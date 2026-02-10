@@ -124,6 +124,10 @@ import {
   placeRockInstances,
   type RockInstance,
   type RockColliderMesh,
+  generateBushVariations,
+  placeBushInstances,
+  type BushInstance,
+  type BushVariation,
   type RockTransform,
   buildCollisionWorld,
   CollisionWorld
@@ -154,11 +158,28 @@ export class Room {
   private treeColliderMeshes: Array<{ mesh: TreeColliderMesh; transform: TreeTransform }> = [];
   private rockInstances: RockInstance[] = [];
   private rockColliderMeshes: Array<{ mesh: RockColliderMesh; transform: RockTransform }> = [];
+  private bushInstances: BushInstance[] = [];
   private buildingEntities = new Map<number, Entity>(); // Map of building entities (key: buildingEntityId)
   private blockPhysics = new Map<string, any>(); // Physics bodies for blocks (key: "buildingId_x_y_z")
   private ladderEntities = new Map<number, Entity>(); // Map of ladder entities (key: ladderEntityId)
   private ownerId: string | null = null;
-  private lobbyConfig: { seed?: string } = {};
+  private lobbyConfig: { seed?: string; pistolCount?: number } = {};
+
+  // Game start state
+  private gameStartState: {
+    phase: 'lobby' | 'countdown' | 'loading' | 'playing';
+    countdownTimer?: NodeJS.Timeout;
+    countdownSeconds: number;
+    loadingTimer?: NodeJS.Timeout;
+    loadingSeconds: number;
+    readyPlayers: Set<string>;
+    seed?: string;
+  } = {
+    phase: 'lobby',
+    countdownSeconds: 0,
+    loadingSeconds: 0,
+    readyPlayers: new Set()
+  };
 
   // Round system state
   private roundState: {
@@ -199,25 +220,58 @@ export class Room {
     this.engine = createNullEngine();
     this.scene = await createScene(this.engine);
 
+    console.log(`[Room] ========================================`);
+    console.log(`[Room] Initializing room: ${this.id}`);
+    console.log(`[Room] LobbyConfig:`, this.lobbyConfig);
+
     // Check if this is a level room (format: "level_<seed>")
     if (this.id.startsWith('level_')) {
       const seed = this.id.substring(6); // Extract seed after "level_"
-      console.log(`Generating level for room ${this.id} with seed: ${seed}`);
+      console.log(`[Room] ✓ IS A LEVEL ROOM`);
+      console.log(`[Room] Generating level with seed: ${seed}`);
       this.voxelGrid = new VoxelGrid();
       this.voxelGrid.generateFromNoise(seed);
-      console.log(`Generated ${this.voxelGrid.getSolidCount()} solid voxels`);
+      console.log(`[Room] Generated ${this.voxelGrid.getSolidCount()} solid voxels`);
 
       // Cell occupancy tracker (shared between pistols and trees)
       const occupiedCells = new Set<string>();
 
+      // Get disable flags from lobby config
+      const disableSpawns = (this.lobbyConfig?.disableSpawns || []) as string[];
+      console.log('[Room] Disable spawn flags:', disableSpawns);
+
       // Spawn pistols on the terrain during level generation
-      this.spawnLevelPistols(seed, occupiedCells, this.lobbyConfig);
+      if (!disableSpawns.includes('items')) {
+        this.spawnLevelPistols(seed, occupiedCells, this.lobbyConfig);
+      } else {
+        console.log('[Room] Items spawn disabled');
+      }
 
       // Generate and place rocks across the level (after items, before trees)
-      this.spawnLevelRocks(seed, occupiedCells);
+      if (!disableSpawns.includes('rocks')) {
+        this.spawnLevelRocks(seed, occupiedCells);
+      } else {
+        console.log('[Room] Rocks spawn disabled');
+      }
 
       // Generate and place trees across the level
-      this.spawnLevelTrees(seed, occupiedCells);
+      if (!disableSpawns.includes('trees')) {
+        this.spawnLevelTrees(seed, occupiedCells);
+      } else {
+        console.log('[Room] Trees spawn disabled');
+      }
+      
+      // Generate and place bushes across the level (client-side only)
+      console.log('[Room] Checking if bushes are disabled:', disableSpawns.includes('bushes'));
+      if (!disableSpawns.includes('bushes')) {
+        console.log('[Room] ✓ Spawning bushes...');
+        this.spawnLevelBushes(seed, occupiedCells);
+        console.log('[Room] ✓ Bush spawn complete. Total bushInstances:', this.bushInstances.length);
+      } else {
+        console.log('[Room] ✗ Bushes spawn disabled');
+      }
+    } else {
+      console.log(`[Room] Not a level room (id: ${this.id}) - skipping terrain generation`);
     }
 
     // Check if this is a shooting range room (format: "shooting_range_<id>")
@@ -439,10 +493,26 @@ export class Room {
       this.ownerId = conn.id;
     }
 
-    console.log(`Player ${conn.id} joined room ${this.id} with entity ${entity.id} (color: ${color})`);
+    console.log(`Player ${conn.id} joined room ${this.id} with entity ${entity.id} (color: ${color}), phase: ${this.gameStartState.phase}`);
 
     if (isFirstPlayer) {
       this.startTicking();
+    }
+    
+    // If room is already in loading phase, send current ready update and register as ready
+    if (this.gameStartState.phase === 'loading') {
+      console.log(`[Room] Player ${conn.id} joined during loading phase, sending ready update`);
+      setTimeout(() => {
+        this.broadcastReadyUpdate();
+      }, 200);
+    }
+    
+    // If room is already playing, send GameBegin immediately so late joiner can spawn
+    if (this.gameStartState.phase === 'playing') {
+      console.log(`[Room] Player ${conn.id} joined during playing phase, sending GameBegin immediately`);
+      setTimeout(() => {
+        this.connectionHandler.sendLow(conn, Opcode.GameBegin, {});
+      }, 200);
     }
 
     // Send all existing item positions to the newly joined player
@@ -521,6 +591,23 @@ export class Room {
         };
         this.connectionHandler.sendLow(conn, Opcode.RockSpawn, rockMsg);
         console.log(`Sent ${this.rockInstances.length} rocks to player ${conn.id}`);
+      }
+
+      // Send all bush instances to the newly joined player
+      console.log(`[Room] Checking bushes to send: ${this.bushInstances.length} instances`);
+      if (this.bushInstances.length > 0) {
+        const bushMsg = {
+          bushes: this.bushInstances.map(b => ({
+            variationId: b.variationId,
+            posX: b.worldX,
+            posY: b.worldY,
+            posZ: b.worldZ
+          }))
+        };
+        this.connectionHandler.sendLow(conn, Opcode.BushSpawn, bushMsg);
+        console.log(`[Room] ✓ Sent ${this.bushInstances.length} bushes to player ${conn.id}`);
+      } else {
+        console.log(`[Room] ✗ No bushes to send (bushInstances is empty)`);
       }
 
       // Send existing players' armor and helmet state to the newly joined player
@@ -1057,6 +1144,39 @@ export class Room {
       totalTris += tm.mesh.triangleCount;
     }
     console.log(`Placed ${this.treeInstances.length} tree instances with ${totalTris} total collider triangles`);
+  }
+
+  /**
+   * Place bush instances across the level.
+   * Bushes are client-side only decorations (no server collision).
+   */
+  private spawnLevelBushes(seed: string, occupiedCells: Set<string>): void {
+    if (!this.voxelGrid) {
+      console.log('[Room] ✗ Cannot spawn bushes - no voxelGrid');
+      return;
+    }
+
+    console.log('[Room] Generating bush variations...');
+    // Note: Server doesn't store variations, clients generate the same ones from seed
+    const variations = generateBushVariations(seed, 8, 18);
+    
+    // Place bush instances across the level (200 bushes)
+    const targetCount = 200;
+    this.bushInstances = placeBushInstances(
+      seed,
+      variations.length,
+      targetCount,
+      (worldX: number, worldZ: number) => this.voxelGrid!.getWorldSurfaceY(worldX, worldZ),
+      occupiedCells
+    );
+
+    console.log(`[Room] ✓ Placed ${this.bushInstances.length} bush instances (transforms only, no physics)`);
+    
+    // Debug first 3 bush positions
+    for (let i = 0; i < Math.min(3, this.bushInstances.length); i++) {
+      const b = this.bushInstances[i];
+      console.log(`[Room]   Bush ${i}: pos=(${b.worldX.toFixed(1)}, ${b.worldY.toFixed(1)}, ${b.worldZ.toFixed(1)}), variation=${b.variationId}`);
+    }
   }
 
   removePlayer(connectionId: string): Player | undefined {
@@ -2205,12 +2325,164 @@ export class Room {
     return this.ownerId;
   }
 
-  getLobbyConfig(): { seed?: string } {
+  getLobbyConfig(): { seed?: string; pistolCount?: number } {
     return this.lobbyConfig;
   }
 
-  setLobbyConfig(config: { seed?: string }): void {
+  setLobbyConfig(config: { seed?: string; pistolCount?: number }): void {
     this.lobbyConfig = config;
+  }
+
+  startGameCountdown(): void {
+    if (this.gameStartState.phase !== 'lobby') {
+      console.log('[Room] Cannot start game countdown - already in progress');
+      return;
+    }
+
+    console.log('[Room] Starting 3-second game start countdown');
+    this.gameStartState.phase = 'countdown';
+    this.gameStartState.countdownSeconds = 3;
+
+    // Broadcast initial countdown
+    this.broadcastGameCountdown();
+
+    // Start countdown timer
+    this.gameStartState.countdownTimer = setInterval(() => {
+      this.gameStartState.countdownSeconds--;
+      
+      if (this.gameStartState.countdownSeconds > 0) {
+        this.broadcastGameCountdown();
+      } else {
+        // Countdown finished - transition to loading phase
+        clearInterval(this.gameStartState.countdownTimer);
+        this.startLoadingPhase();
+      }
+    }, 1000);
+  }
+
+  cancelGameCountdown(): void {
+    if (this.gameStartState.phase !== 'countdown') {
+      return;
+    }
+
+    console.log('[Room] Game countdown cancelled');
+    if (this.gameStartState.countdownTimer) {
+      clearInterval(this.gameStartState.countdownTimer);
+      this.gameStartState.countdownTimer = undefined;
+    }
+
+    this.gameStartState.phase = 'lobby';
+    this.gameStartState.countdownSeconds = 0;
+
+    // Broadcast cancellation
+    const connections = this.getAllConnections();
+    connections.forEach(conn => {
+      this.connectionHandler.sendLow(conn, Opcode.LobbyStartCancel, {});
+    });
+  }
+
+  private broadcastGameCountdown(): void {
+    const connections = this.getAllConnections();
+    connections.forEach(conn => {
+      this.connectionHandler.sendLow(conn, Opcode.LobbyStartCountdown, {
+        secondsRemaining: this.gameStartState.countdownSeconds
+      });
+    });
+  }
+
+  private startLoadingPhase(): void {
+    console.log('[Room] Starting loading phase');
+    this.gameStartState.phase = 'loading';
+    this.gameStartState.loadingSeconds = 10;
+    this.gameStartState.readyPlayers.clear();
+
+    // Generate final seed
+    const config = this.lobbyConfig;
+    const seed = config.seed || Math.random().toString(36).substring(2, 15);
+    const finalSeed = `${seed}_${this.ownerId}`;
+    this.gameStartState.seed = finalSeed;
+    
+    // Generate the level terrain, items, trees, and rocks from the seed
+    // This is the same logic as initialize() for level_ rooms but done in-place
+    if (!this.voxelGrid) {
+      console.log(`[Room] Generating level terrain for loading phase with seed: ${finalSeed}`);
+      this.voxelGrid = new VoxelGrid();
+      this.voxelGrid.generateFromNoise(finalSeed);
+      console.log(`[Room] Generated ${this.voxelGrid.getSolidCount()} solid voxels`);
+
+      const occupiedCells = new Set<string>();
+      this.spawnLevelPistols(finalSeed, occupiedCells, config);
+      this.spawnLevelRocks(finalSeed, occupiedCells);
+      this.spawnLevelTrees(finalSeed, occupiedCells);
+      this.spawnLevelBushes(finalSeed, occupiedCells);
+      console.log(`[Room] Level generated: ${this.treeInstances.length} trees, ${this.rockInstances.length} rocks, ${this.bushInstances.length} bushes`);
+    }
+
+    // Broadcast game loading message to all clients
+    const connections = this.getAllConnections();
+    connections.forEach(conn => {
+      this.connectionHandler.sendLow(conn, Opcode.GameLoading, {
+        seed: finalSeed,
+        config: {
+          seed: finalSeed,
+          pistolCount: config.pistolCount
+        }
+      });
+    });
+
+    // Start loading timer - always runs the full duration
+    this.gameStartState.loadingTimer = setInterval(() => {
+      this.gameStartState.loadingSeconds--;
+      
+      // Broadcast ready status update
+      this.broadcastReadyUpdate();
+
+      // Only start game when countdown reaches 0
+      if (this.gameStartState.loadingSeconds <= 0) {
+        clearInterval(this.gameStartState.loadingTimer);
+        this.gameStartState.loadingTimer = undefined;
+        this.startGame();
+      }
+    }, 1000);
+
+    // Broadcast initial ready update
+    this.broadcastReadyUpdate();
+  }
+
+  private broadcastReadyUpdate(): void {
+    const connections = this.getAllConnections();
+    connections.forEach(conn => {
+      this.connectionHandler.sendLow(conn, Opcode.PlayersReadyUpdate, {
+        readyPlayers: Array.from(this.gameStartState.readyPlayers),
+        totalPlayers: this.players.size,
+        secondsRemaining: this.gameStartState.loadingSeconds
+      });
+    });
+  }
+
+  handleClientReady(playerId: string): void {
+    if (this.gameStartState.phase !== 'loading') {
+      return;
+    }
+
+    console.log(`[Room] Player ${playerId} is ready`);
+    this.gameStartState.readyPlayers.add(playerId);
+    this.broadcastReadyUpdate();
+    // Ready status is informational only - game always waits for the full countdown
+  }
+
+  private startGame(): void {
+    console.log('[Room] Starting game - all players ready or timeout reached');
+    this.gameStartState.phase = 'playing';
+
+    // Broadcast game begin
+    const connections = this.getAllConnections();
+    connections.forEach(conn => {
+      this.connectionHandler.sendLow(conn, Opcode.GameBegin, {});
+    });
+
+    // TODO: Spawn players at random valid locations
+    // For now, the existing spawn logic in addPlayer will handle initial spawns
   }
 
   private hslToHex(h: number, s: number, l: number): string {
@@ -2255,6 +2527,11 @@ export class Room {
 
   getPlayerCount(): number {
     return this.players.size;
+  }
+  
+  /** Returns true if the room is in a game-active phase (countdown/loading/playing) and should not be destroyed */
+  isGameActive(): boolean {
+    return this.gameStartState.phase !== 'lobby';
   }
 
   private startTicking() {

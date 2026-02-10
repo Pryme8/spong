@@ -31,6 +31,7 @@ export enum Opcode {
   MaterialsUpdate = 0x3C,
   TreeSpawn = 0x40,
   RockSpawn = 0x41,
+  BushSpawn = 0x42,
   BlockPlace = 0x50,
   BlockRemove = 0x51,
   BlockPlaced = 0x52,
@@ -52,6 +53,12 @@ export enum Opcode {
   LobbyConfigUpdate = 0x73,
   LobbyStart = 0x74,
   LobbyStarting = 0x75,
+  LobbyStartCountdown = 0x79,
+  LobbyStartCancel = 0x7A,
+  GameLoading = 0x7B,
+  ClientReady = 0x7C,
+  PlayersReadyUpdate = 0x7D,
+  GameBegin = 0x7E,
   KillFeed = 0x76,
   RoundState = 0x77,
   ScoreUpdate = 0x78,
@@ -433,6 +440,29 @@ export interface LobbyStartMessage {
 export interface LobbyStartingPayload {
   seed: string;
   config: LobbyConfigPayload;
+}
+
+export interface LobbyStartCountdownPayload {
+  secondsRemaining: number;
+}
+
+export interface GameLoadingPayload {
+  seed: string;
+  config: LobbyConfigPayload;
+}
+
+export interface ClientReadyPayload {
+  // Empty - just a signal
+}
+
+export interface PlayersReadyUpdatePayload {
+  readyPlayers: string[]; // Array of player IDs who are ready
+  totalPlayers: number;
+  secondsRemaining: number;
+}
+
+export interface GameBeginPayload {
+  // Server will send initial game state separately
 }
 
 // ── Round system messages ────────────────────────────────────

@@ -391,7 +391,7 @@ export class WeaponSystem {
     if (!this.weaponIsReloading) return;
 
     const elapsed = (now - this.weaponReloadStartTime) * 0.001;
-    this.reloadProgress.value = Math.min(1, elapsed / this.weaponReloadTime);
+    this.reloadProgress.value = Math.min(1, elapsed / this.weaponReloadTime) * 100;
 
     // Check if reload complete
     if (elapsed >= this.weaponReloadTime) {

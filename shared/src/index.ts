@@ -15,5 +15,6 @@ export * from './noise.js';
 export * from './levelgen/index.js';
 export * from './treegen/index.js';
 export * from './cloudgen/index.js';
+export * from './bushgen/index.js';
 export * from './rockgen/index.js';
 export * from './sunConfig.js';

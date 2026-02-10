@@ -11,7 +11,7 @@ const router = createRouter({
     {
       path: '/game',
       name: 'game',
-      component: () => import('../views/PreLobbyView.vue')
+      component: () => import('../views/GameRouteView.vue')
     },
     {
       path: '/level/',
@@ -32,6 +32,11 @@ const router = createRouter({
       path: '/rock/',
       name: 'rock',
       component: () => import('../views/RockView.vue')
+    },
+    {
+      path: '/bush/',
+      name: 'bush',
+      component: () => import('../views/BushView.vue')
     },
     {
       path: '/shootingRange',

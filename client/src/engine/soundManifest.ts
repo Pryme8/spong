@@ -71,6 +71,15 @@ export const SOUND_MANIFEST: SoundManifestEntry[] = [
     spatial: true,
   },
 
+  // ── Environment Sounds ───────────────────────────────
+  {
+    name: 'rustle',
+    path: '/assets/sfx/rustle.mp3',
+    channel: 'ambient',
+    maxInstances: 3,
+    spatial: false,
+  },
+
   // ── Item Sounds ──────────────────────────────────────
   {
     name: 'item_pickup',

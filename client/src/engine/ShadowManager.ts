@@ -65,7 +65,11 @@ export class ShadowManager {
   addShadowCaster(mesh: AbstractMesh, enableSelfShadows: boolean = true): void {
     this.shadowGenerator.addShadowCaster(mesh);
     if (enableSelfShadows) {
-      mesh.receiveShadows = true;
+      // Only set receiveShadows if this is NOT an instance mesh
+      // InstancedMesh inherits receiveShadows from source mesh
+      if (!(mesh as any).sourceMesh) {
+        mesh.receiveShadows = true;
+      }
     }
   }
 

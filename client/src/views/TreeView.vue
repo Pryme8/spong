@@ -433,6 +433,43 @@
 
           <v-divider class="my-2"></v-divider>
 
+          <!-- Leaf Collider Debug -->
+          <div class="param-section">
+            <div class="section-title">Leaf Collider (Trigger)</div>
+            
+            <v-checkbox 
+              v-model="showLeafColliderMesh" 
+              label="Show Leaf Collider Mesh" 
+              density="compact"
+              hide-details
+              class="mb-1"
+              @update:model-value="updateLeafColliderVisibility"
+            ></v-checkbox>
+            
+            <div class="text-caption mb-2">
+              Leaf Collider Triangles: {{ leafColliderTriCount }}
+            </div>
+            
+            <div class="param-item">
+              <label>Leaf Collider Resolution ({{ leafColliderResolution }})</label>
+              <v-slider
+                v-model="leafColliderResolution"
+                :min="4"
+                :max="64"
+                :step="2"
+                density="compact"
+                hide-details
+                @end="regenerateLeafCollider"
+              ></v-slider>
+            </div>
+
+            <div class="text-caption mt-2" :style="{ color: isCameraInLeaves ? '#4CAF50' : '#666' }">
+              {{ isCameraInLeaves ? '🌿 Camera in leaves' : '○ Camera outside leaves' }}
+            </div>
+          </div>
+
+          <v-divider class="my-2"></v-divider>
+
           <!-- Leaves -->
           <div class="param-section">
             <div class="section-title">Leaves</div>
@@ -503,12 +540,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Scene, Vector3, Color3, MeshBuilder, StandardMaterial, LinesBuilder, Mesh, VertexData } from '@babylonjs/core';
+import { Scene, Vector3, Color3, MeshBuilder, StandardMaterial, LinesBuilder, Mesh, VertexData, PostProcess, Effect } from '@babylonjs/core';
 import { useGameSession } from '../composables/useGameSession';
 import { PLAYER_MAX_HEALTH } from '@spong/shared';
 import GameHud from '../components/GameHud.vue';
 import { TreeMesh } from '../engine/TreeMesh';
-import { generateTree, TreeGreedyMesher, TreeMeshBuilder, TreeMeshDecimator, TREE_GRID_SIZE, TREE_GRID_H, TREE_VOXEL_SIZE, type DebugSegment, type TreeColliderMesh } from '@spong/shared';
+import { AudioManager } from '../engine/AudioManager';
+import { BushLeafEffect } from '../engine/BushLeafEffect';
+import { generateTree, TreeGreedyMesher, TreeMeshBuilder, TreeLeafMeshBuilder, TreeMeshDecimator, TREE_GRID_SIZE, TREE_GRID_H, TREE_VOXEL_SIZE, type DebugSegment, type TreeColliderMesh } from '@spong/shared';
 
 const route = useRoute();
 const router = useRouter();
@@ -562,6 +601,16 @@ const showColliderMesh = ref(false);
 let debugSegments: DebugSegment[] = [];
 let colliderMesh: TreeColliderMesh | null = null;
 let colliderVisMesh: Mesh | null = null;
+let leafColliderMesh: TreeColliderMesh | null = null;
+let leafColliderVisMesh: Mesh | null = null;
+let leafColliderTriggerMesh: Mesh | null = null;
+let wasInLeavesLastFrame = false;
+let leafEntryX = 0;
+let leafEntryY = 0;
+let leafEntryZ = 0;
+let selectedTextureIndex1 = 0;
+let selectedTextureIndex2 = 1;
+let leafEffect: BushLeafEffect | null = null;
 
 const TREE_X = -10; // Tree positioned to the left of spawn
 
@@ -611,6 +660,12 @@ const treeParams = ref({
 
 const colliderResolution = ref(32);
 const colliderTriCount = ref(0);
+const leafColliderResolution = ref(12);
+const leafColliderTriCount = ref(0);
+const showLeafColliderMesh = ref(false);
+const isCameraInLeaves = ref(false);
+const leafTexturesReady = ref(false);
+let leafTriggerPost: PostProcess | null = null;
 
 // Grid world-space size (before scaling)
 const gridWorldSize = TREE_GRID_SIZE * TREE_VOXEL_SIZE; // 50 * 0.5 = 25 units (width/depth)
@@ -709,6 +764,16 @@ function generateAndDisplayTree() {
   colliderTriCount.value = colliderMesh.triangleCount;
   console.log(`[TreeView] Collider mesh: ${colliderMesh.triangleCount} triangles`);
 
+  // Build leaf collider mesh (leaves only, for trigger detection)
+  const leafMeshBuilder = new TreeLeafMeshBuilder();
+  const fullLeafMesh = leafMeshBuilder.buildFromQuads(quads);
+  
+  // Decimate for leaf trigger
+  const leafDecimator = new TreeMeshDecimator();
+  leafColliderMesh = leafDecimator.decimate(fullLeafMesh, leafColliderResolution.value);
+  leafColliderTriCount.value = leafColliderMesh.triangleCount;
+  console.log(`[TreeView] Leaf collider mesh: ${leafColliderMesh.triangleCount} triangles`);
+
   // Create Babylon.js meshes
   // TreeMesh internally positions at (-halfGrid, 0, -halfGrid) and scales 2x
   // This centers the tree at origin. We just need to move it to TREE_X.
@@ -729,6 +794,15 @@ function generateAndDisplayTree() {
   
   // Update collider mesh visualization
   updateColliderVisibility();
+  
+  // Create leaf trigger mesh and update visibility
+  createLeafColliderTriggerMesh();
+  updateLeafColliderVisibility();
+  
+  // Initialize leaf effect if not already done
+  if (!leafEffect) {
+    initializeLeafEffect();
+  }
 }
 
 function regenerateCollider() {
@@ -812,6 +886,349 @@ function createColliderMeshVisualization() {
   mesh.material = mat;
 
   colliderVisMesh = mesh;
+}
+
+function regenerateLeafCollider() {
+  if (!scene) return;
+  
+  const existingTrunk = scene.getMeshByName('trunk');
+  if (!existingTrunk) return;
+  
+  if (leafColliderMesh) {
+    const result = generateTree(seed.value, treeParams.value, !showLeaves.value);
+    const mesher = new TreeGreedyMesher(result.grid);
+    const quads = mesher.generateMesh();
+    
+    const leafMeshBuilder = new TreeLeafMeshBuilder();
+    const fullLeafMesh = leafMeshBuilder.buildFromQuads(quads);
+    
+    const leafDecimator = new TreeMeshDecimator();
+    leafColliderMesh = leafDecimator.decimate(fullLeafMesh, leafColliderResolution.value);
+    leafColliderTriCount.value = leafColliderMesh.triangleCount;
+    
+    console.log(`[TreeView] Regenerated leaf collider mesh: ${leafColliderMesh.triangleCount} triangles`);
+    
+    createLeafColliderTriggerMesh();
+    
+    if (showLeafColliderMesh.value) {
+      createLeafColliderMeshVisualization();
+    }
+  }
+}
+
+function updateLeafColliderVisibility() {
+  if (showLeafColliderMesh.value && leafColliderMesh && scene) {
+    createLeafColliderMeshVisualization();
+  } else if (leafColliderVisMesh) {
+    leafColliderVisMesh.dispose();
+    leafColliderVisMesh = null;
+  }
+}
+
+function createLeafColliderMeshVisualization() {
+  if (!scene || !leafColliderMesh) return;
+
+  if (leafColliderVisMesh) {
+    leafColliderVisMesh.dispose();
+    leafColliderVisMesh = null;
+  }
+
+  const mesh = new Mesh('leafColliderMesh', scene);
+  const vd = new VertexData();
+  
+  vd.positions = Array.from(leafColliderMesh.vertices);
+  vd.indices = Array.from(leafColliderMesh.indices);
+  
+  vd.applyToMesh(mesh);
+
+  const halfGrid = (TREE_GRID_SIZE * TREE_VOXEL_SIZE) * 0.5;
+  const yOffset = 2 * TREE_VOXEL_SIZE;
+  const TREE_SCALE = 0.4;
+  
+  mesh.position.set(
+    (-halfGrid) * TREE_SCALE + TREE_X,
+    (-yOffset) * TREE_SCALE,
+    (-halfGrid) * TREE_SCALE
+  );
+  mesh.scaling.setAll(TREE_SCALE);
+
+  const mat = new StandardMaterial('leafColliderMeshMat', scene);
+  mat.emissiveColor = new Color3(0.3, 1.0, 0.4);
+  mat.wireframe = true;
+  mat.alpha = 0.6;
+  mesh.material = mat;
+
+  leafColliderVisMesh = mesh;
+}
+
+function createLeafColliderTriggerMesh() {
+  if (!scene || !leafColliderMesh) return;
+
+  if (leafColliderTriggerMesh) {
+    leafColliderTriggerMesh.dispose();
+    leafColliderTriggerMesh = null;
+  }
+
+  const mesh = new Mesh('leafColliderTrigger', scene);
+  const vd = new VertexData();
+  
+  vd.positions = Array.from(leafColliderMesh.vertices);
+  vd.indices = Array.from(leafColliderMesh.indices);
+  
+  vd.applyToMesh(mesh);
+
+  const halfGrid = (TREE_GRID_SIZE * TREE_VOXEL_SIZE) * 0.5;
+  const yOffset = 2 * TREE_VOXEL_SIZE;
+  const TREE_SCALE = 0.4;
+  
+  mesh.position.set(
+    (-halfGrid) * TREE_SCALE + TREE_X,
+    (-yOffset) * TREE_SCALE,
+    (-halfGrid) * TREE_SCALE
+  );
+  mesh.scaling.setAll(TREE_SCALE);
+
+  mesh.isVisible = false;
+  mesh.isPickable = true;
+
+  leafColliderTriggerMesh = mesh;
+}
+
+function checkCameraInLeaves() {
+  if (!leafColliderTriggerMesh || !leafColliderMesh || !scene || !scene.activeCamera || !leafTexturesReady.value) {
+    isCameraInLeaves.value = false;
+    return;
+  }
+
+  const camPos = scene.activeCamera.position;
+
+  const triggerBounds = leafColliderTriggerMesh.getBoundingInfo().boundingBox;
+  const worldMin = triggerBounds.minimumWorld;
+  const worldMax = triggerBounds.maximumWorld;
+
+  const triggerMargin = 0.5;
+
+  const inLeaves = 
+    camPos.x >= (worldMin.x - triggerMargin) && camPos.x <= (worldMax.x + triggerMargin) &&
+    camPos.y >= (worldMin.y - triggerMargin) && camPos.y <= (worldMax.y + triggerMargin) &&
+    camPos.z >= (worldMin.z - triggerMargin) && camPos.z <= (worldMax.z + triggerMargin);
+
+  if (inLeaves && !wasInLeavesLastFrame) {
+    onLeavesEnter();
+  } else if (!inLeaves && wasInLeavesLastFrame) {
+    onLeavesLeave();
+  }
+
+  wasInLeavesLastFrame = inLeaves;
+  isCameraInLeaves.value = inLeaves;
+}
+
+function onLeavesEnter() {
+  console.log('[TreeView] Camera entered leaves');
+  
+  if (scene && scene.activeCamera) {
+    const camPos = scene.activeCamera.position;
+    leafEntryX = camPos.x;
+    leafEntryY = camPos.y;
+    leafEntryZ = camPos.z;
+  }
+  
+  try {
+    const audioManager = AudioManager.getInstance();
+    audioManager.play('rustle', { volume: 0.5 });
+  } catch (e) {
+    console.warn('[TreeView] AudioManager not initialized yet');
+  }
+}
+
+function onLeavesLeave() {
+  console.log('[TreeView] Camera left leaves');
+  
+  selectedTextureIndex1 = Math.floor(Math.random() * 3);
+  selectedTextureIndex2 = Math.floor(Math.random() * 3);
+  
+  while (selectedTextureIndex2 === selectedTextureIndex1) {
+    selectedTextureIndex2 = Math.floor(Math.random() * 3);
+  }
+  
+  console.log(`[TreeView] Next leaf entry will use texture sets ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
+  
+  try {
+    const audioManager = AudioManager.getInstance();
+    audioManager.play('rustle', { volume: 0.4 });
+  } catch (e) {
+    console.warn('[TreeView] AudioManager not initialized yet');
+  }
+}
+
+async function initializeLeafEffect() {
+  if (!scene || leafEffect) return;
+
+  console.log('[TreeView] Initializing leaf effect...');
+  leafEffect = new BushLeafEffect(scene);
+  
+  try {
+    await leafEffect.generate();
+    console.log('[TreeView] Leaf textures generated successfully');
+    
+    selectedTextureIndex1 = Math.floor(Math.random() * 3);
+    selectedTextureIndex2 = Math.floor(Math.random() * 3);
+    while (selectedTextureIndex2 === selectedTextureIndex1) {
+      selectedTextureIndex2 = Math.floor(Math.random() * 3);
+    }
+    console.log(`[TreeView] Initial texture sets selected: ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
+    
+    // Initialize wasInLeavesLastFrame to current state before starting checks
+    if (scene && scene.activeCamera && leafColliderTriggerMesh && leafColliderMesh) {
+      const camPos = scene.activeCamera.position;
+      const triggerBounds = leafColliderTriggerMesh.getBoundingInfo().boundingBox;
+      const worldMin = triggerBounds.minimumWorld;
+      const worldMax = triggerBounds.maximumWorld;
+      const triggerMargin = 0.5;
+      
+      wasInLeavesLastFrame = 
+        camPos.x >= (worldMin.x - triggerMargin) && camPos.x <= (worldMax.x + triggerMargin) &&
+        camPos.y >= (worldMin.y - triggerMargin) && camPos.y <= (worldMax.y + triggerMargin) &&
+        camPos.z >= (worldMin.z - triggerMargin) && camPos.z <= (worldMax.z + triggerMargin);
+      
+      isCameraInLeaves.value = wasInLeavesLastFrame;
+      
+      if (wasInLeavesLastFrame) {
+        leafEntryX = camPos.x;
+        leafEntryY = camPos.y;
+        leafEntryZ = camPos.z;
+      }
+    }
+    
+    setupLeafTriggerDetection();
+    
+    // Mark textures as ready AFTER initialization
+    leafTexturesReady.value = true;
+  } catch (error) {
+    console.error('[TreeView] Failed to generate leaf textures:', error);
+  }
+}
+
+function setupLeafTriggerDetection() {
+  if (!scene) return;
+
+  // Create leaf overlay post-process with mask-based alpha and parallax movement
+  Effect.ShadersStore['leafTriggerFragmentShader'] = `
+    precision highp float;
+    
+    varying vec2 vUV;
+    uniform sampler2D textureSampler;
+    uniform sampler2D leafColorTexture1;
+    uniform sampler2D leafMaskTexture1;
+    uniform sampler2D leafColorTexture2;
+    uniform sampler2D leafMaskTexture2;
+    uniform float intensity;
+    uniform vec2 screenSize;
+    uniform vec2 textureSize;
+    uniform vec3 cameraOffset;
+    
+    void main() {
+      vec4 sceneColor = texture2D(textureSampler, vUV);
+      
+      if (intensity < 0.01) {
+        gl_FragColor = sceneColor;
+        return;
+      }
+      
+      // Calculate uniform scale to fit texture to screen (cover largest dimension)
+      float screenAspect = screenSize.x / screenSize.y;
+      float textureAspect = textureSize.x / textureSize.y;
+      
+      vec2 scale;
+      if (screenAspect > textureAspect) {
+        // Screen is wider - fit to width
+        scale = vec2(1.0, screenAspect / textureAspect);
+      } else {
+        // Screen is taller - fit to height
+        scale = vec2(textureAspect / screenAspect, 1.0);
+      }
+      
+      // Add overdraw for parallax movement (scale up slightly)
+      float overdrawScale = 1.032; // ~16 pixels per side at 1024px
+      scale *= overdrawScale;
+      
+      // Parallax offset from camera movement
+      vec2 parallaxOffset1 = vec2(cameraOffset.x * 0.02, cameraOffset.z * 0.02);
+      vec2 parallaxOffset2 = vec2(-cameraOffset.x * 0.015, cameraOffset.z * 0.025);
+      
+      // Layer 1: 65% opacity with first parallax offset and first texture set
+      vec2 leafUV1 = (vUV - 0.5) / scale + 0.5 + parallaxOffset1;
+      vec4 leafColor1 = texture2D(leafColorTexture1, leafUV1);
+      float leafMask1 = texture2D(leafMaskTexture1, leafUV1).r;
+      vec3 darkenedLeaf1 = leafColor1.rgb * 0.3;
+      float mixAmount1 = leafMask1 * intensity * 0.65;
+      
+      // Layer 2: 100% opacity with second parallax offset and second texture set
+      vec2 leafUV2 = (vUV - 0.5) / scale + 0.5 + parallaxOffset2;
+      vec4 leafColor2 = texture2D(leafColorTexture2, leafUV2);
+      float leafMask2 = texture2D(leafMaskTexture2, leafUV2).r;
+      vec3 darkenedLeaf2 = leafColor2.rgb * 0.3;
+      float mixAmount2 = leafMask2 * intensity;
+      
+      // Composite both layers over scene
+      vec3 result = sceneColor.rgb;
+      result = mix(result, darkenedLeaf1, mixAmount1);
+      result = mix(result, darkenedLeaf2, mixAmount2);
+      
+      gl_FragColor = vec4(result, sceneColor.a);
+    }
+  `;
+
+  const camera = scene.activeCamera;
+  if (camera) {
+    leafTriggerPost = new PostProcess(
+      'leafTrigger',
+      'leafTrigger',
+      ['intensity', 'screenSize', 'textureSize', 'cameraOffset'],
+      ['leafColorTexture1', 'leafMaskTexture1', 'leafColorTexture2', 'leafMaskTexture2'],
+      1.0,
+      camera
+    );
+
+    leafTriggerPost.onApply = (effect) => {
+      const isInLeaves = isCameraInLeaves.value;
+      
+      if (leafEffect && leafEffect.ready()) {
+        const colorTexture1 = leafEffect.getColorTexture(selectedTextureIndex1);
+        const maskTexture1 = leafEffect.getMaskTexture(selectedTextureIndex1);
+        const colorTexture2 = leafEffect.getColorTexture(selectedTextureIndex2);
+        const maskTexture2 = leafEffect.getMaskTexture(selectedTextureIndex2);
+        
+        if (colorTexture1 && maskTexture1 && colorTexture2 && maskTexture2 && scene && scene.activeCamera) {
+          effect.setTexture('leafColorTexture1', colorTexture1);
+          effect.setTexture('leafMaskTexture1', maskTexture1);
+          effect.setTexture('leafColorTexture2', colorTexture2);
+          effect.setTexture('leafMaskTexture2', maskTexture2);
+          
+          const engine = scene.getEngine();
+          effect.setFloat2('screenSize', engine.getRenderWidth(), engine.getRenderHeight());
+          effect.setFloat2('textureSize', 1024, 1024);
+          
+          const camPos = scene.activeCamera.position;
+          const offsetX = camPos.x - leafEntryX;
+          const offsetY = camPos.y - leafEntryY;
+          const offsetZ = camPos.z - leafEntryZ;
+          effect.setFloat3('cameraOffset', offsetX, offsetY, offsetZ);
+          
+          effect.setFloat('intensity', isInLeaves ? 1.0 : 0.0);
+        } else {
+          effect.setFloat('intensity', 0.0);
+        }
+      } else {
+        effect.setFloat('intensity', 0.0);
+      }
+    };
+  }
+
+  // Add camera check to render loop
+  scene.onBeforeRenderObservable.add(checkCameraInLeaves);
+  
+  console.log('[TreeView] Leaf trigger detection and post-process set up');
 }
 
 /**
@@ -990,6 +1407,21 @@ function cleanup() {
   if (colliderVisMesh) {
     colliderVisMesh.dispose();
     colliderVisMesh = null;
+  }
+  if (leafColliderVisMesh) {
+    leafColliderVisMesh.dispose();
+    leafColliderVisMesh = null;
+  }
+  if (leafColliderTriggerMesh) {
+    leafColliderTriggerMesh.dispose();
+    leafColliderTriggerMesh = null;
+  }
+  if (leafTriggerPost) {
+    leafTriggerPost.dispose();
+    leafTriggerPost = null;
+  }
+  if (leafEffect) {
+    leafEffect = null;
   }
   scene = null;
 }

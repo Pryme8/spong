@@ -104,11 +104,14 @@
               size="x-large"
               variant="flat"
               @click="startGame"
-              :disabled="!isInRoom"
+              :disabled="!isInRoom || startCountdown > 0"
             >
               <v-icon start>mdi-play</v-icon>
               Start Game
             </v-btn>
+            <div v-else-if="startCountdown > 0" class="text-h6 text-medium-emphasis">
+              Game starting in {{ startCountdown }}s...
+            </div>
             <div v-else class="text-h6 text-medium-emphasis">
               Waiting for host to start...
             </div>
@@ -117,6 +120,89 @@
         </v-card>
       </v-col>
     </v-row>
+
+    <!-- Start Countdown Dialog -->
+    <v-dialog
+      v-model="showStartCountdown"
+      max-width="400"
+      persistent
+    >
+      <v-card>
+        <v-card-title class="text-h5 text-center pa-6">
+          Starting Game
+        </v-card-title>
+        <v-card-text class="text-center pb-0">
+          <div class="text-h1 countdown-display">{{ startCountdown }}</div>
+          <div class="text-body-1 mt-4">Get ready!</div>
+        </v-card-text>
+        <v-card-actions class="pa-4">
+          <v-spacer></v-spacer>
+          <v-btn
+            v-if="isOwner"
+            color="error"
+            variant="outlined"
+            @click="cancelStart"
+          >
+            Cancel
+          </v-btn>
+          <v-spacer></v-spacer>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Loading Dialog -->
+    <v-dialog
+      v-model="showLoadingDialog"
+      max-width="500"
+      persistent
+    >
+      <v-card>
+        <v-card-title class="text-h5 text-center pa-6">
+          Loading Game
+        </v-card-title>
+        <v-card-text>
+          <div class="text-center mb-4">
+            <v-progress-circular
+              :size="60"
+              :width="6"
+              color="primary"
+              indeterminate
+            ></v-progress-circular>
+          </div>
+          <div class="text-center text-h6 mb-4">
+            {{ loadingSecondsRemaining }}s remaining
+          </div>
+          <v-list density="compact">
+            <v-list-subheader>Players Ready ({{ readyPlayerIds.length }} / {{ totalPlayers }})</v-list-subheader>
+            <v-list-item
+              v-for="player in playersList"
+              :key="player.id"
+            >
+              <template v-slot:prepend>
+                <v-icon
+                  :color="player.color"
+                  icon="mdi-account-circle"
+                  size="small"
+                ></v-icon>
+              </template>
+              <v-list-item-title>{{ player.id }}</v-list-item-title>
+              <template v-slot:append>
+                <v-icon
+                  v-if="readyPlayerIds.includes(player.id)"
+                  color="success"
+                  icon="mdi-check-circle"
+                ></v-icon>
+                <v-icon
+                  v-else
+                  color="warning"
+                  icon="mdi-clock-outline"
+                ></v-icon>
+              </template>
+            </v-list-item>
+          </v-list>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
 
     <!-- Configuration Dialog -->
     <v-dialog
@@ -241,6 +327,12 @@ const configSeed = ref('');
 const configPistolCount = ref(30);
 const showConfigDialog = ref(false);
 const configTab = ref('world');
+const showStartCountdown = ref(false);
+const startCountdown = ref(0);
+const showLoadingDialog = ref(false);
+const loadingSecondsRemaining = ref(0);
+const readyPlayerIds = ref<string[]>([]);
+const totalPlayers = ref(0);
 
 const {
   isConnected,
@@ -250,7 +342,11 @@ const {
   myEntityId,
   players,
   chatMessages,
-  lobbyConfig
+  lobbyConfig,
+  startCountdownSeconds,
+  isLoading,
+  loadingInfo,
+  gameLoadingConfig
 } = session;
 
 const playersList = computed(() => {
@@ -281,10 +377,31 @@ function startGame() {
   session.startGame();
 }
 
+function cancelStart() {
+  session.cancelStart();
+}
+
 watch(chatMessages, async () => {
   await nextTick();
   if (chatContainer.value) {
     chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+  }
+});
+
+watch(startCountdownSeconds, (seconds) => {
+  startCountdown.value = seconds;
+  showStartCountdown.value = seconds > 0;
+});
+
+watch(isLoading, (loading) => {
+  showLoadingDialog.value = loading;
+});
+
+watch(loadingInfo, (info) => {
+  if (info) {
+    loadingSecondsRemaining.value = info.secondsRemaining;
+    readyPlayerIds.value = info.readyPlayers;
+    totalPlayers.value = info.totalPlayers;
   }
 });
 
@@ -297,8 +414,33 @@ watch(lobbyConfig, (config) => {
   }
 });
 
+// Watch for game loading to start - emit immediately so GameView can load level
+watch(gameLoadingConfig, (config) => {
+  if (config) {
+    console.log('[PreLobby] Game loading config received, emitting game-loading event:', config);
+    
+    // Emit immediately when loading starts
+    emit('game-loading', {
+      roomId: roomId.value || '',
+      seed: config.seed,
+      config: config.config
+    });
+  }
+});
+
+const emit = defineEmits<{
+  'game-loading': [data: { roomId: string; seed: string; config: any }]
+}>();
+
 onMounted(async () => {
-  const targetRoom = (route.query.room as string) || 'lobby';
+  let targetRoom = route.query.room as string;
+  
+  // If no room specified, generate a unique one (user becomes owner)
+  if (!targetRoom) {
+    targetRoom = `lobby_${Math.random().toString(36).substring(2, 15)}`;
+    console.log(`[PreLobby] No room specified, created unique room: ${targetRoom}`);
+  }
+  
   await session.init(targetRoom);
 });
 
@@ -365,5 +507,12 @@ onUnmounted(() => {
 
 .chat-text {
   color: rgba(255, 255, 255, 0.9);
+}
+
+.countdown-display {
+  font-size: 96px;
+  font-weight: bold;
+  color: rgb(var(--v-theme-primary));
+  line-height: 1;
 }
 </style>

@@ -41,11 +41,12 @@ export class NetworkClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        console.log('[NetworkClient] Attempting WebSocket connection to:', this.url);
         this.ws = new WebSocket(this.url);
         this.ws.binaryType = 'arraybuffer';
 
         this.ws.onopen = () => {
-          console.log('Connected to server');
+          console.log('[NetworkClient] Connected to server');
           this.reconnectAttempts = 0;
           this.connectionListeners.forEach(cb => cb());
           resolve();
@@ -56,16 +57,17 @@ export class NetworkClient {
         };
 
         this.ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
+          console.error('[NetworkClient] WebSocket error. URL:', this.url, 'Error:', error);
           reject(error);
         };
 
-        this.ws.onclose = () => {
-          console.log('Disconnected from server');
+        this.ws.onclose = (event) => {
+          console.log('[NetworkClient] Disconnected from server. Code:', event.code, 'Reason:', event.reason);
           this.disconnectionListeners.forEach(cb => cb());
           this.attemptReconnect();
         };
       } catch (err) {
+        console.error('[NetworkClient] Exception during connection attempt:', err);
         reject(err);
       }
     });

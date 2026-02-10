@@ -105,6 +105,14 @@ export class RoomManager {
     this.connectionHandler.registerMessageHandler(Opcode.LobbyStart, (conn, data) => {
       this.handleLobbyStart(conn, data);
     });
+
+    this.connectionHandler.registerMessageHandler(Opcode.LobbyStartCancel, (conn, data) => {
+      this.handleLobbyStartCancel(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.ClientReady, (conn, data) => {
+      this.handleClientReady(conn, data);
+    });
     
     // Register disconnect handler
     this.connectionHandler.registerDisconnectHandler((conn) => {
@@ -179,11 +187,16 @@ export class RoomManager {
       conn.roomId = undefined;
       conn.entityId = undefined;
 
-      // Remove room if empty
+      // Remove room if empty, but NOT if the game is active (loading/playing)
+      // During loading phase, the lobby connection disconnects and GameView reconnects
       if (room.getPlayerCount() === 0) {
-        room.dispose();
-        this.rooms.delete(roomId);
-        console.log(`Room ${roomId} removed (empty)`);
+        if (room.isGameActive()) {
+          console.log(`Room ${roomId} kept alive (game active, waiting for GameView reconnect)`);
+        } else {
+          room.dispose();
+          this.rooms.delete(roomId);
+          console.log(`Room ${roomId} removed (empty)`);
+        }
       }
     }
   }
@@ -329,10 +342,16 @@ export class RoomManager {
 
           console.log(`Player ${conn.id} disconnected from room ${conn.roomId}`);
 
+          // Remove room if empty, but NOT if the game is active (loading/playing)
+          // During loading phase, the lobby connection disconnects and GameView reconnects
           if (room.getPlayerCount() === 0) {
-            room.dispose();
-            this.rooms.delete(conn.roomId);
-            console.log(`Room ${conn.roomId} removed (empty)`);
+            if (room.isGameActive()) {
+              console.log(`Room ${conn.roomId} kept alive (game active, waiting for GameView reconnect)`);
+            } else {
+              room.dispose();
+              this.rooms.delete(conn.roomId);
+              console.log(`Room ${conn.roomId} removed (empty)`);
+            }
           }
         }
       }
@@ -413,24 +432,31 @@ export class RoomManager {
       return;
     }
 
-    const config = room.getLobbyConfig();
-    const seed = config.seed || Math.random().toString(36).substring(2, 15);
-    const finalSeed = `${seed}_${conn.id}`;
+    // Start 3-second countdown
+    room.startGameCountdown();
+  }
 
-    const startingMsg: LobbyStartingPayload = {
-      seed: finalSeed,
-      config: {
-        seed: finalSeed,
-        pistolCount: config.pistolCount
-      }
-    };
+  private handleLobbyStartCancel(conn: ConnectionState, _data: any) {
+    if (!conn.roomId) return;
 
-    const connections = room.getAllConnections();
-    connections.forEach(c => {
-      this.connectionHandler.sendLow(c, Opcode.LobbyStarting, startingMsg);
-    });
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
 
-    console.log(`[Lobby] Room ${conn.roomId} starting game with seed ${finalSeed}, pistols: ${config.pistolCount ?? 30}`);
+    if (room.getOwnerId() !== conn.id) {
+      this.connectionHandler.sendError(conn, 'NOT_OWNER', 'Only the room owner can cancel the start');
+      return;
+    }
+
+    room.cancelGameCountdown();
+  }
+
+  private handleClientReady(conn: ConnectionState, _data: any) {
+    if (!conn.roomId) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleClientReady(conn.id);
   }
 
   getAllRooms(): Room[] {

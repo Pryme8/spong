@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Five-Pointed Leaf Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        #leafCanvas {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+        
+        #controlCanvas {
+            pointer-events: auto;
+        }
+        
+        #maskCanvas, #coloredCanvas {
+            border: 2px solid white;
+        }
+        
+        #coloredCanvas {
+            background: 
+                linear-gradient(45deg, #ccc 25%, transparent 25%), 
+                linear-gradient(-45deg, #ccc 25%, transparent 25%), 
+                linear-gradient(45deg, transparent 75%, #ccc 75%), 
+                linear-gradient(-45deg, transparent 75%, #ccc 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+        
+        h1 {
+            color: white;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        h2 {
+            text-align: center;
+            font-size: 18px;
+        }
+        
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            background: white;
+            color: #667eea;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+        }
+        
+        #symmetryBtn {
+            transition: background 0.3s, color 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <h1>Five-Pointed Maple Leaf Editor</h1>
+    <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
+        <div>
+            <h2 style="color: white; margin: 0 0 10px 0;">Editor</h2>
+            <div style="position: relative; display: inline-block;">
+                <canvas id="leafCanvas" width="600" height="600"></canvas>
+                <canvas id="controlCanvas" width="600" height="600" style="position: absolute; top: 0; left: 0; cursor: crosshair;"></canvas>
+            </div>
+        </div>
+        <div id="textureContainer" style="display: none;">
+            <h2 style="color: white; margin: 0 0 10px 0;">Mask (1024x1024)</h2>
+            <canvas id="maskCanvas" width="1024" height="1024" style="background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); max-width: 512px; height: auto;"></canvas>
+        </div>
+        <div id="coloredContainer" style="display: none;">
+            <h2 style="color: white; margin: 0 0 10px 0;">Colored (1024x1024)</h2>
+            <canvas id="coloredCanvas" width="1024" height="1024" style="background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); max-width: 512px; height: auto;"></canvas>
+        </div>
+    </div>
+    <div class="controls">
+        <button onclick="drawLeaf('autumn')">Autumn Colors</button>
+        <button onclick="drawLeaf('green')">Green</button>
+        <button onclick="drawLeaf('golden')">Golden</button>
+        <button onclick="toggleControls()">👁️ Toggle Controls</button>
+        <button onclick="toggleSymmetry()" id="symmetryBtn">🔄 Symmetry: OFF</button>
+        <button onclick="copyToClipboard()">📋 Copy Design</button>
+        <button onclick="generateTexture()">🎨 Generate Textures</button>
+        <button onclick="generateTexture()" id="regenBtn" style="display: none;">🔄 Regenerate</button>
+        <button onclick="saveMask()" id="saveMaskBtn" style="display: none;">💾 Save Mask</button>
+        <button onclick="saveColored()" id="saveColoredBtn" style="display: none;">💾 Save Colored</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('leafCanvas');
+        const ctx = canvas.getContext('2d');
+        const controlCanvas = document.getElementById('controlCanvas');
+        const ctrlCtx = controlCanvas.getContext('2d');
+        
+        let currentColor = 'autumn';
+        let draggingPoint = null;
+        let showControls = true;
+        let symmetryMode = false;
+        
+        const centerX = 300;
+        const centerY = 300;
+        const size = 200;
+        
+        const angleStep = Math.PI * 2 * 0.2;
+        const baseAngle = -Math.PI * 0.5;
+        
+        const leafData = {
+            tipSizes: [1.1, 0.95, 0.85, 0.85, 0.95],
+            valleyDepth: 0.5,
+            tips: [],
+            valleys: [],
+            controls: [],
+            stem: {
+                start: { x: 0, y: 0 },
+                end: { x: 0, y: 80 },
+                control: { x: -15, y: 40 },
+                startWidth: 3,
+                endWidth: 8
+            }
+        };
+        
+        function initializePoints() {
+            leafData.tips = [
+                { x: 0, y: -229.71875, angle: -1.5707963267948966 },
+                { x: 200.5, y: -77.71875, angle: -0.3141592653589793 },
+                { x: 99.92349288972044, y: 137.53288904374108, angle: 0.9424777960769379 },
+                { x: -99.92349288972042, y: 137.53288904374108, angle: 2.199114857512855 },
+                { x: -200.5, y: -77.71875, angle: 3.4557519189487724 }
+            ];
+            
+            leafData.valleys = [
+                { x: 52.5, y: -77.71875, angle: -0.9424777960769379 },
+                { x: 64.5, y: 33.28125, angle: 0.3141592653589793 },
+                { x: 1.5, y: 79.28125, angle: 1.5707963267948966 },
+                { x: -63.5, y: 38.28125, angle: 2.827433388230814 },
+                { x: -50.5, y: -81.71875, angle: 4.084070449666731 }
+            ];
+            
+            leafData.controls = [
+                {
+                    cp1: { x: -38.5, y: -92.71875 },
+                    cp2: { x: -62.5, y: -188.71875 },
+                    cp3: { x: 66.5, y: -185.71875 },
+                    cp4: { x: 40.00000000000001, y: -88.00000000000001 }
+                },
+                {
+                    cp1: { x: 65.5, y: -69.71875 },
+                    cp2: { x: 133.5, y: -106.71875 },
+                    cp3: { x: 179.5, y: 1.28125 },
+                    cp4: { x: 84.5, y: 9.28125 }
+                },
+                {
+                    cp1: { x: 61.5, y: 47.28125 },
+                    cp2: { x: 111.5, y: 80.28125 },
+                    cp3: { x: 33.5, y: 136.28125 },
+                    cp4: { x: 7.608717380890283, y: 78.52456570919537 }
+                },
+                {
+                    cp1: { x: -7.608717380890276, y: 78.52456570919537 },
+                    cp2: { x: -33.5, y: 136.28125 },
+                    cp3: { x: -111.5, y: 80.28125 },
+                    cp4: { x: -61.5, y: 47.28125 }
+                },
+                {
+                    cp1: { x: -84.5, y: 9.28125 },
+                    cp2: { x: -179.5, y: 1.28125 },
+                    cp3: { x: -133.5, y: -106.71875 },
+                    cp4: { x: -65.5, y: -69.71875 }
+                }
+            ];
+            
+            leafData.stem.start.x = 1.5;
+            leafData.stem.start.y = 79.28125;
+            leafData.stem.end.x = 0;
+            leafData.stem.end.y = 159.28125;
+            leafData.stem.control.x = -15;
+            leafData.stem.control.y = 119.28125;
+        }
+        
+        function drawFivePointedLeaf(color) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            
+            const stem = leafData.stem;
+            const steps = 20;
+            
+            for (let i = 0; i < steps; i++) {
+                const t = i / steps;
+                const nextT = (i + 1) / steps;
+                
+                const x1 = (1 - t) * (1 - t) * stem.start.x + 2 * (1 - t) * t * stem.control.x + t * t * stem.end.x;
+                const y1 = (1 - t) * (1 - t) * stem.start.y + 2 * (1 - t) * t * stem.control.y + t * t * stem.end.y;
+                
+                const x2 = (1 - nextT) * (1 - nextT) * stem.start.x + 2 * (1 - nextT) * nextT * stem.control.x + nextT * nextT * stem.end.x;
+                const y2 = (1 - nextT) * (1 - nextT) * stem.start.y + 2 * (1 - nextT) * nextT * stem.control.y + nextT * nextT * stem.end.y;
+                
+                const width = stem.startWidth + (stem.endWidth - stem.startWidth) * t;
+                
+                ctx.strokeStyle = '#8b4513';
+                ctx.lineWidth = width;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+            
+            let gradient;
+            if (color === 'autumn') {
+                gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+                gradient.addColorStop(0, '#d32f2f');
+                gradient.addColorStop(0.5, '#ff6f00');
+                gradient.addColorStop(1, '#f57c00');
+            } else if (color === 'green') {
+                gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+                gradient.addColorStop(0, '#558b2f');
+                gradient.addColorStop(0.5, '#689f38');
+                gradient.addColorStop(1, '#7cb342');
+            } else if (color === 'golden') {
+                gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+                gradient.addColorStop(0, '#f9a825');
+                gradient.addColorStop(0.5, '#fbc02d');
+                gradient.addColorStop(1, '#fdd835');
+            }
+            
+            ctx.beginPath();
+            ctx.moveTo(leafData.valleys[4].x, leafData.valleys[4].y);
+            
+            for (let i = 0; i < 5; i++) {
+                const tip = leafData.tips[i];
+                const valley = leafData.valleys[i];
+                const ctrl = leafData.controls[i];
+                
+                ctx.bezierCurveTo(ctrl.cp1.x, ctrl.cp1.y, ctrl.cp2.x, ctrl.cp2.y, tip.x, tip.y);
+                ctx.bezierCurveTo(ctrl.cp3.x, ctrl.cp3.y, ctrl.cp4.x, ctrl.cp4.y, valley.x, valley.y);
+            }
+            
+            ctx.closePath();
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(leafData.tips[i].x * 0.8, leafData.tips[i].y * 0.8);
+                ctx.stroke();
+            }
+            
+            ctx.restore();
+        }
+        
+        function drawControls() {
+            ctrlCtx.clearRect(0, 0, controlCanvas.width, controlCanvas.height);
+            if (!showControls) return;
+            
+            ctrlCtx.save();
+            ctrlCtx.translate(centerX, centerY);
+            
+            for (let i = 0; i < 5; i++) {
+                const tip = leafData.tips[i];
+                const valley = leafData.valleys[i];
+                const ctrl = leafData.controls[i];
+                
+                ctrlCtx.strokeStyle = '#2196f3';
+                ctrlCtx.lineWidth = 1;
+                ctrlCtx.setLineDash([5, 5]);
+                
+                ctrlCtx.beginPath();
+                ctrlCtx.moveTo(valley.x, valley.y);
+                ctrlCtx.lineTo(ctrl.cp1.x, ctrl.cp1.y);
+                ctrlCtx.lineTo(ctrl.cp2.x, ctrl.cp2.y);
+                ctrlCtx.lineTo(tip.x, tip.y);
+                ctrlCtx.stroke();
+                
+                ctrlCtx.beginPath();
+                ctrlCtx.moveTo(tip.x, tip.y);
+                ctrlCtx.lineTo(ctrl.cp3.x, ctrl.cp3.y);
+                ctrlCtx.lineTo(ctrl.cp4.x, ctrl.cp4.y);
+                ctrlCtx.lineTo(valley.x, valley.y);
+                ctrlCtx.stroke();
+                
+                ctrlCtx.setLineDash([]);
+                
+                ctrlCtx.fillStyle = '#ff9800';
+                ctrlCtx.fillRect(ctrl.cp1.x - 4, ctrl.cp1.y - 4, 8, 8);
+                ctrlCtx.fillRect(ctrl.cp2.x - 4, ctrl.cp2.y - 4, 8, 8);
+                ctrlCtx.fillRect(ctrl.cp3.x - 4, ctrl.cp3.y - 4, 8, 8);
+                ctrlCtx.fillRect(ctrl.cp4.x - 4, ctrl.cp4.y - 4, 8, 8);
+            }
+            
+            for (let i = 0; i < 5; i++) {
+                ctrlCtx.fillStyle = '#4caf50';
+                ctrlCtx.beginPath();
+                ctrlCtx.arc(leafData.tips[i].x, leafData.tips[i].y, 6, 0, Math.PI * 2);
+                ctrlCtx.fill();
+                
+                ctrlCtx.fillStyle = '#f44336';
+                ctrlCtx.beginPath();
+                ctrlCtx.arc(leafData.valleys[i].x, leafData.valleys[i].y, 6, 0, Math.PI * 2);
+                ctrlCtx.fill();
+            }
+            
+            ctrlCtx.strokeStyle = '#8b4513';
+            ctrlCtx.lineWidth = 2;
+            ctrlCtx.setLineDash([5, 5]);
+            ctrlCtx.beginPath();
+            ctrlCtx.moveTo(leafData.stem.start.x, leafData.stem.start.y);
+            ctrlCtx.lineTo(leafData.stem.control.x, leafData.stem.control.y);
+            ctrlCtx.lineTo(leafData.stem.end.x, leafData.stem.end.y);
+            ctrlCtx.stroke();
+            ctrlCtx.setLineDash([]);
+            
+            ctrlCtx.fillStyle = '#8b4513';
+            ctrlCtx.fillRect(leafData.stem.control.x - 4, leafData.stem.control.y - 4, 8, 8);
+            
+            ctrlCtx.fillStyle = '#6b3410';
+            ctrlCtx.beginPath();
+            ctrlCtx.arc(leafData.stem.end.x, leafData.stem.end.y, 6, 0, Math.PI * 2);
+            ctrlCtx.fill();
+            
+            ctrlCtx.restore();
+        }
+        
+        function getPointAt(mx, my) {
+            const x = mx - centerX;
+            const y = my - centerY;
+            
+            if (Math.hypot(leafData.stem.end.x - x, leafData.stem.end.y - y) < 10) {
+                return { type: 'stemEnd' };
+            }
+            if (Math.hypot(leafData.stem.control.x - x, leafData.stem.control.y - y) < 10) {
+                return { type: 'stemControl' };
+            }
+            
+            for (let i = 0; i < 5; i++) {
+                if (Math.hypot(leafData.tips[i].x - x, leafData.tips[i].y - y) < 10) {
+                    return { type: 'tip', index: i };
+                }
+                if (Math.hypot(leafData.valleys[i].x - x, leafData.valleys[i].y - y) < 10) {
+                    return { type: 'valley', index: i };
+                }
+                const ctrl = leafData.controls[i];
+                if (Math.hypot(ctrl.cp1.x - x, ctrl.cp1.y - y) < 10) {
+                    return { type: 'cp1', index: i };
+                }
+                if (Math.hypot(ctrl.cp2.x - x, ctrl.cp2.y - y) < 10) {
+                    return { type: 'cp2', index: i };
+                }
+                if (Math.hypot(ctrl.cp3.x - x, ctrl.cp3.y - y) < 10) {
+                    return { type: 'cp3', index: i };
+                }
+                if (Math.hypot(ctrl.cp4.x - x, ctrl.cp4.y - y) < 10) {
+                    return { type: 'cp4', index: i };
+                }
+            }
+            return null;
+        }
+        
+        controlCanvas.addEventListener('mousedown', (e) => {
+            const rect = controlCanvas.getBoundingClientRect();
+            draggingPoint = getPointAt(e.clientX - rect.left, e.clientY - rect.top);
+        });
+        
+        function findMirrorTipIndex(index, currentX, currentY) {
+            for (let i = 0; i < 5; i++) {
+                if (i === index) continue;
+                const tip = leafData.tips[i];
+                if (Math.abs(tip.x + currentX) < 5 && Math.abs(tip.y - currentY) < 5) {
+                    return i;
+                }
+            }
+            return null;
+        }
+        
+        function findMirrorValleyIndex(index, currentX, currentY) {
+            for (let i = 0; i < 5; i++) {
+                if (i === index) continue;
+                const valley = leafData.valleys[i];
+                if (Math.abs(valley.x + currentX) < 5 && Math.abs(valley.y - currentY) < 5) {
+                    return i;
+                }
+            }
+            return null;
+        }
+        
+        function findMirrorControlPoint(index, cpType, currentX, currentY) {
+            for (let i = 0; i < 5; i++) {
+                if (i === index) continue;
+                const ctrl = leafData.controls[i];
+                for (const key of ['cp1', 'cp2', 'cp3', 'cp4']) {
+                    const cp = ctrl[key];
+                    if (Math.abs(cp.x + currentX) < 5 && Math.abs(cp.y - currentY) < 5) {
+                        return { index: i, type: key };
+                    }
+                }
+            }
+            return null;
+        }
+        
+        controlCanvas.addEventListener('mousemove', (e) => {
+            if (!draggingPoint) return;
+            
+            const rect = controlCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left - centerX;
+            const y = e.clientY - rect.top - centerY;
+            
+            if (draggingPoint.type === 'stemEnd') {
+                leafData.stem.end.x = x;
+                leafData.stem.end.y = y;
+            } else if (draggingPoint.type === 'stemControl') {
+                leafData.stem.control.x = x;
+                leafData.stem.control.y = y;
+            } else if (draggingPoint.type === 'tip') {
+                const oldX = leafData.tips[draggingPoint.index].x;
+                const oldY = leafData.tips[draggingPoint.index].y;
+                
+                if (symmetryMode && Math.abs(oldX) < 5) {
+                    leafData.tips[draggingPoint.index].x = 0;
+                    leafData.tips[draggingPoint.index].y = y;
+                } else {
+                    leafData.tips[draggingPoint.index].x = x;
+                    leafData.tips[draggingPoint.index].y = y;
+                    
+                    if (symmetryMode) {
+                        const mirrorIdx = findMirrorTipIndex(draggingPoint.index, oldX, oldY);
+                        if (mirrorIdx !== null) {
+                            leafData.tips[mirrorIdx].x = -x;
+                            leafData.tips[mirrorIdx].y = y;
+                        }
+                    }
+                }
+            } else if (draggingPoint.type === 'valley') {
+                const oldX = leafData.valleys[draggingPoint.index].x;
+                const oldY = leafData.valleys[draggingPoint.index].y;
+                
+                leafData.valleys[draggingPoint.index].x = x;
+                leafData.valleys[draggingPoint.index].y = y;
+                
+                if (symmetryMode) {
+                    const mirrorIdx = findMirrorValleyIndex(draggingPoint.index, oldX, oldY);
+                    if (mirrorIdx !== null) {
+                        leafData.valleys[mirrorIdx].x = -x;
+                        leafData.valleys[mirrorIdx].y = y;
+                    }
+                }
+            } else if (draggingPoint.type.startsWith('cp')) {
+                const oldX = leafData.controls[draggingPoint.index][draggingPoint.type].x;
+                const oldY = leafData.controls[draggingPoint.index][draggingPoint.type].y;
+                
+                leafData.controls[draggingPoint.index][draggingPoint.type].x = x;
+                leafData.controls[draggingPoint.index][draggingPoint.type].y = y;
+                
+                if (symmetryMode) {
+                    const mirror = findMirrorControlPoint(draggingPoint.index, draggingPoint.type, oldX, oldY);
+                    if (mirror !== null) {
+                        leafData.controls[mirror.index][mirror.type].x = -x;
+                        leafData.controls[mirror.index][mirror.type].y = y;
+                    }
+                }
+            }
+            
+            redraw();
+        });
+        
+        controlCanvas.addEventListener('mouseup', () => {
+            draggingPoint = null;
+        });
+        
+        function redraw() {
+            drawFivePointedLeaf(currentColor);
+            drawControls();
+        }
+        
+        function drawLeaf(colorScheme) {
+            currentColor = colorScheme;
+            redraw();
+        }
+        
+        function copyToClipboard() {
+            const data = JSON.stringify(leafData, null, 2);
+            navigator.clipboard.writeText(data).then(() => {
+                alert('Leaf design copied to clipboard!');
+            });
+        }
+        
+        function toggleControls() {
+            showControls = !showControls;
+            redraw();
+        }
+        
+        function toggleSymmetry() {
+            symmetryMode = !symmetryMode;
+            const btn = document.getElementById('symmetryBtn');
+            if (symmetryMode) {
+                btn.textContent = '🔄 Symmetry: ON';
+                btn.style.background = '#4caf50';
+                btn.style.color = 'white';
+            } else {
+                btn.textContent = '🔄 Symmetry: OFF';
+                btn.style.background = 'white';
+                btn.style.color = '#667eea';
+            }
+        }
+        
+        function drawLeafSilhouette(ctx, x, y, scale, rotation, rotX, rotY, colored) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+            
+            const perspectiveScale = 0.5;
+            const scaleX = scale * Math.cos(rotY);
+            const scaleY = scale * Math.cos(rotX);
+            const skewX = Math.sin(rotY) * perspectiveScale;
+            const skewY = Math.sin(rotX) * perspectiveScale;
+            
+            ctx.transform(scaleX, skewY * scaleX, skewX * scaleY, scaleY, 0, 0);
+            
+            ctx.beginPath();
+            ctx.moveTo(leafData.valleys[4].x, leafData.valleys[4].y);
+            
+            for (let i = 0; i < 5; i++) {
+                const tip = leafData.tips[i];
+                const valley = leafData.valleys[i];
+                const ctrl = leafData.controls[i];
+                
+                ctx.bezierCurveTo(ctrl.cp1.x, ctrl.cp1.y, ctrl.cp2.x, ctrl.cp2.y, tip.x, tip.y);
+                ctx.bezierCurveTo(ctrl.cp3.x, ctrl.cp3.y, ctrl.cp4.x, ctrl.cp4.y, valley.x, valley.y);
+            }
+            
+            ctx.closePath();
+            
+            if (colored) {
+                const gradient = ctx.createRadialGradient(0, -50, 0, 0, -50, 200);
+                gradient.addColorStop(0, '#558b2f');
+                gradient.addColorStop(0.5, '#689f38');
+                gradient.addColorStop(1, '#7cb342');
+                ctx.fillStyle = gradient;
+            } else {
+                ctx.fillStyle = 'white';
+            }
+            ctx.fill();
+            
+            const stem = leafData.stem;
+            const steps = 20;
+            
+            for (let i = 0; i < steps; i++) {
+                const t = i / steps;
+                const nextT = (i + 1) / steps;
+                
+                const x1 = (1 - t) * (1 - t) * stem.start.x + 2 * (1 - t) * t * stem.control.x + t * t * stem.end.x;
+                const y1 = (1 - t) * (1 - t) * stem.start.y + 2 * (1 - t) * t * stem.control.y + t * t * stem.end.y;
+                
+                const x2 = (1 - nextT) * (1 - nextT) * stem.start.x + 2 * (1 - nextT) * nextT * stem.control.x + nextT * nextT * stem.end.x;
+                const y2 = (1 - nextT) * (1 - nextT) * stem.start.y + 2 * (1 - nextT) * nextT * stem.control.y + nextT * nextT * stem.end.y;
+                
+                const width = stem.startWidth + (stem.endWidth - stem.startWidth) * t;
+                
+                ctx.strokeStyle = colored ? '#8b4513' : 'white';
+                ctx.lineWidth = width;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+            
+            ctx.restore();
+        }
+        
+        function generateTexture() {
+            const maskCanvas = document.getElementById('maskCanvas');
+            const coloredCanvas = document.getElementById('coloredCanvas');
+            const maskCtx = maskCanvas.getContext('2d');
+            const coloredCtx = coloredCanvas.getContext('2d');
+            
+            maskCtx.fillStyle = 'black';
+            maskCtx.fillRect(0, 0, 1024, 1024);
+            
+            coloredCtx.clearRect(0, 0, 1024, 1024);
+            
+            const numLeaves = 30 + Math.floor(Math.random() * 11);
+            const leaves = [];
+            
+            for (let i = 0; i < numLeaves; i++) {
+                leaves.push({
+                    x: Math.random() * 1024,
+                    y: Math.random() * 1024,
+                    scale: 0.3 + Math.random() * 0.7,
+                    rotation: Math.random() * Math.PI * 2,
+                    rotX: (Math.random() - 0.5) * Math.PI * 0.6,
+                    rotY: (Math.random() - 0.5) * Math.PI * 0.6
+                });
+            }
+            
+            leaves.forEach(leaf => {
+                drawLeafSilhouette(maskCtx, leaf.x, leaf.y, leaf.scale, leaf.rotation, leaf.rotX, leaf.rotY, false);
+                drawLeafSilhouette(coloredCtx, leaf.x, leaf.y, leaf.scale, leaf.rotation, leaf.rotX, leaf.rotY, true);
+            });
+            
+            document.getElementById('textureContainer').style.display = 'block';
+            document.getElementById('coloredContainer').style.display = 'block';
+            document.getElementById('regenBtn').style.display = 'inline-block';
+            document.getElementById('saveMaskBtn').style.display = 'inline-block';
+            document.getElementById('saveColoredBtn').style.display = 'inline-block';
+        }
+        
+        function saveMask() {
+            const maskCanvas = document.getElementById('maskCanvas');
+            const link = document.createElement('a');
+            link.download = 'leaf-mask-1024x1024.png';
+            link.href = maskCanvas.toDataURL('image/png');
+            link.click();
+        }
+        
+        function saveColored() {
+            const coloredCanvas = document.getElementById('coloredCanvas');
+            const link = document.createElement('a');
+            link.download = 'leaf-colored-1024x1024.png';
+            link.href = coloredCanvas.toDataURL('image/png');
+            link.click();
+        }
+        
+        initializePoints();
+        drawLeaf('autumn');
+    </script>
+</body>
+</html>

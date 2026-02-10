@@ -9,32 +9,49 @@
           <v-card-subtitle class="text-center text-h6 pb-4">
             Multiplayer Game
           </v-card-subtitle>
-          <v-card-text>
-            <v-text-field
-              v-model="roomId"
-              label="Room ID"
-              variant="outlined"
-              color="primary"
-              prepend-inner-icon="mdi-door"
-              hint="Enter a room ID to join"
-              persistent-hint
-            />
-          </v-card-text>
           <v-card-actions class="pa-6">
             <v-btn
               block
               color="primary"
               size="x-large"
               variant="flat"
-              @click="joinGame"
-              :disabled="!roomId"
+              @click="createLobby"
             >
-              <v-icon start>mdi-play</v-icon>
-              Join Game
+              <v-icon start>mdi-plus</v-icon>
+              Create Lobby
             </v-btn>
           </v-card-actions>
 
-          <v-card-text class="text-center pt-0">
+          <v-divider class="mx-6"></v-divider>
+
+          <v-card-text class="pt-4">
+            <v-text-field
+              v-model="roomId"
+              label="Room ID"
+              variant="outlined"
+              color="primary"
+              prepend-inner-icon="mdi-door"
+              hint="Enter a room ID to join an existing lobby"
+              persistent-hint
+            />
+          </v-card-text>
+          <v-card-actions class="pa-6 pt-0">
+            <v-btn
+              block
+              color="secondary"
+              size="large"
+              variant="outlined"
+              @click="joinGame"
+              :disabled="!roomId"
+            >
+              <v-icon start>mdi-login</v-icon>
+              Join Existing Lobby
+            </v-btn>
+          </v-card-actions>
+
+          <v-divider class="mx-6 my-2"></v-divider>
+
+          <v-card-text class="text-center py-4">
             <v-btn
               variant="outlined"
               color="primary"
@@ -42,11 +59,11 @@
               @click="quickPlay"
             >
               <v-icon start>mdi-lightning-bolt</v-icon>
-              Quick Play
+              Quick Play (Skip Lobby)
             </v-btn>
           </v-card-text>
           
-          <v-divider class="my-4"></v-divider>
+          <v-divider class="mx-6 my-2"></v-divider>
           
           <v-card-text class="text-center">
             <v-btn
@@ -79,9 +96,15 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 const router = useRouter();
-const roomId = ref('lobby');
+const roomId = ref('');
+
+const createLobby = () => {
+  const uniqueRoomId = `lobby_${Math.random().toString(36).substring(2, 15)}`;
+  router.push({ name: 'game', query: { room: uniqueRoomId } });
+};
 
 const joinGame = () => {
+  if (!roomId.value.trim()) return;
   router.push({ name: 'game', query: { room: roomId.value } });
 };
 

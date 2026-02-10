@@ -23,6 +23,7 @@ export function useRoom(networkClient: NetworkClient) {
 
   // Handle room state (when joining)
   networkClient.onLowFrequency(Opcode.RoomState, (payload: RoomStateMessage) => {
+    console.log('[useRoom] Received RoomState:', payload);
     roomId.value = payload.roomId;
     myEntityId.value = payload.myEntityId;
     ownerId.value = payload.ownerId;
@@ -39,8 +40,8 @@ export function useRoom(networkClient: NetworkClient) {
       }
     });
 
-    console.log(`Joined room ${payload.roomId} with entity ID ${payload.myEntityId}`);
-    console.log(`Room has ${payload.players.length} player(s)`);
+    console.log(`[useRoom] Joined room ${payload.roomId} with entity ID ${payload.myEntityId}`);
+    console.log(`[useRoom] Room has ${payload.players.length} player(s), ownerId: ${payload.ownerId}`);
   });
 
   // Handle player joined
@@ -66,6 +67,7 @@ export function useRoom(networkClient: NetworkClient) {
   });
 
   const joinRoom = (targetRoomId: string, config?: any) => {
+    console.log('[useRoom] Sending RoomJoin request:', { roomId: targetRoomId, config });
     networkClient.sendLow(Opcode.RoomJoin, { roomId: targetRoomId, config });
   };
 

@@ -1,6 +1,6 @@
 import { ref, computed, Ref, watch } from 'vue';
 import type { Engine, Scene } from '@babylonjs/core';
-import { MeshBuilder, StandardMaterial, Color3 } from '@babylonjs/core';
+import { MeshBuilder, StandardMaterial, Color3, Vector3, PostProcess, Effect } from '@babylonjs/core';
 import {
   FIXED_TIMESTEP,
   Opcode,
@@ -21,6 +21,7 @@ import { ProjectileManager } from '../engine/ProjectileManager';
 import { LevelMesh } from '../engine/LevelMesh';
 import { LevelTreeManager } from '../engine/LevelTreeManager';
 import { LevelRockManager } from '../engine/LevelRockManager';
+import { LevelBushManager } from '../engine/LevelBushManager';
 import { CloudPostProcess } from '../engine/CloudPostProcess';
 import { LevelCloudManager } from '../engine/LevelCloudManager';
 import { FinalPostProcess } from '../engine/FinalPostProcess';
@@ -31,6 +32,7 @@ import { playSFX3D } from '../engine/audioHelpers';
 import { WeaponSystem } from '../engine/WeaponSystem';
 import { ItemSystem } from '../engine/ItemSystem';
 import { GameLoop } from '../engine/GameLoop';
+import { BushLeafEffect } from '../engine/BushLeafEffect';
 import { BuildingCollisionManager } from '../engine/BuildingCollisionManager';
 import { BuildSystem } from '../engine/BuildSystem';
 import { LadderPlacementSystem } from '../engine/LadderPlacementSystem';
@@ -62,6 +64,7 @@ export interface GameSessionConfig {
   levelSeed?: string;
   isMobile?: boolean;
   levelConfig?: any;
+  isLoadingPhase?: boolean;
 }
 
 export function useGameSession() {
@@ -109,12 +112,31 @@ export function useGameSession() {
   let voxelGrid: VoxelGrid | null = null;
   let treeManager: LevelTreeManager | null = null;
   let rockManager: LevelRockManager | null = null;
+  let bushManager: LevelBushManager | null = null;
   let cloudPostProcess: CloudPostProcess | null = null;
   let cloudManager: LevelCloudManager | null = null;
   let finalPostProcess: FinalPostProcess | null = null;
   let skyPickSphere: SkyPickSphere | null = null;
   let shadowManager: any = null;
+  let leafEffect: BushLeafEffect | null = null;
+  let leafTriggerPost: PostProcess | null = null;
+  let currentTreeIndex = -1;
+  let currentBushIndex = -1;
+  let wasInLeavesLastFrame = false;
+  let leafEntryX = 0;
+  let leafEntryY = 0;
+  let leafEntryZ = 0;
+  let selectedTextureIndex1 = 0;
+  let selectedTextureIndex2 = 1;
   let inputSequence = 0;
+  let isInLoadingPhase = false;
+  let pendingEntityId: number | null = null;
+  let spawnPlayerFn: ((entityId: number) => void) | null = null;
+  const loadingSecondsRemaining = ref(0);
+  const loadingReadyPlayers = ref<string[]>([]);
+  const loadingTotalPlayers = ref(0);
+  const gameBegun = ref(false);
+  const gameBeginCallbacks: (() => void)[] = [];
   let buildingCollisionManager: BuildingCollisionManager | null = null;
   let buildSystem: BuildSystem | null = null;
   let ladderPlacementSystem: LadderPlacementSystem | null = null;
@@ -145,6 +167,9 @@ export function useGameSession() {
   const handleResize = () => engine?.resize();
   
   const init = async (canvas: HTMLCanvasElement, config: GameSessionConfig) => {
+    // Track if we're in loading phase
+    isInLoadingPhase = config.isLoadingPhase || false;
+    
     // 1. Create Babylon engine + scene (WebGPU with WebGL fallback)
     engine = await createEngine(canvas);
     const sunConfig = config.levelSeed ? generateSunConfig(config.levelSeed) : undefined;
@@ -183,22 +208,46 @@ export function useGameSession() {
       levelMesh.createFromQuads(quads);
       console.log('[GameSession] Level mesh created');
       
+      // Get disable flags from level config
+      const disableSpawns = (config.levelConfig?.disableSpawns || []) as string[];
+      
       // Initialize tree manager for this level
-      try {
-        treeManager = new LevelTreeManager(scene, config.levelSeed);
-        await treeManager.initialize();
-        console.log('[GameSession] Tree manager initialized');
-      } catch (error) {
-        console.error('[GameSession] Failed to initialize tree manager:', error);
+      if (!disableSpawns.includes('trees')) {
+        try {
+          treeManager = new LevelTreeManager(scene, config.levelSeed);
+          await treeManager.initialize();
+          console.log('[GameSession] Tree manager initialized');
+        } catch (error) {
+          console.error('[GameSession] Failed to initialize tree manager:', error);
+        }
+      } else {
+        console.log('[GameSession] Trees disabled - skipping tree manager');
       }
       
       // Initialize rock manager for this level
-      try {
-        rockManager = new LevelRockManager(scene, config.levelSeed);
-        await rockManager.initialize();
-        console.log('[GameSession] Rock manager initialized');
-      } catch (error) {
-        console.error('[GameSession] Failed to initialize rock manager:', error);
+      if (!disableSpawns.includes('rocks')) {
+        try {
+          rockManager = new LevelRockManager(scene, config.levelSeed);
+          await rockManager.initialize();
+          console.log('[GameSession] Rock manager initialized');
+        } catch (error) {
+          console.error('[GameSession] Failed to initialize rock manager:', error);
+        }
+      } else {
+        console.log('[GameSession] Rocks disabled - skipping rock manager');
+      }
+      
+      // Initialize bush manager for this level
+      if (!disableSpawns.includes('bushes')) {
+        try {
+          bushManager = new LevelBushManager(scene, config.levelSeed);
+          await bushManager.initialize();
+          console.log('[GameSession] Bush manager initialized');
+        } catch (error) {
+          console.error('[GameSession] Failed to initialize bush manager:', error);
+        }
+      } else {
+        console.log('[GameSession] Bushes disabled - skipping bush manager');
       }
       
       // Initialize cloud post-processing and cloud manager
@@ -213,6 +262,9 @@ export function useGameSession() {
       
       // Initialize final post-processing (FXAA + vignette)
       finalPostProcess = new FinalPostProcess(scene, cameraController.getCamera());
+      
+      // Initialize leaf effect
+      await initializeLeafEffect(scene, cameraController.getCamera());
     } else if (scene) {
       // Flat ground for shooting range / builder rooms
       console.log('[GameSession] Creating flat ground');
@@ -245,10 +297,38 @@ export function useGameSession() {
       }
     }
     
+    // If in loading phase, position camera to look at terrain from an angle
+    // and start the render loop immediately so the scene is visible
+    if (config.isLoadingPhase && engine && scene) {
+      console.log('[GameSession] Loading phase - positioning camera to view terrain');
+      const camera = cameraController!.getCamera();
+      
+      // Position camera high and to the side for a panoramic terrain view
+      camera.position.set(80, 100, 80);
+      camera.setTarget(new Vector3(0, 20, 0));
+      
+      // Slow orbit during loading for visual interest
+      let loadingAngle = 0;
+      engine.runRenderLoop(() => {
+        loadingAngle += 0.002;
+        const radius = 100;
+        camera.position.x = Math.cos(loadingAngle) * radius;
+        camera.position.z = Math.sin(loadingAngle) * radius;
+        camera.position.y = 80;
+        camera.setTarget(new Vector3(0, 20, 0));
+        scene.render();
+      });
+      console.log('[GameSession] Loading phase render loop started');
+    }
+    
     window.addEventListener('resize', handleResize);
     
     // 3. Connect to server
-    const wsUrl = `ws://${window.location.hostname}:3000/ws`;
+    // Use Vite proxy in development, direct connection in production
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = import.meta.env.DEV 
+      ? `${wsProtocol}//${window.location.host}/ws`
+      : `ws://${window.location.hostname}:3000/ws`;
     
     networkClient = new NetworkClient(wsUrl);
     const room = useRoom(networkClient);
@@ -596,6 +676,22 @@ export function useGameSession() {
       rockManager.spawnRockInstances(instances);
     });
     
+    // Handle bush spawns from server (level rooms only)
+    networkClient.onLowFrequency(Opcode.BushSpawn, (payload) => {
+      if (!bushManager) {
+        console.warn('[GameSession] Received BushSpawn but bushManager not initialized!');
+        return;
+      }
+      console.log(`[GameSession] Received ${payload.bushes.length} bushes from server`);
+      const instances = payload.bushes.map((b: any) => ({
+        variationId: b.variationId,
+        worldX: b.posX,
+        worldY: b.posY,
+        worldZ: b.posZ
+      }));
+      bushManager.spawnBushInstances(instances);
+    });
+    
     // Handle other players joining
     room.onPlayerJoined((playerInfo) => {
       if (!scene || !transformSync) return;
@@ -612,18 +708,62 @@ export function useGameSession() {
       transformSync.removeTransform(entityId);
     });
     
+    // Register loading phase handlers BEFORE connecting so we never miss messages
+    if (config.isLoadingPhase) {
+      networkClient.onLowFrequency(Opcode.PlayersReadyUpdate, (data: any) => {
+        console.log('[GameSession] PlayersReadyUpdate:', data);
+        loadingSecondsRemaining.value = data.secondsRemaining;
+        loadingReadyPlayers.value = data.readyPlayers;
+        loadingTotalPlayers.value = data.totalPlayers;
+      });
+      
+      networkClient.onLowFrequency(Opcode.GameBegin, () => {
+        console.log('[GameSession] GameBegin received');
+        isInLoadingPhase = false;
+        gameBegun.value = true;
+        
+        // Spawn the player if we have a pending entity ID
+        if (pendingEntityId !== null && spawnPlayerFn) {
+          console.log('[GameSession] Spawning player after loading phase');
+          spawnPlayerFn(pendingEntityId);
+          pendingEntityId = null;
+        }
+        
+        // Fire all registered callbacks
+        for (const cb of gameBeginCallbacks) {
+          cb();
+        }
+      });
+    }
+    
     // Try to connect
     try {
       await networkClient.connect();
       isConnected.value = true;
+      console.log('[GameSession] Joining room:', config.roomId, 'with config:', config.levelConfig);
       room.joinRoom(config.roomId, config.levelConfig);
+      
+      // Auto-send ClientReady during loading phase once connected
+      if (config.isLoadingPhase) {
+        // Small delay to ensure room join is processed first
+        setTimeout(() => {
+          networkClient!.sendLow(Opcode.ClientReady, {});
+          console.log('[GameSession] Auto-sent ClientReady after connection');
+        }, 500);
+      }
     } catch (err) {
       console.error('[GameSession] Failed to connect:', err);
     }
     
-    // 4. When we get our entity ID, set up our local player
-    watch(() => room.myEntityId.value, (entityId) => {
-      if (entityId === null || entityId === undefined || !scene || !transformSync) return;
+    // Helper function to spawn player
+    const spawnPlayer = (entityId: number) => {
+      if (!scene || !transformSync) return;
+      
+      console.log('[GameSession] Spawning player with entity ID:', entityId);
+      myEntityId.value = entityId;
+      
+      // Camera will be repositioned by CameraController.setTarget below
+      // when we set it to the player's position
       
       // Create our local transform (isLocal = true for client prediction)
       myTransform.value = transformSync.createTransform(entityId, true, voxelGrid || undefined);
@@ -848,8 +988,9 @@ export function useGameSession() {
         cameraController.setTarget(myTransform.value.getPosition());
       }
       
-      // Start game loop
+      // Stop preview render loop (if running from loading phase) and start full game loop
       if (engine && scene && transformSync && cameraController) {
+        engine.stopRenderLoop(); // Stop any existing render loop (e.g., loading preview)
         gameLoop.start(engine, scene, {
           transformSync,
           projectileManager,
@@ -867,6 +1008,25 @@ export function useGameSession() {
           }
         });
       }
+    }; // End of spawnPlayer function
+    
+    // Store reference to spawnPlayer so onGameBegin can call it
+    spawnPlayerFn = spawnPlayer;
+    
+    // 4. When we get our entity ID, set up our local player
+    watch(() => room.myEntityId.value, (entityId) => {
+      if (entityId === null || entityId === undefined) return;
+      
+      // If in loading phase, save the entity ID but don't spawn yet
+      if (isInLoadingPhase) {
+        console.log('[GameSession] Received entity ID during loading phase, deferring spawn until GameBegin');
+        pendingEntityId = entityId;
+        myEntityId.value = entityId;
+        return;
+      }
+      
+      // Spawn player immediately if not in loading phase
+      spawnPlayer(entityId);
     }, { immediate: true });
   };
   
@@ -879,9 +1039,12 @@ export function useGameSession() {
     if (scene) itemSystem.dispose(scene);
     treeManager?.dispose();
     rockManager?.dispose();
+    bushManager?.dispose();
     cloudManager?.dispose();
     cloudPostProcess?.dispose();
     finalPostProcess?.dispose();
+    leafTriggerPost?.dispose();
+    leafEffect = null;
     skyPickSphere?.dispose();
     shadowManager?.dispose();
     buildingCollisionManager?.clear();
@@ -899,6 +1062,238 @@ export function useGameSession() {
     engine?.dispose();
   };
   
+  // Leaf effect functions
+  async function initializeLeafEffect(scene: Scene, camera: any) {
+    if (!scene || !camera) return;
+
+    console.log('[GameSession] Initializing leaf effect...');
+    leafEffect = new BushLeafEffect(scene);
+    
+    try {
+      await leafEffect.generate();
+      console.log('[GameSession] Leaf textures generated successfully');
+      
+      selectedTextureIndex1 = Math.floor(Math.random() * 3);
+      selectedTextureIndex2 = Math.floor(Math.random() * 3);
+      while (selectedTextureIndex2 === selectedTextureIndex1) {
+        selectedTextureIndex2 = Math.floor(Math.random() * 3);
+      }
+      console.log(`[GameSession] Initial texture sets selected: ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
+      
+      setupLeafTriggerDetection(scene, camera);
+    } catch (error) {
+      console.error('[GameSession] Failed to generate leaf textures:', error);
+    }
+  }
+
+  function setupLeafTriggerDetection(scene: Scene, camera: any) {
+    if (!scene) return;
+
+    Effect.ShadersStore['leafTriggerFragmentShader'] = `
+      precision highp float;
+      
+      varying vec2 vUV;
+      uniform sampler2D textureSampler;
+      uniform sampler2D leafColorTexture1;
+      uniform sampler2D leafMaskTexture1;
+      uniform sampler2D leafColorTexture2;
+      uniform sampler2D leafMaskTexture2;
+      uniform float intensity;
+      uniform vec2 screenSize;
+      uniform vec2 textureSize;
+      uniform vec3 cameraOffset;
+      
+      void main() {
+        vec4 sceneColor = texture2D(textureSampler, vUV);
+        
+        if (intensity < 0.01) {
+          gl_FragColor = sceneColor;
+          return;
+        }
+        
+        float screenAspect = screenSize.x / screenSize.y;
+        float textureAspect = textureSize.x / textureSize.y;
+        
+        vec2 scale;
+        if (screenAspect > textureAspect) {
+          scale = vec2(1.0, screenAspect / textureAspect);
+        } else {
+          scale = vec2(textureAspect / screenAspect, 1.0);
+        }
+        
+        float overdrawScale = 1.032;
+        scale *= overdrawScale;
+        
+        vec2 parallaxOffset1 = vec2(cameraOffset.x * 0.02, cameraOffset.z * 0.02);
+        vec2 parallaxOffset2 = vec2(-cameraOffset.x * 0.015, cameraOffset.z * 0.025);
+        
+        vec2 leafUV1 = (vUV - 0.5) / scale + 0.5 + parallaxOffset1;
+        vec4 leafColor1 = texture2D(leafColorTexture1, leafUV1);
+        float leafMask1 = texture2D(leafMaskTexture1, leafUV1).r;
+        vec3 darkenedLeaf1 = leafColor1.rgb * 0.3;
+        float mixAmount1 = leafMask1 * intensity * 0.65;
+        
+        vec2 leafUV2 = (vUV - 0.5) / scale + 0.5 + parallaxOffset2;
+        vec4 leafColor2 = texture2D(leafColorTexture2, leafUV2);
+        float leafMask2 = texture2D(leafMaskTexture2, leafUV2).r;
+        vec3 darkenedLeaf2 = leafColor2.rgb * 0.3;
+        float mixAmount2 = leafMask2 * intensity;
+        
+        vec3 result = sceneColor.rgb;
+        result = mix(result, darkenedLeaf1, mixAmount1);
+        result = mix(result, darkenedLeaf2, mixAmount2);
+        
+        gl_FragColor = vec4(result, sceneColor.a);
+      }
+    `;
+
+    leafTriggerPost = new PostProcess(
+      'leafTrigger',
+      'leafTrigger',
+      ['intensity', 'screenSize', 'textureSize', 'cameraOffset'],
+      ['leafColorTexture1', 'leafMaskTexture1', 'leafColorTexture2', 'leafMaskTexture2'],
+      1.0,
+      camera
+    );
+
+    leafTriggerPost.onApply = (effect) => {
+      const isInLeaves = currentTreeIndex >= 0 || currentBushIndex >= 0;
+      
+      if (leafEffect && leafEffect.ready()) {
+        const colorTexture1 = leafEffect.getColorTexture(selectedTextureIndex1);
+        const maskTexture1 = leafEffect.getMaskTexture(selectedTextureIndex1);
+        const colorTexture2 = leafEffect.getColorTexture(selectedTextureIndex2);
+        const maskTexture2 = leafEffect.getMaskTexture(selectedTextureIndex2);
+        
+        if (colorTexture1 && maskTexture1 && colorTexture2 && maskTexture2 && scene && camera) {
+          effect.setTexture('leafColorTexture1', colorTexture1);
+          effect.setTexture('leafMaskTexture1', maskTexture1);
+          effect.setTexture('leafColorTexture2', colorTexture2);
+          effect.setTexture('leafMaskTexture2', maskTexture2);
+          
+          const engine = scene.getEngine();
+          effect.setFloat2('screenSize', engine.getRenderWidth(), engine.getRenderHeight());
+          effect.setFloat2('textureSize', 1024, 1024);
+          
+          const camPos = camera.position;
+          const offsetX = camPos.x - leafEntryX;
+          const offsetY = camPos.y - leafEntryY;
+          const offsetZ = camPos.z - leafEntryZ;
+          effect.setFloat3('cameraOffset', offsetX, offsetY, offsetZ);
+          
+          effect.setFloat('intensity', isInLeaves ? 1.0 : 0.0);
+        } else {
+          effect.setFloat('intensity', 0.0);
+        }
+      } else {
+        effect.setFloat('intensity', 0.0);
+      }
+    };
+
+    scene.onBeforeRenderObservable.add(checkCameraInLeaves);
+    
+    console.log('[GameSession] Leaf trigger detection and post-process set up');
+  }
+
+  function checkCameraInLeaves() {
+    if (!scene || !scene.activeCamera) {
+      currentTreeIndex = -1;
+      currentBushIndex = -1;
+      return;
+    }
+
+    const camPos = scene.activeCamera.position;
+    
+    // Check trees first
+    let treeIndex = -1;
+    if (treeManager) {
+      treeIndex = treeManager.checkCameraInLeaves(camPos.x, camPos.y, camPos.z);
+    }
+    
+    // Check bushes if not in a tree
+    let bushIndex = -1;
+    if (treeIndex < 0 && bushManager) {
+      bushIndex = bushManager.checkCameraInBushes(camPos.x, camPos.y, camPos.z);
+    }
+
+    const inFoliage = treeIndex >= 0 || bushIndex >= 0;
+
+    if (inFoliage && !wasInLeavesLastFrame) {
+      onLeavesEnter(camPos.x, camPos.y, camPos.z);
+    } else if (!inFoliage && wasInLeavesLastFrame) {
+      onLeavesLeave();
+    }
+
+    wasInLeavesLastFrame = inFoliage;
+    currentTreeIndex = treeIndex;
+    currentBushIndex = bushIndex;
+  }
+
+  function onLeavesEnter(x: number, y: number, z: number) {
+    console.log('[GameSession] Camera entered tree leaves');
+    
+    leafEntryX = x;
+    leafEntryY = y;
+    leafEntryZ = z;
+    
+    try {
+      const audioManager = AudioManager.getInstance();
+      audioManager.play('rustle', { volume: 0.5 });
+    } catch (e) {
+      console.warn('[GameSession] AudioManager not initialized yet');
+    }
+  }
+
+  function onLeavesLeave() {
+    console.log('[GameSession] Camera left tree leaves');
+    
+    selectedTextureIndex1 = Math.floor(Math.random() * 3);
+    selectedTextureIndex2 = Math.floor(Math.random() * 3);
+    
+    while (selectedTextureIndex2 === selectedTextureIndex1) {
+      selectedTextureIndex2 = Math.floor(Math.random() * 3);
+    }
+    
+    console.log(`[GameSession] Next leaf entry will use texture sets ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
+    
+    try {
+      const audioManager = AudioManager.getInstance();
+      audioManager.play('rustle', { volume: 0.4 });
+    } catch (e) {
+      console.warn('[GameSession] AudioManager not initialized yet');
+    }
+  }
+  
+  // Loading phase methods
+  const sendClientReady = () => {
+    if (networkClient) {
+      networkClient.sendLow(Opcode.ClientReady, {});
+      console.log('[GameSession] Sent ClientReady');
+    }
+  };
+  
+  const onPlayersReadyUpdate = (callback: (data: any) => void) => {
+    // Just watch the reactive refs instead - this is kept for backwards compat
+    watch([loadingSecondsRemaining, loadingReadyPlayers, loadingTotalPlayers], () => {
+      callback({
+        secondsRemaining: loadingSecondsRemaining.value,
+        readyPlayers: loadingReadyPlayers.value,
+        totalPlayers: loadingTotalPlayers.value
+      });
+    });
+  };
+  
+  const onGameBegin = (callback: () => void) => {
+    // If game already began (we missed it), call immediately
+    if (gameBegun.value) {
+      console.log('[GameSession] GameBegin already received, calling callback immediately');
+      callback();
+      return;
+    }
+    // Otherwise store the callback for when it fires
+    gameBeginCallbacks.push(callback);
+  };
+
   return {
     init,
     dispose,
@@ -937,6 +1332,14 @@ export function useGameSession() {
     killFeedEntries,
     // Round system
     roundState,
+    // Loading phase
+    sendClientReady,
+    onPlayersReadyUpdate,
+    onGameBegin,
+    loadingSecondsRemaining,
+    loadingReadyPlayers,
+    loadingTotalPlayers,
+    gameBegun,
     getScene: () => scene,
     getCamera: () => cameraController?.getCamera() || null,
     getPlayerTransform: () => myTransform.value,

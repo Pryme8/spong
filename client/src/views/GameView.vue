@@ -64,20 +64,85 @@
       :winner="roundState?.winner.value || null"
       :scores="roundState?.scores.value || []"
     />
+
+    <!-- Loading Dialog (during level preload) -->
+    <v-dialog
+      v-model="showLoadingOverlay"
+      max-width="500"
+      persistent
+    >
+      <v-card>
+        <v-card-title class="text-h5 text-center pa-6">
+          Loading Game
+        </v-card-title>
+        <v-card-text>
+          <div class="text-center mb-4">
+            <v-progress-circular
+              :size="60"
+              :width="6"
+              color="primary"
+              indeterminate
+            ></v-progress-circular>
+          </div>
+          <div class="text-center text-h6 mb-4">
+            {{ loadingSecondsRemaining }}s remaining
+          </div>
+          <v-list density="compact">
+            <v-list-subheader>Players Ready ({{ readyPlayerCount }} / {{ totalPlayerCount }})</v-list-subheader>
+            <v-list-item
+              v-for="player in players.values()"
+              :key="player.id"
+            >
+              <template v-slot:prepend>
+                <v-icon
+                  :color="player.color"
+                  icon="mdi-account-circle"
+                  size="small"
+                ></v-icon>
+              </template>
+              <v-list-item-title>{{ player.id }}</v-list-item-title>
+              <template v-slot:append>
+                <v-icon
+                  v-if="readyPlayerIds.includes(player.id)"
+                  color="success"
+                  icon="mdi-check-circle"
+                ></v-icon>
+                <v-icon
+                  v-else
+                  color="warning"
+                  icon="mdi-clock-outline"
+                ></v-icon>
+              </template>
+            </v-list-item>
+          </v-list>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useGameSession } from '../composables/useGameSession';
-import { PLAYER_MAX_HEALTH } from '@spong/shared';
+import { PLAYER_MAX_HEALTH, Opcode } from '@spong/shared';
 import GameHud from '../components/GameHud.vue';
 import TouchController from '../components/TouchController.vue';
 import ShadowDebugPanel from '../components/ShadowDebugPanel.vue';
 import Scoreboard from '../components/Scoreboard.vue';
 import CountdownOverlay from '../components/CountdownOverlay.vue';
 import VictoryScreen from '../components/VictoryScreen.vue';
+
+const props = defineProps<{
+  isLoadingPhase?: boolean;
+  levelSeed?: string;
+  roomId?: string;
+  levelConfig?: any;
+}>();
+
+const emit = defineEmits<{
+  'loading-complete': []
+}>();
 
 const route = useRoute();
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -86,14 +151,39 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
   || window.innerWidth < 768;
 
-// Get room info and config from route
-const levelSeed = route.query.seed as string || null;
-const targetRoom = levelSeed ? `level_${levelSeed}` : 'lobby';
+// Get room info and config - route determines behavior
+let levelSeed: string | null = null;
+let targetRoom: string;
 
-// Parse config from URL params
-const levelConfig: any = {};
-if (route.query.pistols) {
+if (route.name === 'level') {
+  // /level/ route: ALWAYS create a level_ room
+  levelSeed = (route.query.seed as string) || 'test';
+  targetRoom = `level_${levelSeed}`;
+  console.log('[GameView] Level route - forcing level room:', targetRoom);
+} else {
+  // /game/ route or other: use props or query params
+  levelSeed = props.levelSeed || (route.query.seed as string) || null;
+  targetRoom = props.roomId || (route.query.room as string) || (levelSeed ? `level_${levelSeed}` : 'lobby');
+  console.log('[GameView] Game route - using provided room:', targetRoom);
+}
+
+console.log('[GameView] Final config:', {
+  routeName: route.name,
+  levelSeed,
+  targetRoom
+});
+
+// Parse config from props or URL params
+const levelConfig: any = props.levelConfig || {};
+if (!props.levelConfig && route.query.pistols) {
   levelConfig.pistolCount = parseInt(route.query.pistols as string);
+}
+
+// Parse disable flags from URL (e.g. ?disable=trees,bushes,rocks,items)
+if (route.query.disable) {
+  const disableFlags = (route.query.disable as string).split(',').map(s => s.trim());
+  levelConfig.disableSpawns = disableFlags;
+  console.log('[GameView] Disabling spawns:', disableFlags);
 }
 
 // Check for shadowDebug URL flag
@@ -140,6 +230,13 @@ const {
 // Scoreboard visibility (Tab key)
 const showScoreboard = ref(false);
 
+// Loading dialog state
+const showLoadingOverlay = ref(false);
+const loadingSecondsRemaining = ref(0);
+const readyPlayerIds = ref<string[]>([]);
+const totalPlayerCount = computed(() => players.value.size);
+const readyPlayerCount = computed(() => readyPlayerIds.value.length);
+
 // Health computed
 const maxHealth = PLAYER_MAX_HEALTH;
 const healthPercent = computed(() => {
@@ -177,6 +274,12 @@ function handleKeyDown(e: KeyboardEvent) {
     e.preventDefault();
     showScoreboard.value = true;
   }
+  
+  // F12 to toggle Babylon inspector
+  if (e.code === 'F12') {
+    e.preventDefault();
+    toggleInspector();
+  }
 }
 
 function handleKeyUp(e: KeyboardEvent) {
@@ -186,6 +289,27 @@ function handleKeyUp(e: KeyboardEvent) {
   }
 }
 
+// Toggle Babylon.js inspector for debugging
+async function toggleInspector() {
+  const scene = session.getScene();
+  if (!scene) return;
+  
+  if (scene.debugLayer.isVisible()) {
+    scene.debugLayer.hide();
+  } else {
+    await import('@babylonjs/inspector');
+    scene.debugLayer.show({ embedMode: true });
+  }
+}
+
+// Set initial loading overlay state from prop
+showLoadingOverlay.value = props.isLoadingPhase || false;
+
+// Watch for loading phase prop changes
+watch(() => props.isLoadingPhase, (isLoading) => {
+  showLoadingOverlay.value = isLoading || false;
+});
+
 // Initialize session when mounted
 onMounted(async () => {
   if (!canvasRef.value) return;
@@ -194,8 +318,29 @@ onMounted(async () => {
     roomId: targetRoom,
     levelSeed: levelSeed || undefined,
     isMobile,
-    levelConfig: Object.keys(levelConfig).length > 0 ? levelConfig : undefined
+    levelConfig: Object.keys(levelConfig).length > 0 ? levelConfig : undefined,
+    isLoadingPhase: props.isLoadingPhase
   });
+  
+  // If in loading phase, watch reactive loading state from session
+  if (props.isLoadingPhase) {
+    console.log('[GameView] In loading phase - watching session loading state');
+    
+    // Watch loading state reactively (handlers registered inside init, never missed)
+    watch(() => session.loadingSecondsRemaining.value, (val) => {
+      loadingSecondsRemaining.value = val;
+    });
+    watch(() => session.loadingReadyPlayers.value, (val) => {
+      readyPlayerIds.value = val;
+    }, { deep: true });
+    
+    // Listen for GameBegin (safe even if it already fired)
+    session.onGameBegin(() => {
+      console.log('[GameView] Game begin - hiding loading overlay');
+      showLoadingOverlay.value = false;
+      emit('loading-complete');
+    });
+  }
   
   // Add keyboard listeners
   window.addEventListener('keydown', handleKeyDown);
