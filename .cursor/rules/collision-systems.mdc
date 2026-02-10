@@ -1,0 +1,160 @@
+---
+description: Collision system implementation standards
+globs: "**/collision*.ts"
+alwaysApply: false
+---
+
+# Collision Systems Standards
+
+## Core Principles
+
+1. **Reuse Collision Functions**: Don't reimplement AABB, raycast, etc.
+2. **Consistent Format**: All colliders use standard format (minX, minY, minZ, maxX, maxY, maxZ)
+3. **Performance**: Build collision data once per tick, not per entity
+
+## Collision Data Format
+
+### Block Colliders (Building Blocks)
+```typescript
+// ✅ GOOD - Standard AABB format
+interface BoxCollider {
+  minX: number; minY: number; minZ: number;
+  maxX: number; maxY: number; maxZ: number;
+}
+
+const blockColliders: BoxCollider[] = [];
+
+// Generate from voxel data
+for (let x = 0; x < gridSize; x++) {
+  for (let y = 0; y < gridSize; y++) {
+    for (let z = 0; z < gridSize; z++) {
+      if (voxelData[index] !== 0) {
+        blockColliders.push({
+          minX: worldX - halfCell,
+          minY: worldY - halfCell,
+          minZ: worldZ - halfCell,
+          maxX: worldX + halfCell,
+          maxY: worldY + halfCell,
+          maxZ: worldZ + halfCell
+        });
+      }
+    }
+  }
+}
+```
+
+## Client-Server Collision Consistency
+
+### Critical: Same Collision Data on Both Sides
+
+```typescript
+// ✅ GOOD - Client builds same colliders as server
+// Server (Room.ts)
+const building = this.buildingEntity.get(COMP_BUILDING);
+const blockColliders = buildBlockColliders(building);  // Standard function
+
+// Client (BuildingCollisionManager.ts)
+const blockColliders = buildBlockColliders(this.buildingData);  // Same function!
+
+// ❌ BAD - Client missing collision data
+// Server has blockColliders, client has nothing
+```
+
+## Collision Resolution Order
+
+### Must Process in Consistent Order
+1. X-axis collision
+2. Y-axis collision (gravity, ground)
+3. Z-axis collision
+
+```typescript
+// ✅ GOOD - Consistent order
+// Step 1: Move + resolve X
+state.posX += state.velX * dt;
+resolveCollisionX(state, colliders);
+
+// Step 2: Move + resolve Y
+state.posY += state.velY * dt;
+resolveCollisionY(state, colliders);
+
+// Step 3: Move + resolve Z
+state.posZ += state.velZ * dt;
+resolveCollisionZ(state, colliders);
+
+// ❌ BAD - Wrong order or missing axes
+state.posY += state.velY * dt;  // Y first breaks step-up
+resolveCollisionY(state, colliders);
+```
+
+## Building Block Collision
+
+### Server: Generate Block Colliders
+Location: `server/src/rooms/Room.ts` (lines 1749-1792)
+
+```typescript
+// Build block colliders from building entity
+let blockColliders: BoxCollider[] | undefined;
+if (this.buildingEntity) {
+  const building = this.buildingEntity.get(COMP_BUILDING);
+  if (building) {
+    blockColliders = [];
+    for each voxel in building.voxelData {
+      if (voxel !== 0) {
+        // Transform local grid position to world space
+        blockColliders.push({...});
+      }
+    }
+  }
+}
+
+// Pass to character physics
+stepCharacter(state, input, dt, voxelGrid, trees, rocks, blockColliders);
+```
+
+### Client: Must Match Server
+Location: `client/src/engine/BuildingCollisionManager.ts` (to be created)
+
+```typescript
+class BuildingCollisionManager {
+  getBlockColliders(): BoxCollider[] {
+    // MUST generate colliders exactly like server
+    // Same loop, same transform, same format
+  }
+}
+```
+
+## Ground Detection Pattern
+
+```typescript
+// Check all collision types for ground
+const groundCheckY = state.posY - 0.05;  // Probe slightly below
+
+state.isGrounded = 
+  // Voxel terrain
+  aabbVsVoxelGrid(voxelGrid, state.posX, groundCheckY, state.posZ, half, half, half) ||
+  // Building blocks
+  (blockColliders?.length > 0 && aabbVsBlocks(state.posX, groundCheckY, state.posZ, half, half, blockColliders));
+```
+
+## Performance Best Practices
+
+### Build Once Per Tick
+```typescript
+// ✅ GOOD - Build collision data once
+const blockColliders = buildBlockColliders(building);
+for (const player of players) {
+  stepCharacter(player.state, player.input, dt, voxelGrid, trees, rocks, blockColliders);
+}
+
+// ❌ BAD - Rebuilding for each entity
+for (const player of players) {
+  const blockColliders = buildBlockColliders(building);  // Wasteful!
+  stepCharacter(player.state, player.input, dt, voxelGrid, trees, rocks, blockColliders);
+}
+```
+
+### Spatial Partitioning (Future)
+When building count > 100 blocks, consider spatial partitioning:
+- Grid-based bucketing
+- Only check nearby blocks
+- Target: < 1ms collision query

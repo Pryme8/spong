@@ -1,0 +1,59 @@
+---
+description: TODO list management - check, update, and maintain project tasks
+alwaysApply: true
+---
+
+# TODO List Management
+
+## Location
+The project maintains a master TODO list at: `TODO.md` (root directory)
+
+## Agent Responsibilities
+
+### 1. Check TODO List
+When starting a task, **ALWAYS** read `TODO.md` to see if your work relates to any existing TODO items.
+
+### 2. Mark Completed Items
+**CRITICAL: You must ALWAYS get explicit human confirmation before marking any item as complete.**
+
+Before marking a TODO item as complete:
+- Ask the user to confirm the task is complete and ready to be marked off
+- Wait for explicit approval (e.g., "yes", "mark it complete", "ok")
+- DO NOT mark items complete without this confirmation, even if you believe the work is done
+
+Once confirmed by the user:
+- Move it from "Current Tasks" to "Completed Tasks" section
+- Apply strikethrough formatting: `- [x] ~~Task description~~`
+- Add a brief note if helpful: `- [x] ~~Task~~ (Completed: brief note)`
+
+### 3. Add New TODOs
+As you work, you may discover:
+- Related tasks that should be done
+- Technical debt to address
+- Follow-up work needed
+- Dependencies or blockers
+
+**Add these to the TODO list immediately** under "Current Tasks"
+
+### 4. Keep It Organized
+- Use clear, actionable descriptions
+- Break large tasks into smaller items
+- Group related tasks together
+- Use checkboxes: `- [ ]` for incomplete, `- [x]` for complete
+
+## Example Updates
+
+```markdown
+## Current Tasks
+- [ ] New task discovered during implementation
+- [ ] Another follow-up task
+
+## Completed Tasks
+- [x] ~~Enable build system in game cycle~~ (Completed: integrated into GameView.vue)
+```
+
+## Format Rules
+- Use markdown checkboxes for all tasks
+- Keep descriptions concise but clear
+- Include technical details when relevant
+- Update the list in the same commit as the related work

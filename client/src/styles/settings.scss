@@ -1,0 +1,4 @@
+// Vuetify SASS variables for Nexus theme
+@use 'vuetify/settings' with (
+  $color-pack: false
+);

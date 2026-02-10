@@ -1,0 +1,444 @@
+import { Room } from './Room.js';
+import { ConnectionState, ConnectionHandler } from '../network/ConnectionHandler.js';
+import { 
+  Opcode, 
+  RoomJoinMessage, 
+  RoomLeaveMessage, 
+  RoomStateMessage, 
+  PlayerJoinedMessage, 
+  PlayerLeftMessage,
+  BlockPlaceMessage,
+  BlockRemoveMessage,
+  BuildingCreateMessage,
+  BuildingTransformMessage,
+  BuildingDestroyMessage,
+  LadderPlaceMessage,
+  LadderDestroyMessage,
+  ChatMessagePayload,
+  ChatBroadcastPayload,
+  LobbyConfigPayload,
+  LobbyConfigUpdatePayload,
+  LobbyStartMessage,
+  LobbyStartingPayload,
+  decodeInput,
+  decodeShoot,
+  encodeProjectileSpawn,
+  encodeProjectileSpawnBatch
+} from '@spong/shared';
+
+export class RoomManager {
+  private rooms = new Map<string, Room>();
+  private connectionHandler: ConnectionHandler;
+
+  constructor(connectionHandler: ConnectionHandler, _tickRate: number = 20) {
+    this.connectionHandler = connectionHandler;
+
+    // Register message handlers
+    this.connectionHandler.registerMessageHandler(Opcode.RoomJoin, (conn, data) => {
+      this.handleRoomJoin(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.RoomLeave, (conn, data) => {
+      this.handleRoomLeave(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.ReloadRequest, (conn, _data) => {
+      this.handleReloadRequest(conn, _data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.ItemDrop, (conn, _data) => {
+      this.handleItemDrop(conn, _data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.ItemTossLand, (conn, data) => {
+      this.handleItemTossLand(conn, data);
+    });
+    
+    // Register binary handlers
+    this.connectionHandler.registerBinaryHandler(Opcode.PlayerInput, (conn, buffer) => {
+      this.handlePlayerInput(conn, buffer);
+    });
+
+    this.connectionHandler.registerBinaryHandler(Opcode.ShootRequest, (conn, buffer) => {
+      this.handleShootRequest(conn, buffer);
+    });
+
+    // Building system handlers
+    this.connectionHandler.registerMessageHandler(Opcode.BuildingCreate, (conn, data) => {
+      this.handleBuildingCreate(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.BlockPlace, (conn, data) => {
+      this.handleBlockPlace(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.BlockRemove, (conn, data) => {
+      this.handleBlockRemove(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.BuildingTransform, (conn, data) => {
+      this.handleBuildingTransform(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.BuildingDestroy, (conn, data) => {
+      this.handleBuildingDestroy(conn, data);
+    });
+
+    // Ladder system handlers
+    this.connectionHandler.registerMessageHandler(Opcode.LadderPlace, (conn, data) => {
+      this.handleLadderPlace(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.LadderDestroy, (conn, data) => {
+      this.handleLadderDestroy(conn, data);
+    });
+
+    // Lobby system handlers
+    this.connectionHandler.registerMessageHandler(Opcode.ChatMessage, (conn, data) => {
+      this.handleChatMessage(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.LobbyConfig, (conn, data) => {
+      this.handleLobbyConfig(conn, data);
+    });
+
+    this.connectionHandler.registerMessageHandler(Opcode.LobbyStart, (conn, data) => {
+      this.handleLobbyStart(conn, data);
+    });
+    
+    // Register disconnect handler
+    this.connectionHandler.registerDisconnectHandler((conn) => {
+      this.handleDisconnect(conn);
+    });
+  }
+
+  private async handleRoomJoin(conn: ConnectionState, data: RoomJoinMessage) {
+    const { roomId, config } = data;
+
+    // Get or create room
+    let room = this.rooms.get(roomId);
+    if (!room) {
+      room = new Room(roomId, this.connectionHandler);
+      
+      // If config is provided (e.g., from URL params), set it before initializing
+      if (config) {
+        room.setLobbyConfig(config);
+      }
+      
+      await room.initialize();
+      this.rooms.set(roomId, room);
+    }
+
+    // Add player to room
+    const player = room.addPlayer(conn);
+
+    // Send room state to the joining player
+    const roomState: RoomStateMessage = {
+      roomId,
+      players: room.getPlayerInfoList(),
+      myEntityId: player.entityId,
+      ownerId: room.getOwnerId() || conn.id
+    };
+    this.connectionHandler.sendLow(conn, Opcode.RoomState, roomState);
+
+    // Broadcast to other players that someone joined
+    const otherConnections = room.getAllConnections().filter(c => c.id !== conn.id);
+    if (otherConnections.length > 0) {
+      const joinedMsg: PlayerJoinedMessage = {
+        player: room.getPlayerInfo(player.entityId)
+      };
+      otherConnections.forEach(c => {
+        this.connectionHandler.sendLow(c, Opcode.PlayerJoined, joinedMsg);
+      });
+    }
+
+    console.log(`Connection ${conn.id} joined room ${roomId}`);
+  }
+
+  private handleRoomLeave(conn: ConnectionState, data: RoomLeaveMessage) {
+    const { roomId } = data;
+    const room = this.rooms.get(roomId);
+
+    if (!room) {
+      this.connectionHandler.sendError(conn, 'ROOM_NOT_FOUND', `Room ${roomId} not found`);
+      return;
+    }
+
+    const player = room.removePlayer(conn.id);
+    if (player) {
+      // Broadcast to other players
+      const leftMsg: PlayerLeftMessage = {
+        playerId: player.id,
+        entityId: player.entityId
+      };
+      room.getAllConnections().forEach(c => {
+        this.connectionHandler.sendLow(c, Opcode.PlayerLeft, leftMsg);
+      });
+
+      // Clean up connection state
+      conn.roomId = undefined;
+      conn.entityId = undefined;
+
+      // Remove room if empty
+      if (room.getPlayerCount() === 0) {
+        room.dispose();
+        this.rooms.delete(roomId);
+        console.log(`Room ${roomId} removed (empty)`);
+      }
+    }
+  }
+
+  getRoom(roomId: string): Room | undefined {
+    return this.rooms.get(roomId);
+  }
+
+  private handlePlayerInput(conn: ConnectionState, buffer: ArrayBuffer) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+    
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+    
+    const input = decodeInput(buffer);
+    room.applyInput(conn.id, input);
+  }
+
+  private handleShootRequest(conn: ConnectionState, buffer: ArrayBuffer) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    // Decode the aim direction from the shoot packet
+    const shootData = decodeShoot(buffer);
+
+    // Spawn projectile(s) using the client-provided aim direction
+    const spawnData = room.spawnProjectile(conn.id, shootData.dirX, shootData.dirY, shootData.dirZ);
+    if (!spawnData) return;
+
+    // Handle both single projectile and multiple pellets (shotgun)
+    if (Array.isArray(spawnData)) {
+      // Multi-pellet: use batch encoding (one WebSocket frame for all pellets)
+      const batchBuffer = encodeProjectileSpawnBatch(Opcode.ProjectileSpawnBatch, spawnData);
+      this.connectionHandler.broadcast(room.getAllConnections(), batchBuffer);
+    } else {
+      // Single projectile: use original encoding
+      const spawnBuffer = encodeProjectileSpawn(Opcode.ProjectileSpawn, spawnData);
+      this.connectionHandler.broadcast(room.getAllConnections(), spawnBuffer);
+    }
+  }
+
+  private handleReloadRequest(conn: ConnectionState, _data: any) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleReloadRequest(conn.id);
+  }
+
+  private handleItemDrop(conn: ConnectionState, _data: any) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleItemDrop(conn.id);
+  }
+
+  private handleItemTossLand(conn: ConnectionState, data: any) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleItemTossLand(conn.id, data.posX, data.posY, data.posZ);
+  }
+
+  private handleBlockPlace(conn: ConnectionState, data: BlockPlaceMessage) {
+    console.log(`[RoomManager] handleBlockPlace - conn: ${conn.id}, roomId: ${conn.roomId}, entityId: ${conn.entityId}, data:`, data);
+    
+    if (!conn.roomId || conn.entityId === undefined) {
+      console.warn('[RoomManager] BlockPlace - no room or entity ID');
+      return;
+    }
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) {
+      console.warn('[RoomManager] BlockPlace - room not found:', conn.roomId);
+      return;
+    }
+
+    room.handleBlockPlace(conn.entityId, data);
+  }
+
+  private handleBlockRemove(conn: ConnectionState, data: BlockRemoveMessage) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleBlockRemove(conn.entityId, data);
+  }
+
+  private handleBuildingCreate(conn: ConnectionState, data: BuildingCreateMessage) {
+    if (!conn.roomId || conn.entityId === undefined) {
+      console.warn('[RoomManager] BuildingCreate - no room or entity ID');
+      return;
+    }
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) {
+      console.warn('[RoomManager] BuildingCreate - room not found:', conn.roomId);
+      return;
+    }
+
+    room.handleBuildingCreate(conn.entityId, data);
+  }
+
+  private handleBuildingTransform(conn: ConnectionState, data: BuildingTransformMessage) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleBuildingTransform(conn.entityId, data);
+  }
+
+  private handleBuildingDestroy(conn: ConnectionState, data: BuildingDestroyMessage) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleBuildingDestroy(conn.entityId, data);
+  }
+
+  private handleDisconnect(conn: ConnectionState) {
+    if (conn.roomId && conn.entityId !== undefined) {
+      const room = this.rooms.get(conn.roomId);
+      if (room) {
+        const player = room.removePlayer(conn.id);
+        if (player) {
+          const leftMsg: PlayerLeftMessage = {
+            playerId: player.id,
+            entityId: player.entityId
+          };
+          room.getAllConnections().forEach(c => {
+            this.connectionHandler.sendLow(c, Opcode.PlayerLeft, leftMsg);
+          });
+
+          console.log(`Player ${conn.id} disconnected from room ${conn.roomId}`);
+
+          if (room.getPlayerCount() === 0) {
+            room.dispose();
+            this.rooms.delete(conn.roomId);
+            console.log(`Room ${conn.roomId} removed (empty)`);
+          }
+        }
+      }
+    }
+  }
+
+  private handleLadderPlace(conn: ConnectionState, data: LadderPlaceMessage) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleLadderPlace(conn.entityId, data);
+  }
+
+  private handleLadderDestroy(conn: ConnectionState, data: LadderDestroyMessage) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleLadderDestroy(conn.entityId, data);
+  }
+
+  private handleChatMessage(conn: ConnectionState, data: ChatMessagePayload) {
+    if (!conn.roomId) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    const player = room.getPlayer(conn.id);
+    if (!player) return;
+
+    const broadcastMsg: ChatBroadcastPayload = {
+      senderId: player.id,
+      senderColor: player.color,
+      text: data.text,
+      timestamp: Date.now()
+    };
+
+    const connections = room.getAllConnections();
+    connections.forEach(c => {
+      this.connectionHandler.sendLow(c, Opcode.ChatBroadcast, broadcastMsg);
+    });
+  }
+
+  private handleLobbyConfig(conn: ConnectionState, data: LobbyConfigPayload) {
+    if (!conn.roomId) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    if (room.getOwnerId() !== conn.id) {
+      this.connectionHandler.sendError(conn, 'NOT_OWNER', 'Only the room owner can change lobby settings');
+      return;
+    }
+
+    room.setLobbyConfig(data);
+
+    const updateMsg: LobbyConfigUpdatePayload = {
+      config: data
+    };
+
+    const connections = room.getAllConnections();
+    connections.forEach(c => {
+      this.connectionHandler.sendLow(c, Opcode.LobbyConfigUpdate, updateMsg);
+    });
+  }
+
+  private handleLobbyStart(conn: ConnectionState, _data: LobbyStartMessage) {
+    if (!conn.roomId) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    if (room.getOwnerId() !== conn.id) {
+      this.connectionHandler.sendError(conn, 'NOT_OWNER', 'Only the room owner can start the game');
+      return;
+    }
+
+    const config = room.getLobbyConfig();
+    const seed = config.seed || Math.random().toString(36).substring(2, 15);
+    const finalSeed = `${seed}_${conn.id}`;
+
+    const startingMsg: LobbyStartingPayload = {
+      seed: finalSeed,
+      config: {
+        seed: finalSeed,
+        pistolCount: config.pistolCount
+      }
+    };
+
+    const connections = room.getAllConnections();
+    connections.forEach(c => {
+      this.connectionHandler.sendLow(c, Opcode.LobbyStarting, startingMsg);
+    });
+
+    console.log(`[Lobby] Room ${conn.roomId} starting game with seed ${finalSeed}, pistols: ${config.pistolCount ?? 30}`);
+  }
+
+  getAllRooms(): Room[] {
+    return Array.from(this.rooms.values());
+  }
+
+  dispose() {
+    this.rooms.forEach(room => room.dispose());
+    this.rooms.clear();
+  }
+}

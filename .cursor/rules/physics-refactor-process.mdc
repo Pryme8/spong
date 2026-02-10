@@ -1,0 +1,187 @@
+---
+description: Guidelines for refactoring physics systems safely
+globs: "**/{physics,collision,transform,LocalTransform,RemoteTransform}*.ts"
+alwaysApply: false
+---
+
+# Physics Refactor Process Guidelines
+
+## Refactor Priorities (Must Follow Order)
+
+### Priority 1: Fix Client Prediction ⚡ (CURRENT)
+**Status**: In Progress
+**Goal**: Make player gravity work on building blocks
+
+Tasks:
+1. Create `BuildingCollisionManager` 
+2. Integrate with `GameSession`
+3. Update `LocalTransform` to use block colliders
+4. Update `useTransformSync` to pass collision data
+5. Test and verify gravity works
+
+**DO NOT** move to Priority 2 until Priority 1 is complete and tested!
+
+### Priority 2: Unify Physics Systems 🔧
+Only start after Priority 1 is working!
+
+### Priority 3: Unified Collision Manager 🎯  
+Only start after Priority 2 is working!
+
+### Priority 4: Building Visualization 🎨
+Optional - only if requested
+
+## Safe Refactoring Rules
+
+### 1. Keep Backward Compatibility
+```typescript
+// ✅ GOOD - Add optional parameters
+function stepCharacter(
+  state: CharacterState,
+  input: CharacterInput,
+  dt: number,
+  voxelGrid?: VoxelGrid,
+  treeColliders?: TreeCollider[],
+  rockMeshes?: RockMesh[],
+  blockColliders?: BoxCollider[]  // New parameter - optional!
+) {
+  // Old code works, new code gets more data
+}
+
+// ❌ BAD - Breaking changes
+function stepCharacter(
+  physicsComponent: PhysicsComponent,  // Changed interface!
+  collisionWorld: CollisionWorld       // Different parameters!
+) {
+  // This breaks all existing code
+}
+```
+
+### 2. Test Before Removing Old Code
+```typescript
+// ✅ GOOD - Gradual migration
+// Step 1: Add new system alongside old
+const newResult = newPhysicsSystem(state);
+const oldResult = oldPhysicsSystem(state);
+
+// Step 2: Verify they match
+if (Math.abs(newResult.posY - oldResult.posY) > 0.001) {
+  console.error('Physics mismatch!');
+}
+
+// Step 3: Use old system until verified
+return oldResult;
+
+// Step 4: After testing, switch to new
+return newResult;
+
+// Step 5: Finally remove old system
+```
+
+### 3. Incremental Changes
+- ✅ Change one file at a time
+- ✅ Test after each change
+- ✅ Commit working states frequently
+- ❌ Don't refactor multiple systems at once
+- ❌ Don't change client and server simultaneously
+
+### 4. Preserve Client-Server Parity
+```typescript
+// When updating physics code:
+// 1. Update shared code first
+// 2. Test server with new code
+// 3. Test client with new code  
+// 4. Verify they still match
+
+// ❌ BAD - Only updating one side
+// Server: Uses new unified physics
+// Client: Still uses old physics
+// Result: Massive desync and rubber-banding!
+```
+
+## Testing Checklist for Each Change
+
+After ANY physics/collision change:
+
+- [ ] Player can walk on flat terrain
+- [ ] Player can walk on voxel terrain slopes
+- [ ] Player can walk on building blocks
+- [ ] Player falls off edges correctly
+- [ ] Player can jump normally
+- [ ] Step-up works (can climb onto 0.6 unit blocks)
+- [ ] No visual jitter or rubber-banding
+- [ ] No console errors
+- [ ] Server and client logs show matching positions
+
+## Rollback Strategy
+
+### If Something Breaks
+1. **Don't panic** - we have a plan
+2. **Identify which change caused it** - use git diff
+3. **Revert that specific change** - keep other progress
+4. **Document the issue** - add to PHYSICS_REFACTOR_PLAN.md
+5. **Fix in isolation** - create test case first
+6. **Re-apply carefully** - with fix included
+
+### Keep Old Code Accessible
+```typescript
+// Don't delete old code immediately
+// Move to archive file for reference
+
+// old_physics.ts.backup
+export function oldStepCharacter(...) {
+  // Original implementation kept for reference
+}
+```
+
+## Performance Monitoring
+
+Track these metrics during refactor:
+
+```typescript
+// Add timing to physics step
+const startTime = performance.now();
+stepCharacter(state, input, dt, ...colliders);
+const elapsed = performance.now() - startTime;
+
+if (elapsed > 2.0) {
+  console.warn(`Physics step took ${elapsed}ms (target: < 2ms)`);
+}
+```
+
+**Performance Targets:**
+- Physics step: < 2ms per entity
+- Collision query: < 1ms
+- Frame time: < 16.67ms (60 FPS)
+
+## Code Review Before Committing
+
+Before committing physics changes:
+
+1. **Client-server match?** Both use same code path?
+2. **All collision data passed?** No missing parameters?
+3. **Ground detection complete?** Checks all surface types?
+4. **Backward compatible?** Old code still works?
+5. **Tests pass?** All checklist items verified?
+6. **Performance OK?** No new slowdowns?
+
+## Communication
+
+When stuck or uncertain:
+1. Check `PHYSICS_REFACTOR_PLAN.md` for context
+2. Check relevant rule files for standards
+3. Review existing working code for patterns
+4. Ask questions rather than guessing
+
+## Current Focus Files
+
+### Priority 1 Files (Current Work)
+- `client/src/engine/BuildingCollisionManager.ts` (TO CREATE)
+- `client/src/engine/LocalTransform.ts` (UPDATE lines 177, 216)
+- `client/src/composables/useTransformSync.ts` (UPDATE)
+- `client/src/composables/useGameSession.ts` (UPDATE)
+
+### Don't Touch Yet (Priority 2+)
+- `shared/src/physics.ts` (Wait for Priority 2)
+- `shared/src/collectablePhysics.ts` (Wait for Priority 2)
+- `shared/src/projectile.ts` (Wait for Priority 2)
+- `shared/src/collision.ts` (Wait for Priority 3)

@@ -1,0 +1,146 @@
+---
+description: Client-server physics synchronization standards
+alwaysApply: true
+---
+
+# Client-Server Physics Consistency
+
+## Critical Rule: Server is Authoritative
+
+- Server runs physics at 60Hz and broadcasts state at 30Hz
+- Client predicts locally at 60Hz, then reconciles with server
+- Any mismatch between client/server physics causes rubber-banding
+
+## Prediction Requirements
+
+### 1. Identical Code Path
+Client prediction MUST use the exact same physics code as server:
+
+```typescript
+// ✅ GOOD - Both import from shared
+import { stepCharacter, FIXED_TIMESTEP } from '@spong/shared';
+
+// Server
+stepCharacter(state, input, FIXED_TIMESTEP, ...collisionData);
+
+// Client  
+stepCharacter(state, input, deltaTime, ...collisionData);
+
+// ❌ BAD - Client uses different function
+stepCharacterClient(state, input, deltaTime);  // Don't do this!
+```
+
+### 2. Identical Collision Data
+Client MUST have access to the same collision data as server:
+
+**Current Issue (Being Fixed):**
+- ❌ Server: `stepCharacter(..., blockColliders)` 
+- ❌ Client: `stepCharacter(..., undefined)`  
+- ⚠️ This causes players to not fall off building blocks correctly
+
+**Target State:**
+- ✅ Server: `stepCharacter(..., blockColliders)`
+- ✅ Client: `stepCharacter(..., blockColliders)` 
+
+### 3. Identical Parameters
+ALL parameters to physics functions must match:
+
+```typescript
+// Server parameters
+stepCharacter(
+  pc.state,
+  pc.input,
+  FIXED_TIMESTEP,
+  this.voxelGrid,
+  this.treeColliders,
+  this.rockColliderMeshes,
+  blockColliders
+);
+
+// Client parameters - MUST MATCH
+stepCharacter(
+  this.state,
+  this.input,
+  deltaTime,
+  this.voxelGrid,
+  this.treeColliders,    // ⚠️ Currently missing
+  this.rockMeshes,       // ⚠️ Currently missing  
+  this.blockColliders    // ⚠️ Currently missing - CRITICAL BUG
+);
+```
+
+## Reconciliation Flow
+
+### When Server State Arrives
+1. Prune acknowledged inputs from buffer
+2. Save current predicted position
+3. Snap to server's authoritative state
+4. Replay unacknowledged inputs using SAME physics
+5. Calculate prediction error
+6. Absorb error into visual offset (smooth correction)
+
+### Input Buffer Management
+- Buffer stores: `{ sequence: number, input: CharacterInput }`
+- Max buffer size: 128 snapshots
+- Client sends input every frame with incrementing sequence
+- Server echoes `lastProcessedInput` in state updates
+
+## Network Message Synchronization
+
+### Building Block Synchronization
+Building blocks affect physics, so they MUST be synced:
+
+```typescript
+// Server sends building updates
+Opcode.BuildingInitialState  // When player joins
+Opcode.BlockPlace             // When block placed
+Opcode.BlockRemove            // When block removed
+
+// Client MUST handle in BOTH GameView and BuilderView
+networkClient.onLowFrequency(Opcode.BuildingInitialState, (data) => {
+  buildingCollisionManager.initialize(data);
+});
+
+networkClient.onLowFrequency(Opcode.BlockPlace, (data) => {
+  buildingCollisionManager.addBlock(data);
+});
+
+networkClient.onLowFrequency(Opcode.BlockRemove, (data) => {
+  buildingCollisionManager.removeBlock(data);
+});
+```
+
+## Testing Synchronization
+
+### Required Tests
+1. **No Rubber-Banding**: Smooth movement at 50ms, 100ms, 200ms latency
+2. **Gravity Works**: Player falls off all surfaces correctly
+3. **No Penetration**: Player doesn't clip through blocks/terrain
+4. **Ground Detection**: isGrounded accurate on all surfaces
+5. **Step-Up Works**: Player can step onto blocks (STEP_HEIGHT = 0.6)
+
+### Debug Synchronization Issues
+If rubber-banding occurs:
+1. Check client has ALL collision data server has
+2. Verify client and server use same physics constants
+3. Confirm collision resolution order matches
+4. Log prediction errors (should be < 0.1 units normally)
+
+## Current Known Issues (Being Fixed)
+
+1. **LocalTransform.ts lines 177, 216**: Missing tree, rock, and block colliders
+2. **BuildingCollisionManager**: Doesn't exist yet - needs creation
+3. **GameView**: Doesn't listen for building network messages
+4. **useTransformSync**: Doesn't pass collision managers to LocalTransform
+
+## File Locations
+
+### Server Physics
+- `server/src/rooms/Room.ts` - Lines 1658-2478 (physics tick)
+
+### Client Prediction  
+- `client/src/engine/LocalTransform.ts` - Lines 177, 216 (stepCharacter calls)
+- `client/src/composables/useTransformSync.ts` - Transform sync management
+
+### Shared Physics
+- `shared/src/physics.ts` - stepCharacter function (authoritative implementation)

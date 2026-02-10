@@ -1,0 +1,90 @@
+---
+description: Physics system implementation standards
+globs: "**/physics*.ts"
+alwaysApply: false
+---
+
+# Physics Systems Standards
+
+## Core Principles
+
+1. **No Duplication**: Never duplicate physics logic. Reuse existing systems.
+2. **Unified Constants**: Import from `shared/src/physicsConstants.ts` (when created)
+3. **Determinism**: Physics must be deterministic for client-server consistency
+
+## Current State (During Refactor)
+
+### Gravity Constants
+- **Target**: Single `GRAVITY = -20.0` constant
+- **Current**: Three different values (-20, -20, -9.8) - being unified
+- ⚠️ **Rule**: Use existing constants until unified, then update all references
+
+### Physics Step Pattern
+
+```typescript
+// ✅ GOOD - Reuses stepCharacter
+import { stepCharacter } from '@spong/shared';
+stepCharacter(state, input, dt, voxelGrid, treeColliders, rockMeshes, blockColliders);
+
+// ❌ BAD - Duplicates physics logic
+function myCustomPhysics(state, dt) {
+  state.velY += -20 * dt;  // Don't duplicate gravity!
+  // ... custom collision code ...
+}
+```
+
+## Client-Server Consistency
+
+### Critical Rule: Identical Physics
+- Client prediction and server physics MUST use the same code
+- Same parameters, same collision data, same order of operations
+- Any divergence causes rubber-banding and prediction errors
+
+```typescript
+// ✅ GOOD - Server and client use same function
+// Server (Room.ts)
+stepCharacter(pc.state, pc.input, FIXED_TIMESTEP, 
+  this.voxelGrid, this.treeColliders, this.rockColliderMeshes, blockColliders);
+
+// Client (LocalTransform.ts)  
+stepCharacter(this.state, this.input, deltaTime, 
+  this.voxelGrid, this.treeColliders, this.rockMeshes, this.blockColliders);
+
+// ❌ BAD - Client missing parameters
+stepCharacter(this.state, this.input, deltaTime, this.voxelGrid);
+```
+
+## Ground Detection
+
+### Must Check All Surfaces
+Ground detection must check ALL collision types where entities can stand:
+- Voxel terrain
+- Building blocks (AABB)
+- Trees (cylinders)
+- Rocks (meshes)
+
+```typescript
+// ✅ GOOD - Comprehensive ground check
+state.isGrounded = 
+  aabbVsVoxelGrid(voxelGrid, x, y, z, half, half, half) ||
+  (blockColliders && aabbVsBlocks(x, y, z, half, half, blockColliders)) ||
+  (treeColliders && aabbVsTrees(x, y, z, half, treeColliders));
+
+// ❌ BAD - Incomplete ground check
+state.isGrounded = aabbVsVoxelGrid(voxelGrid, x, y, z, half, half, half);
+```
+
+## Performance Guidelines
+
+- **Target**: < 2ms per entity physics step
+- **Collision Queries**: < 1ms per query
+- **Optimization**: Build collision structures once per tick, reuse for all entities
+
+## Testing Requirements
+
+When modifying physics:
+1. Test on flat terrain
+2. Test on voxel terrain with slopes
+3. Test on building blocks
+4. Test walking off edges (gravity must apply)
+5. Test with network latency (50ms, 100ms, 200ms)
