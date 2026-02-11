@@ -10,6 +10,7 @@
       :room-id="roomId"
       :my-entity-id="myEntityId"
       :players="players"
+      :kill-feed-entries="killFeedEntries"
       :player-health="playerHealth"
       :max-health="maxHealth"
       :player-armor="playerArmor"
@@ -17,6 +18,10 @@
       :player-stamina="playerStamina"
       :player-is-exhausted="playerIsExhausted"
       :player-has-infinite-stamina="playerHasInfiniteStamina"
+      :player-breath-remaining="playerBreathRemaining"
+      :player-max-breath="playerMaxBreath"
+      :player-is-underwater="playerIsUnderwater"
+      :player-is-in-water="playerIsInWater"
       :has-weapon="hasWeapon"
       :weapon-type="weaponType"
       :current-ammo="currentAmmo"
@@ -25,6 +30,7 @@
       :reload-progress="reloadProgress"
       :latency="latency"
       :ping-color-class="pingColorClass"
+      :hit-marker-visible="hitMarkerVisible"
     />
 
     <!-- Tree Parameter UI Overlay -->
@@ -570,6 +576,10 @@ const {
   playerStamina,
   playerIsExhausted,
   playerHasInfiniteStamina,
+  playerBreathRemaining,
+  playerMaxBreath,
+  playerIsUnderwater,
+  playerIsInWater,
   hasWeapon,
   weaponType,
   currentAmmo,
@@ -577,7 +587,9 @@ const {
   isReloading,
   reloadProgress,
   latency,
-  pingColorClass
+  pingColorClass,
+  killFeedEntries,
+  hitMarkerVisible
 } = session;
 
 // Health computed
@@ -585,7 +597,7 @@ const maxHealth = PLAYER_MAX_HEALTH;
 
 let scene: Scene | null = null;
 
-const showGround = ref(false);
+const showGround = ref(true);
 const seed = ref<string>('');
 const voxelCounts = ref({ wood: 0, leaf: 0 });
 const quadCount = ref(0);
@@ -694,7 +706,7 @@ watch([isInRoom, () => {
 
 function updateGroundVisibility() {
   if (!scene) return;
-  const ground = scene.getMeshByName('rangeGround');
+  const ground = scene.getMeshByName('level');
   if (ground) {
     ground.setEnabled(showGround.value);
   }
@@ -1035,7 +1047,7 @@ function onLeavesEnter() {
   
   try {
     const audioManager = AudioManager.getInstance();
-    audioManager.play('rustle', { volume: 0.5 });
+    audioManager.play('rustle', { volume: 0.5, position: { x: leafEntryX, y: leafEntryY, z: leafEntryZ } });
   } catch (e) {
     console.warn('[TreeView] AudioManager not initialized yet');
   }
@@ -1055,7 +1067,7 @@ function onLeavesLeave() {
   
   try {
     const audioManager = AudioManager.getInstance();
-    audioManager.play('rustle', { volume: 0.4 });
+    audioManager.play('rustle', { volume: 0.4, position: { x: leafEntryX, y: leafEntryY, z: leafEntryZ } });
   } catch (e) {
     console.warn('[TreeView] AudioManager not initialized yet');
   }

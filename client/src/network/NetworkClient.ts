@@ -188,10 +188,18 @@ export class NetworkClient {
     this.sendBinary(buffer);
   }
 
-  sendShoot(dirX: number, dirY: number, dirZ: number) {
+  sendShoot(
+    dirX: number, 
+    dirY: number, 
+    dirZ: number,
+    spawnX: number,
+    spawnY: number,
+    spawnZ: number
+  ) {
     const buffer = encodeShoot(Opcode.ShootRequest, {
       timestamp: performance.now(),
-      dirX, dirY, dirZ
+      dirX, dirY, dirZ,
+      spawnX, spawnY, spawnZ
     });
     this.sendBinary(buffer);
   }

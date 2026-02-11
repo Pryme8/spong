@@ -28,6 +28,8 @@ export {
   CHARACTER,
   COLLECTABLE,
   PROJECTILE,
+  WATER,
+  STAMINA,
   // Legacy flat exports (deprecated)
   MOVEMENT_ACCELERATION,
   MOVEMENT_MAX_SPEED,

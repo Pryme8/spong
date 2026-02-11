@@ -1,12 +1,21 @@
 import { FreeCamera, Vector3, Scene, Matrix } from '@babylonjs/core';
 
+// ============================================================================
+// Camera Mode Configuration
+// ============================================================================
+// Set FIRST_PERSON to true for first-person view, false for third-person
+// First-person: Camera at eye height, wider FOV, local player mesh hidden
+// Third-person: Camera orbits behind player at CAMERA_DISTANCE units
+const FIRST_PERSON = true;
+
 const AIM_MAX_RANGE = 200;
-const CAMERA_DISTANCE = 6.0; // Moved back 1.0 unit total
-const CAMERA_TARGET_OFFSET_Y = 1.75; // Moved down 0.75 units total
+const CAMERA_DISTANCE = 6.0; // Third-person distance
+const CAMERA_TARGET_OFFSET_Y = 1.75; // Third-person target offset
+const EYE_HEIGHT = 1.9; // First-person eye height (head cube at y=1.3, eyes near top at +0.6)
 const MOUSE_SENSITIVITY = 0.003;
 const PITCH_MIN = -1.4; // ~80 degrees down
 const PITCH_MAX = 1.4;  // ~80 degrees up
-const DEFAULT_FOV = 0.8; // Default field of view (radians)
+const DEFAULT_FOV = FIRST_PERSON ? 1.0 : 0.8; // Wider FOV for first-person
 
 export class CameraController {
   private camera: FreeCamera;
@@ -26,6 +35,9 @@ export class CameraController {
   private defaultFov = DEFAULT_FOV;
   private targetFov = DEFAULT_FOV;
   private currentFov = DEFAULT_FOV;
+  
+  // Debug third-person toggle
+  private debugThirdPerson = false;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -33,6 +45,7 @@ export class CameraController {
     // Create FreeCamera at default position
     this.camera = new FreeCamera('freeCamera', new Vector3(0, 5, -8), scene);
     this.camera.fov = DEFAULT_FOV;
+    this.camera.minZ = 0.05;
     
     // Disable all default camera inputs - we'll handle rotation manually
     this.camera.inputs.clear();
@@ -104,24 +117,38 @@ export class CameraController {
   update(deltaTime: number) {
     if (!this.target) return;
 
-    // Calculate camera position based on yaw, pitch, and distance
-    const targetY = this.target.y + CAMERA_TARGET_OFFSET_Y;
-    
-    // Spherical coordinates to cartesian
-    const camX = this.target.x - Math.sin(this.yaw) * Math.cos(this.pitch) * CAMERA_DISTANCE;
-    const camY = targetY + Math.sin(this.pitch) * CAMERA_DISTANCE;
-    const camZ = this.target.z - Math.cos(this.yaw) * Math.cos(this.pitch) * CAMERA_DISTANCE;
-    
-    // Camera follows player directly — no smoothing.
-    // The player position is already smoothly interpolated between physics
-    // ticks, so adding camera smoothing only introduces phase-shifted lag
-    // that the eye perceives as jitter.
-    this.camera.position.x = camX;
-    this.camera.position.y = camY;
-    this.camera.position.z = camZ;
-    
-    // Always look at player target
-    this.camera.setTarget(new Vector3(this.target.x, targetY, this.target.z));
+    const useFirstPerson = FIRST_PERSON && !this.debugThirdPerson;
+
+    if (useFirstPerson) {
+      // First-person: camera at eye height, look at calculated target point
+      this.camera.position.x = this.target.x;
+      this.camera.position.y = this.target.y + EYE_HEIGHT;
+      this.camera.position.z = this.target.z;
+      
+      // Calculate look target using same math as third-person
+      // This ensures movement direction matches look direction
+      const lookDist = 10; // Short distance for look target
+      const targetX = this.target.x + Math.sin(this.yaw) * Math.cos(this.pitch) * lookDist;
+      const targetY = this.target.y + EYE_HEIGHT - Math.sin(this.pitch) * lookDist;
+      const targetZ = this.target.z + Math.cos(this.yaw) * Math.cos(this.pitch) * lookDist;
+      
+      this.camera.setTarget(new Vector3(targetX, targetY, targetZ));
+    } else {
+      // Third-person: camera orbits behind player
+      const targetY = this.target.y + CAMERA_TARGET_OFFSET_Y;
+      
+      // Spherical coordinates to cartesian
+      const camX = this.target.x - Math.sin(this.yaw) * Math.cos(this.pitch) * CAMERA_DISTANCE;
+      const camY = targetY + Math.sin(this.pitch) * CAMERA_DISTANCE;
+      const camZ = this.target.z - Math.cos(this.yaw) * Math.cos(this.pitch) * CAMERA_DISTANCE;
+      
+      this.camera.position.x = camX;
+      this.camera.position.y = camY;
+      this.camera.position.z = camZ;
+      
+      // Always look at player target
+      this.camera.setTarget(new Vector3(this.target.x, targetY, this.target.z));
+    }
     
     // Smooth FOV transition for zoom
     if (Math.abs(this.currentFov - this.targetFov) > 0.001) {
@@ -198,5 +225,25 @@ export class CameraController {
    */
   resetZoom(): void {
     this.targetFov = this.defaultFov;
+  }
+
+  /**
+   * Toggle debug third-person view (for weapon positioning debug)
+   */
+  toggleDebugThirdPerson(localPlayerTransform?: any): void {
+    this.debugThirdPerson = !this.debugThirdPerson;
+    console.log(`[CameraController] Debug third-person: ${this.debugThirdPerson ? 'ON' : 'OFF'}`);
+    
+    // Show/hide local player mesh based on debug mode
+    if (localPlayerTransform) {
+      localPlayerTransform.setMeshVisibility(this.debugThirdPerson);
+    }
+  }
+
+  /**
+   * Check if debug third-person is active
+   */
+  isDebugThirdPersonActive(): boolean {
+    return this.debugThirdPerson;
   }
 }

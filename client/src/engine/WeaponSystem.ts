@@ -1,92 +1,21 @@
-import { ref, computed, Ref } from 'vue';
+import { ref, Ref } from 'vue';
 import type { Scene } from '@babylonjs/core';
 import type { CameraController } from './CameraController';
 import type { ProjectileManager } from './ProjectileManager';
 import type { LocalTransform } from './LocalTransform';
 import type { NetworkClient } from '../network/NetworkClient';
-import { PROJECTILE_SPAWN_OFFSET, PLAYER_HITBOX_CENTER_Y } from '@spong/shared';
+import {
+  PROJECTILE_SPAWN_OFFSET,
+  PLAYER_HITBOX_CENTER_Y,
+  WEAPON_STATS,
+  getFireRateCooldownMs,
+  calculateBarrelTipWorldPosition,
+  type WeaponType
+} from '@spong/shared';
 import { playSFX3D } from './audioHelpers';
+import { AudioManager } from './AudioManager';
 
-export type WeaponType = 'pistol' | 'smg' | 'lmg' | 'shotgun' | 'sniper' | 'assault' | 'rocket';
-
-interface WeaponStats {
-  ammo: number;
-  capacity: number;
-  reloadTime: number;
-  accuracy: number;
-  projectileSpeed: number;
-  damage: number;
-  fireRateCooldown: number; // Milliseconds between shots
-  zoomFactor?: number; // Optional zoom factor for scoped weapons
-}
-
-const WEAPON_CONFIGS: Record<WeaponType, WeaponStats> = {
-  pistol: {
-    ammo: 12,
-    capacity: 12,
-    reloadTime: 1.5,
-    accuracy: 0.008,
-    projectileSpeed: 65,
-    damage: 15,
-    fireRateCooldown: 200 // Semi-auto: 300 RPM
-  },
-  smg: {
-    ammo: 30,
-    capacity: 30,
-    reloadTime: 2.2,
-    accuracy: 0.015,
-    projectileSpeed: 60,
-    damage: 12,
-    fireRateCooldown: 100 // Full-auto: 600 RPM
-  },
-  lmg: {
-    ammo: 60,
-    capacity: 60,
-    reloadTime: 8.75,
-    accuracy: 0.02,
-    projectileSpeed: 70,
-    damage: 18,
-    fireRateCooldown: 150 // Full-auto: 400 RPM (slower than SMG)
-  },
-  shotgun: {
-    ammo: 8,
-    capacity: 8,
-    reloadTime: 3.0,
-    accuracy: 0.08,
-    projectileSpeed: 55,
-    damage: 8,
-    fireRateCooldown: 800 // Pump-action: 75 RPM
-  },
-  sniper: {
-    ammo: 1,
-    capacity: 1,
-    reloadTime: 2.5,
-    accuracy: 0.001, // Extremely accurate
-    projectileSpeed: 150, // Very fast bullet
-    damage: 75, // High damage
-    fireRateCooldown: 2500, // Must reload after each shot anyway
-    zoomFactor: 3 // 3x zoom when aiming
-  },
-  assault: {
-    ammo: 30,
-    capacity: 30,
-    reloadTime: 2.5,
-    accuracy: 0.008, // Better than SMG
-    projectileSpeed: 100, // Faster than SMG
-    damage: 18, // Same as LMG
-    fireRateCooldown: 120, // Semi-auto: 500 RPM (fast cycle rate)
-    zoomFactor: 1.8 // 1.8x zoom (tactical sight)
-  },
-  rocket: {
-    ammo: 1,
-    capacity: 1,
-    reloadTime: 6.0, // Very long reload (6 seconds)
-    accuracy: 0.005, // Fairly accurate
-    projectileSpeed: 40, // Slowest projectile
-    damage: 100, // High base damage (before splash falloff)
-    fireRateCooldown: 6500 // Must reload anyway
-  }
-};
+export type { WeaponType };
 
 export class WeaponSystem {
   // Reactive state for HUD binding
@@ -110,6 +39,7 @@ export class WeaponSystem {
   private weaponFireRateCooldown = 200;
   private weaponZoomFactor = 1; // 1 = no zoom
   private lastShootTime = 0;
+  private lastEmptyClickTime = 0; // Track empty click separately
 
   constructor() {
     this.hasWeapon = ref(false);
@@ -121,30 +51,30 @@ export class WeaponSystem {
   }
 
   /**
-   * Equip a weapon and initialize its stats
+   * Equip a weapon and initialize its stats (from shared cannonical stats)
    */
   equipWeapon(type: WeaponType): void {
     this.internalWeaponType = type;
     this.weaponType.value = type;
     this.hasWeapon.value = true;
 
-    const config = WEAPON_CONFIGS[type];
-    this.weaponAmmo = config.ammo;
-    this.weaponCapacity = config.capacity;
-    this.weaponReloadTime = config.reloadTime;
-    this.weaponAccuracy = config.accuracy;
-    this.weaponProjectileSpeed = config.projectileSpeed;
-    this.weaponDamage = config.damage;
-    this.weaponFireRateCooldown = config.fireRateCooldown;
-    this.weaponZoomFactor = config.zoomFactor || 1;
+    const stats = WEAPON_STATS[type];
+    this.weaponAmmo = stats.ammo;
+    this.weaponCapacity = stats.capacity;
+    this.weaponReloadTime = stats.reloadTime;
+    this.weaponAccuracy = stats.accuracy;
+    this.weaponProjectileSpeed = stats.projectileSpeed;
+    this.weaponDamage = stats.damage;
+    this.weaponFireRateCooldown = getFireRateCooldownMs(type);
+    this.weaponZoomFactor = stats.zoomFactor ?? 1;
 
-    this.currentAmmo.value = config.ammo;
-    this.maxCapacity.value = config.capacity;
+    this.currentAmmo.value = stats.ammo;
+    this.maxCapacity.value = stats.capacity;
     this.isReloading.value = false;
     this.weaponIsReloading = false;
     this.reloadProgress.value = 0;
 
-    console.log(`[WeaponSystem] Equipped ${type}: ${this.weaponAmmo}/${this.weaponCapacity} ammo, ${config.fireRateCooldown}ms cooldown, zoom: ${this.weaponZoomFactor}x`);
+    console.log(`[WeaponSystem] Equipped ${type}: ${this.weaponAmmo}/${this.weaponCapacity} ammo, ${this.weaponFireRateCooldown}ms cooldown, zoom: ${this.weaponZoomFactor}x`);
   }
 
   /**
@@ -179,24 +109,50 @@ export class WeaponSystem {
     projectileManager: ProjectileManager,
     networkClient: NetworkClient
   ): boolean {
-    // Check shooting cooldown FIRST to prevent double-fire
-    const now = performance.now();
-    if (now - this.lastShootTime < this.weaponFireRateCooldown) {
-      return false;
-    }
-
     // Must have a weapon to shoot
     if (!this.hasWeapon.value) return false;
 
-    // Can't shoot while reloading
-    if (this.weaponIsReloading) return false;
+    // Can't shoot while reloading - play empty click every trigger pull
+    if (this.weaponIsReloading) {
+      // Throttle empty click to prevent audio issues (100ms = very fast clicking allowed)
+      const now = performance.now();
+      if (now - this.lastEmptyClickTime >= 100) {
+        this.lastEmptyClickTime = now;
+        // Play empty click sound at player position (short duration)
+        const playerState = myTransform.getState();
+        AudioManager.getInstance().play('empty_click', {
+          position: { x: playerState.posX, y: playerState.posY + PLAYER_HITBOX_CENTER_Y, z: playerState.posZ },
+          volume: 0.5,
+          duration: 0.35 // Play only 0.35 seconds of the sound
+        });
+      }
+      return false;
+    }
 
-    // Check ammo
+    // Check ammo - play empty click every trigger pull when empty
     if (this.weaponAmmo <= 0) {
+      // Throttle empty click to prevent audio issues (100ms = very fast clicking allowed)
+      const now = performance.now();
+      if (now - this.lastEmptyClickTime >= 100) {
+        this.lastEmptyClickTime = now;
+        // Play empty click sound at player position (short duration)
+        const playerState = myTransform.getState();
+        AudioManager.getInstance().play('empty_click', {
+          position: { x: playerState.posX, y: playerState.posY + PLAYER_HITBOX_CENTER_Y, z: playerState.posZ },
+          volume: 0.5,
+          duration: 0.35 // Play only 0.35 seconds of the sound
+        });
+      }
       // Auto-reload when empty
       if (!this.weaponIsReloading) {
         this.reload(myTransform, networkClient);
       }
+      return false;
+    }
+
+    // Check shooting cooldown to prevent double-fire (only for successful shots)
+    const now = performance.now();
+    if (now - this.lastShootTime < this.weaponFireRateCooldown) {
       return false;
     }
 
@@ -212,7 +168,7 @@ export class WeaponSystem {
     let soundName = 'pistol_shot';
     let volume = 0.8;
 
-    if (this.internalWeaponType === 'shotgun') {
+    if (this.internalWeaponType === 'shotgun' || this.internalWeaponType === 'doublebarrel') {
       soundName = 'shotgun_shoot';
     } else if (this.internalWeaponType === 'lmg') {
       soundName = 'LMG_shoot';
@@ -221,14 +177,16 @@ export class WeaponSystem {
 
     playSFX3D(soundName, playerState.posX, playerState.posY + PLAYER_HITBOX_CENTER_Y, playerState.posZ, volume);
 
-    // Get camera's forward ray and offset it forward by 6 units
+    // Get camera's forward ray and offset it forward to avoid hitting own head
     const camera = cameraController.getCamera();
     const ray = camera.getForwardRay(1000);
 
-    // Offset ray origin forward by 6 units to avoid backfaces
-    ray.origin.x += ray.direction.x * 6;
-    ray.origin.y += ray.direction.y * 6;
-    ray.origin.z += ray.direction.z * 6;
+    // First-person: small offset to clear the head hitbox (~0.8 units)
+    // Third-person: larger offset to avoid backfaces (6 units)
+    const rayOffset = 0.8; // Just outside the head in first-person
+    ray.origin.x += ray.direction.x * rayOffset;
+    ray.origin.y += ray.direction.y * rayOffset;
+    ray.origin.z += ray.direction.z * rayOffset;
 
     // Pick with the offset ray
     const pick = scene.pickWithRay(
@@ -254,92 +212,115 @@ export class WeaponSystem {
       return false;
     }
 
-    // Get player spawn position
+    // Get projectile spawn position (barrel tip if available, otherwise player center)
     const state = playerState;
-    const spawnX = state.posX;
-    const spawnY = state.posY + PLAYER_HITBOX_CENTER_Y;
-    const spawnZ = state.posZ;
+    let spawnX = state.posX;
+    let spawnY = state.posY + PLAYER_HITBOX_CENTER_Y;
+    let spawnZ = state.posZ;
 
-    // Calculate direction from spawn point to picked point
-    const aimPoint = pick.pickedPoint;
-    let dirX = aimPoint.x - spawnX;
-    let dirY = aimPoint.y - spawnY;
-    let dirZ = aimPoint.z - spawnZ;
-
-    // Normalize
-    const dirLen = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
-    if (dirLen < 0.001) return false;
-    dirX /= dirLen;
-    dirY /= dirLen;
-    dirZ /= dirLen;
-
-    // Apply accuracy cone (random spread)
-    if (this.weaponAccuracy > 0) {
-      // Random angle within cone (0 to accuracy radians)
-      const coneAngle = Math.random() * this.weaponAccuracy;
-      const spin = Math.random() * Math.PI * 2;
-
-      // Find a perpendicular vector to the direction
-      let perpX, perpY, perpZ;
-      if (Math.abs(dirY) < 0.9) {
-        // Use up vector if direction is not too vertical
-        perpX = dirY * 0 - dirZ * 1;
-        perpY = dirZ * 0 - dirX * 0;
-        perpZ = dirX * 1 - dirY * 0;
-      } else {
-        // Use forward vector if direction is vertical
-        perpX = dirY * 1 - dirZ * 0;
-        perpY = dirZ * 0 - dirX * 0;
-        perpZ = dirX * 0 - dirY * 1;
-      }
-
-      // Normalize perpendicular vector
-      const perpLen = Math.sqrt(perpX * perpX + perpY * perpY + perpZ * perpZ);
-      perpX /= perpLen;
-      perpY /= perpLen;
-      perpZ /= perpLen;
-
-      // Rotate perpendicular around direction by spin angle
-      const cosSpin = Math.cos(spin);
-      const sinSpin = Math.sin(spin);
-      const crossX = perpY * dirZ - perpZ * dirY;
-      const crossY = perpZ * dirX - perpX * dirZ;
-      const crossZ = perpX * dirY - perpY * dirX;
-
-      const rotPerpX = perpX * cosSpin + crossX * sinSpin;
-      const rotPerpY = perpY * cosSpin + crossY * sinSpin;
-      const rotPerpZ = perpZ * cosSpin + crossZ * sinSpin;
-
-      // Apply cone angle rotation
-      const cosAngle = Math.cos(coneAngle);
-      const sinAngle = Math.sin(coneAngle);
-
-      dirX = dirX * cosAngle + rotPerpX * sinAngle;
-      dirY = dirY * cosAngle + rotPerpY * sinAngle;
-      dirZ = dirZ * cosAngle + rotPerpZ * sinAngle;
-
-      // Renormalize
-      const finalLen = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
-      dirX /= finalLen;
-      dirY /= finalLen;
-      dirZ /= finalLen;
-    }
-
-    // Offset spawn slightly forward to avoid self-collision
-    const posX = spawnX + dirX * PROJECTILE_SPAWN_OFFSET;
-    const posY = spawnY + dirY * PROJECTILE_SPAWN_OFFSET;
-    const posZ = spawnZ + dirZ * PROJECTILE_SPAWN_OFFSET;
-
-    // Spawn predicted projectile from player
-    projectileManager.spawnPredicted(
-      posX, posY, posZ,
-      dirX, dirY, dirZ,
-      this.weaponProjectileSpeed,
-      myTransform.entityId
+    // Calculate barrel tip position if weapon has hold transform
+    const barrelTip = calculateBarrelTipWorldPosition(
+      this.internalWeaponType,
+      { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      camera.getWorldMatrix().m
     );
 
-    // Tell server with aim direction
-    networkClient.sendShoot(dirX, dirY, dirZ);
+    if (barrelTip) {
+      spawnX = barrelTip.x;
+      spawnY = barrelTip.y;
+      spawnZ = barrelTip.z;
+    }
+
+    // Calculate base direction from spawn point to picked point (server uses this for all pellets)
+    const aimPoint = pick.pickedPoint;
+    let baseDirX = aimPoint.x - spawnX;
+    let baseDirY = aimPoint.y - spawnY;
+    let baseDirZ = aimPoint.z - spawnZ;
+
+    const baseLen = Math.sqrt(baseDirX * baseDirX + baseDirY * baseDirY + baseDirZ * baseDirZ);
+    if (baseLen < 0.001) return false;
+    baseDirX /= baseLen;
+    baseDirY /= baseLen;
+    baseDirZ /= baseLen;
+
+    const pelletsPerShot = WEAPON_STATS[this.internalWeaponType].pelletsPerShot;
+
+    // Apply spawn offset to barrel tip (same for all pellets)
+    // This offset ensures projectile spawns slightly forward to avoid self-collision
+    const finalSpawnX = spawnX + baseDirX * PROJECTILE_SPAWN_OFFSET;
+    const finalSpawnY = spawnY + baseDirY * PROJECTILE_SPAWN_OFFSET;
+    const finalSpawnZ = spawnZ + baseDirZ * PROJECTILE_SPAWN_OFFSET;
+
+    for (let i = 0; i < pelletsPerShot; i++) {
+      let dirX = baseDirX;
+      let dirY = baseDirY;
+      let dirZ = baseDirZ;
+
+      // Apply accuracy cone per pellet (matches server)
+      if (this.weaponAccuracy > 0) {
+        const coneAngle = Math.random() * this.weaponAccuracy;
+        const spin = Math.random() * Math.PI * 2;
+
+        let perpX: number, perpY: number, perpZ: number;
+        if (Math.abs(dirY) < 0.9) {
+          perpX = dirY * 0 - dirZ * 1;
+          perpY = dirZ * 0 - dirX * 0;
+          perpZ = dirX * 1 - dirY * 0;
+        } else {
+          perpX = dirY * 1 - dirZ * 0;
+          perpY = dirZ * 0 - dirX * 0;
+          perpZ = dirX * 0 - dirY * 1;
+        }
+
+        const perpLen = Math.sqrt(perpX * perpX + perpY * perpY + perpZ * perpZ);
+        perpX /= perpLen;
+        perpY /= perpLen;
+        perpZ /= perpLen;
+
+        const cosSpin = Math.cos(spin);
+        const sinSpin = Math.sin(spin);
+        const crossX = perpY * dirZ - perpZ * dirY;
+        const crossY = perpZ * dirX - perpX * dirZ;
+        const crossZ = perpX * dirY - perpY * dirX;
+
+        const rotPerpX = perpX * cosSpin + crossX * sinSpin;
+        const rotPerpY = perpY * cosSpin + crossY * sinSpin;
+        const rotPerpZ = perpZ * cosSpin + crossZ * sinSpin;
+
+        const cosAngle = Math.cos(coneAngle);
+        const sinAngle = Math.sin(coneAngle);
+
+        dirX = dirX * cosAngle + rotPerpX * sinAngle;
+        dirY = dirY * cosAngle + rotPerpY * sinAngle;
+        dirZ = dirZ * cosAngle + rotPerpZ * sinAngle;
+
+        const finalLen = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+        dirX /= finalLen;
+        dirY /= finalLen;
+        dirZ /= finalLen;
+      }
+
+      // Small offset per pellet to prevent instant collisions (matches server)
+      const pelletOffset = 0.05;
+      const angle = (i / pelletsPerShot) * Math.PI * 2;
+      const offsetX = Math.cos(angle) * pelletOffset;
+      const offsetZ = Math.sin(angle) * pelletOffset;
+
+      projectileManager.spawnPredicted(
+        finalSpawnX + offsetX, 
+        finalSpawnY, 
+        finalSpawnZ + offsetZ,
+        dirX, dirY, dirZ,
+        this.weaponProjectileSpeed,
+        myTransform.entityId
+      );
+    }
+
+    // Tell server with base aim direction and final spawn position (barrel tip + offset)
+    networkClient.sendShoot(
+      baseDirX, baseDirY, baseDirZ,
+      finalSpawnX, finalSpawnY, finalSpawnZ
+    );
 
     return true;
   }

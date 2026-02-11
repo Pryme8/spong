@@ -21,6 +21,10 @@
       :player-stamina="playerStamina"
       :player-is-exhausted="playerIsExhausted"
       :player-has-infinite-stamina="playerHasInfiniteStamina"
+      :player-breath-remaining="playerBreathRemaining"
+      :player-max-breath="playerMaxBreath"
+      :player-is-underwater="playerIsUnderwater"
+      :player-is-in-water="playerIsInWater"
       :has-weapon="hasWeapon"
       :weapon-type="weaponType"
       :current-ammo="currentAmmo"
@@ -29,6 +33,7 @@
       :reload-progress="reloadProgress"
       :latency="latency"
       :ping-color-class="pingColorClass"
+      :hit-marker-visible="hitMarkerVisible"
       :has-hammer="hasHammer"
       :has-ladder="hasLadder"
       :build-mode="buildMode"
@@ -43,6 +48,55 @@
 
     <!-- Shadow Debug Panel (only if ?shadowDebug URL flag is present) -->
     <ShadowDebugPanel v-if="showShadowDebug" />
+
+    <!-- Water Debug Panel (only if ?waterDebug URL flag is present) -->
+    <WaterDebugPanel v-if="showWaterDebug" />
+
+    <!-- World Debug Panel (only if ?debugWorld URL flag is present) -->
+    <WorldDebugPanel v-if="showWorldDebug" />
+
+    <!-- Post Process Debug Panel (only if ?debugPost URL flag is present) -->
+    <PostProcessDebugPanel 
+      v-if="showPostDebug"
+      :visible="showPostDebug"
+      :update-exposure="session.setPostProcessExposure"
+      :update-contrast="session.setPostProcessContrast"
+      :update-saturation="session.setPostProcessSaturation"
+      :update-chromatic-aberration="session.setPostProcessChromaticAberration"
+      :update-sharpening="session.setPostProcessSharpening"
+      :update-grain-intensity="session.setPostProcessGrainIntensity"
+      :update-health-percentage="session.setPostProcessHealthPercentage"
+      :update-pencil-enabled="session.setPostProcessPencilEnabled"
+      :update-pencil-edge-strength="session.setPostProcessPencilEdgeStrength"
+      :update-pencil-depth-weight="session.setPostProcessPencilDepthWeight"
+      :update-pencil-normal-weight="session.setPostProcessPencilNormalWeight"
+      :update-pencil-edge-threshold="session.setPostProcessPencilEdgeThreshold"
+      :update-pencil-hatch-intensity="session.setPostProcessPencilHatchIntensity"
+      :update-pencil-hatch-scale="session.setPostProcessPencilHatchScale"
+      :update-pencil-paper-intensity="session.setPostProcessPencilPaperIntensity"
+      :update-directional-light-intensity="session.setDirectionalLightIntensity"
+      :update-directional-light-color="session.setDirectionalLightColor"
+      :update-hemispheric-light-intensity="session.setHemisphericLightIntensity"
+      :update-hemispheric-light-color="session.setHemisphericLightColor"
+      :update-hemispheric-ground-color="session.setHemisphericGroundColor"
+      :update-ambient-tint-strength="session.setAmbientTintStrength"
+      :update-ambient-min-intensity="session.setAmbientMinIntensity"
+      :update-ambient-max-intensity="session.setAmbientMaxIntensity"
+      :initial-values="session.getPostProcessValues()"
+      @close="showPostDebug = false"
+    />
+
+    <!-- Weapon Debug Panel (toggle with U key) -->
+    <WeaponDebugPanel
+      v-if="showWeaponDebug"
+      :visible="showWeaponDebug"
+      :weapon-type="weaponType"
+      :initial-position="weaponDebugPosition"
+      :initial-rotation="weaponDebugRotation"
+      @transform-change="handleWeaponTransformChange"
+      @disable-debug="handleDisableDebugMode"
+      @close="showWeaponDebug = false"
+    />
     
     <!-- Scoreboard (Tab key) -->
     <Scoreboard 
@@ -129,6 +183,10 @@ import { PLAYER_MAX_HEALTH, Opcode } from '@spong/shared';
 import GameHud from '../components/GameHud.vue';
 import TouchController from '../components/TouchController.vue';
 import ShadowDebugPanel from '../components/ShadowDebugPanel.vue';
+import WaterDebugPanel from '../components/WaterDebugPanel.vue';
+import WorldDebugPanel from '../components/WorldDebugPanel.vue';
+import PostProcessDebugPanel from '../components/PostProcessDebugPanel.vue';
+import WeaponDebugPanel from '../components/WeaponDebugPanel.vue';
 import Scoreboard from '../components/Scoreboard.vue';
 import CountdownOverlay from '../components/CountdownOverlay.vue';
 import VictoryScreen from '../components/VictoryScreen.vue';
@@ -179,6 +237,16 @@ if (!props.levelConfig && route.query.pistols) {
   levelConfig.pistolCount = parseInt(route.query.pistols as string);
 }
 
+// Parse damage multipliers from URL params
+if (!props.levelConfig) {
+  if (route.query.hsDmg) {
+    levelConfig.headshotDmg = parseFloat(route.query.hsDmg as string);
+  }
+  if (route.query.nsDmg) {
+    levelConfig.normalDmg = parseFloat(route.query.nsDmg as string);
+  }
+}
+
 // Parse disable flags from URL (e.g. ?disable=trees,bushes,rocks,items)
 if (route.query.disable) {
   const disableFlags = (route.query.disable as string).split(',').map(s => s.trim());
@@ -186,8 +254,14 @@ if (route.query.disable) {
   console.log('[GameView] Disabling spawns:', disableFlags);
 }
 
-// Check for shadowDebug URL flag
+// Check for debug URL flags
 const showShadowDebug = ref(route.query.shadowDebug !== undefined);
+const showWaterDebug = ref(route.query.waterDebug !== undefined);
+const showWorldDebug = ref(route.query.debugWorld !== undefined);
+const showPostDebug = ref(route.query.debugPost !== undefined);
+const showWeaponDebug = ref(false); // Toggle with U key
+const weaponDebugPosition = ref({ x: 0, y: 0, z: 0 });
+const weaponDebugRotation = ref({ x: 0, y: 0, z: 0 });
 
 // Initialize game session
 const session = useGameSession();
@@ -205,6 +279,10 @@ const {
   playerStamina,
   playerIsExhausted,
   playerHasInfiniteStamina,
+  playerBreathRemaining,
+  playerMaxBreath,
+  playerIsUnderwater,
+  playerIsInWater,
   playerX,
   playerY,
   playerZ,
@@ -224,7 +302,8 @@ const {
   playerMaterials,
   hasLadder,
   killFeedEntries,
-  roundState
+  roundState,
+  hitMarkerVisible
 } = session;
 
 // Scoreboard visibility (Tab key)
@@ -279,6 +358,37 @@ function handleKeyDown(e: KeyboardEvent) {
   if (e.code === 'F12') {
     e.preventDefault();
     toggleInspector();
+  }
+  
+  // U key to toggle weapon debug panel
+  if (e.code === 'KeyU') {
+    e.preventDefault();
+    showWeaponDebug.value = !showWeaponDebug.value;
+    
+    // Update initial values from current weapon holder when opening
+    if (showWeaponDebug.value && session.myTransform?.value) {
+      const holder = session.myTransform.value.getWeaponHolder();
+      const pos = holder.getWeaponPosition();
+      const rot = holder.getWeaponRotation();
+      if (pos) weaponDebugPosition.value = pos;
+      if (rot) weaponDebugRotation.value = rot;
+    }
+  }
+}
+
+function handleWeaponTransformChange(position: { x: number; y: number; z: number }, rotation: { x: number; y: number; z: number }) {
+  if (session.myTransform?.value) {
+    const holder = session.myTransform.value.getWeaponHolder();
+    holder.setDebugMode(true); // Enable debug mode to prevent auto-positioning
+    holder.setWeaponPosition(position.x, position.y, position.z);
+    holder.setWeaponRotation(rotation.x, rotation.y, rotation.z);
+  }
+}
+
+function handleDisableDebugMode() {
+  if (session.myTransform?.value) {
+    const holder = session.myTransform.value.getWeaponHolder();
+    holder.setDebugMode(false); // Weapon will return to default positioning
   }
 }
 
@@ -377,14 +487,15 @@ onUnmounted(() => {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 20px;
-  height: 20px;
-  margin-left: -10px;
-  margin-top: -10px;
+  width: 30px;
+  height: 30px;
+  margin-left: -15px;
+  margin-top: -15px;
   pointer-events: none;
   z-index: 999;
 }
 
+/* Create 4 pips with gaps instead of continuous lines */
 .crosshair::before,
 .crosshair::after {
   content: '';
@@ -393,21 +504,31 @@ onUnmounted(() => {
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
 }
 
-/* Vertical line */
+/* Top pip */
 .crosshair::before {
   left: 50%;
   top: 0;
-  width: 2px;
-  height: 100%;
-  margin-left: -1px;
+  width: 1px;
+  height: 8px;
+  margin-left: -0.5px;
+  box-shadow: 
+    0 0 2px rgba(0, 0, 0, 0.8),
+    /* Bottom pip */
+    0 22px 0 0 rgba(255, 255, 255, 0.9),
+    0 22px 2px 0 rgba(0, 0, 0, 0.8);
 }
 
-/* Horizontal line */
+/* Left pip */
 .crosshair::after {
   top: 50%;
   left: 0;
-  height: 2px;
-  width: 100%;
-  margin-top: -1px;
+  height: 1px;
+  width: 8px;
+  margin-top: -0.5px;
+  box-shadow: 
+    0 0 2px rgba(0, 0, 0, 0.8),
+    /* Right pip */
+    22px 0 0 0 rgba(255, 255, 255, 0.9),
+    22px 0 2px 0 rgba(0, 0, 0, 0.8);
 }
 </style>

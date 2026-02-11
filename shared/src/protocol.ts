@@ -1,4 +1,11 @@
 // Opcode definitions for network protocol
+//
+// Network-Synced Spatial Audio Pattern:
+// - For actions that produce sound (reload, drop, etc.), the local player plays a non-spatial version
+// - Server broadcasts the event to all clients with excludeSender=true
+// - Remote clients play a spatial version at the entity's position
+// - Client checks: if excludeSender && entityId === myEntityId, skip playing
+//
 export enum Opcode {
   // High-frequency binary messages (0x01-0x0F)
   TransformUpdate = 0x01,
@@ -22,6 +29,8 @@ export enum Opcode {
   ItemDrop = 0x33,
   ItemTossLand = 0x34,
   ReloadRequest = 0x35,
+  ReloadStarted = 0x3E,
+  ItemDropSound = 0x3D,
   ExplosionSpawn = 0x36,
   StaminaUpdate = 0x37,
   BuffApplied = 0x38,
@@ -111,6 +120,12 @@ export interface TransformData {
   velocity: { x: number; y: number; z: number };
   headPitch: number; // Head pitch angle in radians for head rotation visualization
   lastProcessedInput?: number; // Sequence number of last processed input
+  // Water state (only for players)
+  isInWater?: boolean;
+  isHeadUnderwater?: boolean;
+  breathRemaining?: number;
+  waterDepth?: number;
+  isExhausted?: boolean; // Stamina depleted (causes sinking)
 }
 
 export interface InputData {
@@ -133,6 +148,9 @@ export interface ShootData {
   dirX: number;   // Normalized aim direction from player toward aim point
   dirY: number;
   dirZ: number;
+  spawnX: number;  // Projectile spawn position (barrel tip)
+  spawnY: number;
+  spawnZ: number;
 }
 
 /** Server -> Clients: a new projectile was spawned. */
@@ -174,6 +192,7 @@ export interface KillFeedMessage {
   victimEntityId: number;
   victimColor: string;
   weaponType: string | null;  // null for suicide/environment
+  isHeadshot: boolean;        // true if kill was via headshot
   timestamp: number;
 }
 
@@ -217,6 +236,22 @@ export interface ItemTossLandMessage {
 /** Client -> Server: player wants to reload weapon. */
 export interface ReloadRequestMessage {
   // No payload needed - server knows which player from connection
+}
+
+/** Server -> Clients: a player started reloading (for remote audio). */
+export interface ReloadStartedMessage {
+  entityId: number;
+  weaponType: string;
+  excludeSender?: boolean; // If true, sender should not play spatial version (they play local)
+}
+
+/** Server -> Clients: a player dropped an item (for remote spatial audio). */
+export interface ItemDropSoundMessage {
+  entityId: number;  // player entity ID who dropped the item
+  posX: number;      // drop position X
+  posY: number;      // drop position Y
+  posZ: number;      // drop position Z
+  excludeSender?: boolean; // If true, sender should not play spatial version (they play local)
 }
 
 /** Server -> Clients: all trees in the level (sent once on join). */
@@ -424,6 +459,8 @@ export interface ChatBroadcastPayload {
 export interface LobbyConfigPayload {
   seed?: string;
   pistolCount?: number;
+  headshotDmg?: number;  // Headshot damage multiplier (default: 2.0)
+  normalDmg?: number;    // Normal shot damage multiplier (default: 1.0)
 }
 
 /** Server -> Clients: broadcast lobby configuration update. */

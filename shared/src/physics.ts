@@ -1,4 +1,4 @@
-import { GRAVITY, GROUND_HEIGHT, CHARACTER } from './physicsConstants.js';
+import { GRAVITY, GROUND_HEIGHT, CHARACTER, WATER } from './physicsConstants.js';
 import { PLAYER_HITBOX_HALF, PLAYER_CAPSULE_RADIUS } from './types.js';
 import type { VoxelGrid } from './levelgen/VoxelGrid.js';
 import { aabbVsVoxelGrid, capsuleVsTriangleMesh } from './collision.js';
@@ -16,6 +16,18 @@ export interface BoxCollider {
   maxX: number;
   maxY: number;
   maxZ: number;
+}
+
+/**
+ * Water level provider interface.
+ * Implementations should check if a given XZ position has water and return the water level Y.
+ */
+export interface WaterLevelProvider {
+  /**
+   * Get water level at given XZ position.
+   * @returns Water surface Y coordinate, or -Infinity if no water at this position
+   */
+  getWaterLevelAt(x: number, z: number): number;
 }
 
 // Character physics constants (from unified constants)
@@ -98,6 +110,13 @@ export interface CharacterState {
   yaw: number;
   isGrounded: boolean;
   hasJumped: boolean;
+  // Water state
+  isInWater: boolean;           // Any part of body in water
+  isHeadUnderwater: boolean;    // Head below water level (triggers breath drain)
+  breathRemaining: number;      // Seconds of breath remaining (0-10)
+  waterDepth: number;           // How deep player center is below water surface (0 = not in water)
+  // Stamina state (needed for sinking mechanic)
+  isExhausted: boolean;         // True when stamina depleted (causes sinking in water)
 }
 
 /**
@@ -121,7 +140,12 @@ export function createCharacterState(): CharacterState {
     velX: 0, velY: 0, velZ: 0,
     yaw: 0,
     isGrounded: true,
-    hasJumped: false
+    hasJumped: false,
+    isInWater: false,
+    isHeadUnderwater: false,
+    breathRemaining: 10.0,
+    waterDepth: 0,
+    isExhausted: false
   };
 }
 
@@ -131,22 +155,24 @@ export function createCharacterState(): CharacterState {
  * Mutates `state` in place -- no allocations.
  *
  * Handles:
- *  - Camera-relative horizontal acceleration
- *  - Air control factor
- *  - Max speed clamping
- *  - Ground friction
- *  - Jump (single-fire via hasJumped guard)
- *  - Gravity
+ *  - Camera-relative horizontal acceleration (land) or 3D movement (swimming)
+ *  - Air control factor / water control
+ *  - Max speed clamping (land vs swimming speeds)
+ *  - Ground friction (tight on land) / water drag (smooth gliding)
+ *  - Jump (single-fire via hasJumped guard) / vertical swim boost
+ *  - Gravity (land) / buoyancy (swimming)
  *  - Position integration
  *  - Ground clamping (voxel terrain or flat ground)
  *  - Voxel collision resolution
- *  - Play-area boundary (10 unit radius)
+ *  - Play-area boundary (100 unit box)
  *  - Rotation towards camera yaw
+ *  - Water detection and state updates (shallow vs deep water)
  * 
  * @param voxelGrid Optional voxel grid for terrain collision
  * @param treeColliders Optional array of tree collision cylinders
  * @param rockColliderMeshes Optional array of rock collision meshes with transforms
  * @param blockColliders Optional array of box colliders for building blocks
+ * @param waterLevelProvider Optional water level provider for water detection
  */
 export function stepCharacter(
   state: CharacterState,
@@ -155,61 +181,145 @@ export function stepCharacter(
   voxelGrid?: VoxelGrid,
   treeColliderMeshes?: Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>,
   rockColliderMeshes?: Array<{ mesh: RockColliderMesh; transform: RockTransform }>,
-  blockColliders?: BoxCollider[]
+  blockColliders?: BoxCollider[],
+  waterLevelProvider?: WaterLevelProvider
 ): void {
+  // ── Determine swimming state ───────────────────────────────
+  // Deep water = swimming (3D movement), shallow water = walk normally
+  const DEEP_WATER_THRESHOLD = 0.5; // When water depth > 0.5, activate swimming
+  const isSwimming = state.waterDepth > DEEP_WATER_THRESHOLD;
+
   // ── Camera-relative movement direction ──────────────────────
   const camForwardX = Math.sin(input.cameraYaw);
   const camForwardZ = Math.cos(input.cameraYaw);
   const camRightX = -Math.cos(input.cameraYaw);
   const camRightZ = Math.sin(input.cameraYaw);
 
-  const moveX = camForwardX * input.forward + camRightX * input.right;
-  const moveZ = camForwardZ * input.forward + camRightZ * input.right;
-  const moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ);
+  // ── Swimming: 3D camera-relative movement ───────────────────
+  if (isSwimming) {
+    // 3D movement direction (includes vertical based on camera pitch)
+    const cameraPitch = input.cameraPitch || 0;
+    const camForwardY = -Math.sin(cameraPitch); // Negative because pitch down = positive Y
+    
+    // Horizontal plane already normalized, scale by vertical component
+    const horizontalScale = Math.cos(cameraPitch);
+    
+    const moveX = (camForwardX * horizontalScale) * input.forward + camRightX * input.right;
+    const moveY = camForwardY * input.forward; // Only forward/back affects Y
+    const moveZ = (camForwardZ * horizontalScale) * input.forward + camRightZ * input.right;
+    const moveLen = Math.sqrt(moveX * moveX + moveY * moveY + moveZ * moveZ);
 
-  // ── Horizontal acceleration / friction ──────────────────────
-  if (moveLen > 0.01) {
-    const normX = moveX / moveLen;
-    const normZ = moveZ / moveLen;
-    const controlFactor = state.isGrounded ? 1.0 : AIR_CONTROL;
+    if (moveLen > 0.01) {
+      const normX = moveX / moveLen;
+      const normY = moveY / moveLen;
+      const normZ = moveZ / moveLen;
 
-    state.velX += normX * MOVEMENT_ACCELERATION * dt * controlFactor;
-    state.velZ += normZ * MOVEMENT_ACCELERATION * dt * controlFactor;
+      // Apply water acceleration (reduced, floaty feel)
+      state.velX += normX * WATER.ACCELERATION * dt * WATER.CONTROL;
+      state.velY += normY * WATER.ACCELERATION * dt * WATER.CONTROL;
+      state.velZ += normZ * WATER.ACCELERATION * dt * WATER.CONTROL;
 
-    // Clamp to max speed (sprint = 1.5x faster)
-    const maxSpeed = input.sprint ? MOVEMENT_MAX_SPEED * 1.5 : MOVEMENT_MAX_SPEED;
-    const speed = Math.sqrt(state.velX * state.velX + state.velZ * state.velZ);
-    if (speed > maxSpeed) {
-      const scale = maxSpeed / speed;
-      state.velX *= scale;
-      state.velZ *= scale;
-    }
-  } else if (state.isGrounded) {
-    // Friction only when grounded and no input
-    const speed = Math.sqrt(state.velX * state.velX + state.velZ * state.velZ);
-    if (speed > 0.01) {
-      const newSpeed = Math.max(0, speed - MOVEMENT_FRICTION * dt);
-      const scale = newSpeed / speed;
-      state.velX *= scale;
-      state.velZ *= scale;
+      // Clamp to max swim speed (base = 2/3 sprint, sprint = 4/3 sprint)
+      const maxSwimSpeed = input.sprint ? WATER.MAX_SPEED_SPRINT : WATER.MAX_SPEED;
+      const speed = Math.sqrt(state.velX * state.velX + state.velY * state.velY + state.velZ * state.velZ);
+      if (speed > maxSwimSpeed) {
+        const scale = maxSwimSpeed / speed;
+        state.velX *= scale;
+        state.velY *= scale;
+        state.velZ *= scale;
+      }
     } else {
-      state.velX = 0;
-      state.velZ = 0;
+      // Water friction (smooth gliding when no input)
+      const speed = Math.sqrt(state.velX * state.velX + state.velY * state.velY + state.velZ * state.velZ);
+      if (speed > 0.01) {
+        const newSpeed = Math.max(0, speed - WATER.FRICTION * dt);
+        const scale = newSpeed / speed;
+        state.velX *= scale;
+        state.velY *= scale;
+        state.velZ *= scale;
+      } else {
+        state.velX = 0;
+        state.velY = 0;
+        state.velZ = 0;
+      }
+    }
+  } else {
+    // ── Land/Shallow Water: Normal horizontal movement ─────────
+    const moveX = camForwardX * input.forward + camRightX * input.right;
+    const moveZ = camForwardZ * input.forward + camRightZ * input.right;
+    const moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ);
+
+    if (moveLen > 0.01) {
+      const normX = moveX / moveLen;
+      const normZ = moveZ / moveLen;
+      const controlFactor = state.isGrounded ? 1.0 : AIR_CONTROL;
+
+      state.velX += normX * MOVEMENT_ACCELERATION * dt * controlFactor;
+      state.velZ += normZ * MOVEMENT_ACCELERATION * dt * controlFactor;
+
+      // Determine max speed based on wading state
+      let maxSpeed = input.sprint ? MOVEMENT_MAX_SPEED * 1.5 : MOVEMENT_MAX_SPEED;
+      
+      // Wading in water (body center underwater but grounded): half speed
+      if (state.waterDepth > 0 && state.isGrounded) {
+        maxSpeed *= 0.5; // Half speed when wading
+      }
+      
+      const speed = Math.sqrt(state.velX * state.velX + state.velZ * state.velZ);
+      if (speed > maxSpeed) {
+        const scale = maxSpeed / speed;
+        state.velX *= scale;
+        state.velZ *= scale;
+      }
+    } else if (state.isGrounded) {
+      // Friction only when grounded and no input (TIGHTER on land)
+      const speed = Math.sqrt(state.velX * state.velX + state.velZ * state.velZ);
+      if (speed > 0.01) {
+        const newSpeed = Math.max(0, speed - MOVEMENT_FRICTION * dt);
+        const scale = newSpeed / speed;
+        state.velX *= scale;
+        state.velZ *= scale;
+      } else {
+        state.velX = 0;
+        state.velZ = 0;
+      }
     }
   }
 
-  // ── Jump (single-fire) ─────────────────────────────────────
+  // ── Jump / Surface Boost ───────────────────────────────────
   if (!input.jump && state.hasJumped) {
     state.hasJumped = false;
   }
-  if (input.jump && state.isGrounded && !state.hasJumped) {
-    state.velY = JUMP_VELOCITY;
-    state.hasJumped = true;
-    state.isGrounded = false;
+  
+  if (isSwimming) {
+    // Swimming: Jump = vertical boost upward (helps climb out at surface)
+    if (input.jump && !state.hasJumped) {
+      state.velY += WATER.VERTICAL_SWIM_SPEED * dt * 3.0; // Boost to help exit water
+      state.hasJumped = true;
+    }
+  } else {
+    // Land: Normal jump when grounded
+    if (input.jump && state.isGrounded && !state.hasJumped) {
+      state.velY = JUMP_VELOCITY;
+      state.hasJumped = true;
+      state.isGrounded = false;
+    }
   }
 
-  // ── Gravity ────────────────────────────────────────────────
-  if (!state.isGrounded) {
+  // ── Gravity / Buoyancy / Sinking ───────────────────────────
+  if (isSwimming) {
+    if (state.isExhausted) {
+      // Exhausted while swimming: SINK! (no buoyancy, strong downward force)
+      state.velY += GRAVITY * dt * 1.5; // 1.5x gravity for sinking
+    } else {
+      // Normal swimming: Apply buoyancy (natural float to surface)
+      state.velY += WATER.BUOYANCY * dt;
+    }
+    
+    // Cancel grounded state when swimming
+    state.isGrounded = false;
+  } else if (!state.isGrounded) {
+    // Land/Air: Normal gravity
     state.velY += GRAVITY * dt;
   }
 
@@ -486,6 +596,53 @@ export function stepCharacter(
     const groundedOnBlock = aabbVsBlocks(state.posX, groundCheckY2, state.posZ, hw, hh, blockColliders);
     const groundedOnFlat = !voxelGrid && state.posY <= GROUND_HEIGHT + 0.05;
     state.isGrounded = groundedOnVoxel || groundedOnBlock || groundedOnFlat;
+  }
+
+  // ── Water detection and state update ───────────────────────
+  if (waterLevelProvider) {
+    const waterY = waterLevelProvider.getWaterLevelAt(state.posX, state.posZ);
+    
+    if (waterY !== -Infinity) {
+      // Water exists at this XZ position
+      const feetY = state.posY - PLAYER_HITBOX_HALF;
+      const headY = state.posY + PLAYER_HITBOX_HALF;
+      const centerY = state.posY;
+      
+      // Check if any part of player is in water
+      state.isInWater = feetY < waterY;
+      
+      // Check if head is underwater (based on head position)
+      state.isHeadUnderwater = headY < waterY;
+      
+      // Calculate water depth (how far center is below surface)
+      if (centerY < waterY) {
+        state.waterDepth = waterY - centerY;
+      } else {
+        state.waterDepth = 0;
+      }
+    } else {
+      // No water at this position
+      state.isInWater = false;
+      state.isHeadUnderwater = false;
+      state.waterDepth = 0;
+    }
+  } else {
+    // No water provider - clear water state
+    state.isInWater = false;
+    state.isHeadUnderwater = false;
+    state.waterDepth = 0;
+  }
+
+  // ── Breath management ──────────────────────────────────────
+  if (state.isHeadUnderwater) {
+    // Drain breath when head is underwater
+    state.breathRemaining -= dt;
+    if (state.breathRemaining < 0) {
+      state.breathRemaining = 0;
+    }
+  } else {
+    // Instant breath recovery when head surfaces
+    state.breathRemaining = WATER.MAX_BREATH;
   }
 
   // ── Instant rotation to camera yaw ─────────────────────────

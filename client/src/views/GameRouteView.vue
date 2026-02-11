@@ -41,6 +41,14 @@ function handleGameLoading(data: { roomId: string; seed: string; config: any }) 
     query.pistols = data.config.pistolCount.toString();
   }
   
+  if (data.config.headshotDmg !== undefined) {
+    query.hsDmg = data.config.headshotDmg.toString();
+  }
+  
+  if (data.config.normalDmg !== undefined) {
+    query.nsDmg = data.config.normalDmg.toString();
+  }
+  
   router.replace({
     name: 'game',
     query

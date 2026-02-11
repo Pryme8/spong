@@ -10,6 +10,7 @@
       :room-id="roomId"
       :my-entity-id="myEntityId"
       :players="players"
+      :kill-feed-entries="killFeedEntries"
       :player-health="playerHealth"
       :max-health="maxHealth"
       :player-armor="playerArmor"
@@ -17,6 +18,10 @@
       :player-stamina="playerStamina"
       :player-is-exhausted="playerIsExhausted"
       :player-has-infinite-stamina="playerHasInfiniteStamina"
+      :player-breath-remaining="playerBreathRemaining"
+      :player-max-breath="playerMaxBreath"
+      :player-is-underwater="playerIsUnderwater"
+      :player-is-in-water="playerIsInWater"
       :has-weapon="hasWeapon"
       :weapon-type="weaponType"
       :current-ammo="currentAmmo"
@@ -25,10 +30,23 @@
       :reload-progress="reloadProgress"
       :latency="latency"
       :ping-color-class="pingColorClass"
+      :hit-marker-visible="hitMarkerVisible"
     />
 
     <!-- Back button -->
     <router-link to="/" class="back-button">← Back</router-link>
+
+    <!-- Weapon Debug Panel (toggle with U key) -->
+    <WeaponDebugPanel
+      v-if="showWeaponDebug"
+      :visible="showWeaponDebug"
+      :weapon-type="weaponType"
+      :initial-position="weaponDebugPosition"
+      :initial-rotation="weaponDebugRotation"
+      @transform-change="handleWeaponTransformChange"
+      @disable-debug="handleDisableDebugMode"
+      @close="showWeaponDebug = false"
+    />
   </div>
 </template>
 
@@ -37,6 +55,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useGameSession } from '../composables/useGameSession';
 import { PLAYER_MAX_HEALTH } from '@spong/shared';
 import GameHud from '../components/GameHud.vue';
+import WeaponDebugPanel from '../components/WeaponDebugPanel.vue';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 
@@ -56,6 +75,10 @@ const {
   playerStamina,
   playerIsExhausted,
   playerHasInfiniteStamina,
+  playerBreathRemaining,
+  playerMaxBreath,
+  playerIsUnderwater,
+  playerIsInWater,
   hasWeapon,
   weaponType,
   currentAmmo,
@@ -63,7 +86,9 @@ const {
   isReloading,
   reloadProgress,
   latency,
-  pingColorClass
+  pingColorClass,
+  killFeedEntries,
+  hitMarkerVisible
 } = session;
 
 // Health computed
@@ -78,6 +103,68 @@ const healthBarClass = computed(() => {
   return 'health-low';
 });
 
+// Weapon debug panel state
+const showWeaponDebug = ref(false);
+const weaponDebugPosition = ref({ x: 0, y: 0, z: 0 });
+const weaponDebugRotation = ref({ x: 0, y: 0, z: 0 });
+
+// Keyboard handlers
+function handleKeyDown(e: KeyboardEvent) {
+  // F12 to toggle Babylon inspector
+  if (e.code === 'F12') {
+    e.preventDefault();
+    toggleInspector();
+  }
+  
+  // U key to toggle weapon debug panel
+  if (e.code === 'KeyU') {
+    e.preventDefault();
+    showWeaponDebug.value = !showWeaponDebug.value;
+    
+    // Update initial values from current weapon holder when opening
+    if (showWeaponDebug.value && session.myTransform?.value) {
+      const holder = session.myTransform.value.getWeaponHolder();
+      const pos = holder.getWeaponPosition();
+      const rot = holder.getWeaponRotation();
+      if (pos) weaponDebugPosition.value = pos;
+      if (rot) weaponDebugRotation.value = rot;
+    }
+  }
+}
+
+function handleKeyUp(e: KeyboardEvent) {
+  // Reserved for future use
+}
+
+function handleWeaponTransformChange(position: { x: number; y: number; z: number }, rotation: { x: number; y: number; z: number }) {
+  if (session.myTransform?.value) {
+    const holder = session.myTransform.value.getWeaponHolder();
+    holder.setDebugMode(true); // Enable debug mode to prevent auto-positioning
+    holder.setWeaponPosition(position.x, position.y, position.z);
+    holder.setWeaponRotation(rotation.x, rotation.y, rotation.z);
+  }
+}
+
+function handleDisableDebugMode() {
+  if (session.myTransform?.value) {
+    const holder = session.myTransform.value.getWeaponHolder();
+    holder.setDebugMode(false); // Weapon will return to default positioning
+  }
+}
+
+// Toggle Babylon.js inspector for debugging
+async function toggleInspector() {
+  const scene = session.getScene();
+  if (!scene) return;
+  
+  if (scene.debugLayer.isVisible()) {
+    scene.debugLayer.hide();
+  } else {
+    await import('@babylonjs/inspector');
+    scene.debugLayer.show({ embedMode: true });
+  }
+}
+
 // Initialize session when mounted
 onMounted(async () => {
   if (!canvasRef.value) return;
@@ -86,10 +173,16 @@ onMounted(async () => {
     roomId: 'shooting_range_1',
     isMobile: false
   });
+  
+  // Add keyboard listeners
+  window.addEventListener('keydown', handleKeyDown);
+  window.addEventListener('keyup', handleKeyUp);
 });
 
 // Cleanup on unmount
 onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown);
+  window.removeEventListener('keyup', handleKeyUp);
   session.dispose();
 });
 </script>

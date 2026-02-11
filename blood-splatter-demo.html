@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blood Splatter Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+        }
+        
+        #container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #ff3333;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        #canvasContainer {
+            position: relative;
+            width: 1024px;
+            height: 1024px;
+            margin: 20px auto;
+        }
+        
+        #canvas, #maskCanvas {
+            display: block;
+            position: absolute;
+            left: 0;
+            top: 0;
+            border: 3px solid #333;
+            cursor: crosshair;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        #canvas {
+            background: #f5f5f0;
+        }
+        
+        #maskCanvas {
+            background: #000;
+            display: none;
+        }
+        
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+        }
+        
+        .control-group {
+            display: inline-block;
+            margin: 10px 20px;
+            text-align: left;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #ccc;
+        }
+        
+        input[type="range"] {
+            width: 200px;
+        }
+        
+        button {
+            background: #ff3333;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        button:hover {
+            background: #cc0000;
+        }
+        
+        #toggleViewBtn {
+            background: #3366ff;
+        }
+        
+        #toggleViewBtn:hover {
+            background: #2255dd;
+        }
+        
+        .info {
+            text-align: center;
+            color: #888;
+            margin-top: 10px;
+        }
+        
+        select {
+            padding: 5px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        
+        input[type="checkbox"] {
+            cursor: pointer;
+            width: 18px;
+            height: 18px;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        
+        #blurBtn {
+            background: #9933ff;
+        }
+        
+        #blurBtn:hover {
+            background: #7722dd;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>🩸 Blood Splatter Generator 🩸</h1>
+        
+        <div id="canvasContainer">
+            <canvas id="canvas" width="1024" height="1024"></canvas>
+            <canvas id="maskCanvas" width="1024" height="1024"></canvas>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label>Splatter Style:</label>
+                <select id="styleSelect">
+                    <option value="radial">Radial Splatter</option>
+                    <option value="droplet">Droplet Cluster</option>
+                    <option value="spray">Spray Pattern</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>Splatter Size: <span id="sizeValue">120</span></label>
+                <input type="range" id="sizeSlider" min="50" max="300" value="120">
+            </div>
+            
+            <div class="control-group">
+                <label>Intensity: <span id="intensityValue">0.8</span></label>
+                <input type="range" id="intensitySlider" min="0.3" max="1.0" step="0.1" value="0.8">
+            </div>
+            
+            <div class="control-group">
+                <label>Droplet Count: <span id="countValue">30</span></label>
+                <input type="range" id="countSlider" min="10" max="60" value="30">
+            </div>
+            
+            <div class="control-group">
+                <label>Blur Amount: <span id="blurValue">2</span>px</label>
+                <input type="range" id="blurSlider" min="1" max="20" value="2">
+            </div>
+            
+            <br>
+            
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="randomizeToggle">
+                    Randomize Each Splatter
+                </label>
+            </div>
+            
+            <br>
+            
+            <button id="clearBtn">Clear Canvas</button>
+            <button id="randomBtn">Random Splatters</button>
+            <button id="blurBtn">Apply Blur</button>
+            <button id="toggleViewBtn">Toggle View (Color/Mask)</button>
+        </div>
+        
+        <div class="info">
+            Click anywhere on the canvas to create a blood splatter!<br>
+            Toggle "Randomize Each Splatter" for varied splatters on each click. Use "Apply Blur" to soften edges.
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const maskCanvas = document.getElementById('maskCanvas');
+        const maskCtx = maskCanvas.getContext('2d');
+        
+        // Control elements
+        const styleSelect = document.getElementById('styleSelect');
+        const sizeSlider = document.getElementById('sizeSlider');
+        const intensitySlider = document.getElementById('intensitySlider');
+        const countSlider = document.getElementById('countSlider');
+        const blurSlider = document.getElementById('blurSlider');
+        const clearBtn = document.getElementById('clearBtn');
+        const randomBtn = document.getElementById('randomBtn');
+        const blurBtn = document.getElementById('blurBtn');
+        const toggleViewBtn = document.getElementById('toggleViewBtn');
+        const randomizeToggle = document.getElementById('randomizeToggle');
+        
+        let showMask = false;
+        
+        // Update value displays
+        sizeSlider.oninput = () => document.getElementById('sizeValue').textContent = sizeSlider.value;
+        intensitySlider.oninput = () => document.getElementById('intensityValue').textContent = intensitySlider.value;
+        countSlider.oninput = () => document.getElementById('countValue').textContent = countSlider.value;
+        blurSlider.oninput = () => document.getElementById('blurValue').textContent = blurSlider.value;
+        
+        // Seeded random number generator for deterministic results
+        class SeededRandom {
+            constructor(seed) {
+                this.seed = seed;
+            }
+            
+            next() {
+                this.seed = (this.seed * 9301 + 49297) % 233280;
+                return this.seed / 233280;
+            }
+            
+            random(min, max) {
+                return this.next() * (max - min) + min;
+            }
+            
+            randomInt(min, max) {
+                return Math.floor(this.random(min, max + 1));
+            }
+        }
+        
+        let rng = new SeededRandom(Date.now());
+        
+        // Color generation with variation
+        function getBloodColor(opacity = 1, isMask = false) {
+            if (isMask) return `rgba(255, 255, 255, ${opacity})`;
+            const red = rng.randomInt(120, 180);
+            const green = rng.randomInt(0, 20);
+            const blue = rng.randomInt(0, 10);
+            return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+        }
+        
+        function getDarkBloodColor(opacity = 1, isMask = false) {
+            if (isMask) return `rgba(255, 255, 255, ${opacity})`;
+            const red = rng.randomInt(80, 120);
+            const green = rng.randomInt(0, 10);
+            const blue = rng.randomInt(0, 5);
+            return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+        }
+        
+        // Draw irregular circle (main splatter body)
+        function drawIrregularBlob(context, x, y, radius, color) {
+            context.save();
+            context.beginPath();
+            
+            const points = 20;
+            for (let i = 0; i <= points; i++) {
+                const angle = (i / points) * Math.PI * 2;
+                const variation = rng.random(0.7, 1.1);
+                const r = radius * variation;
+                const px = x + Math.cos(angle) * r;
+                const py = y + Math.sin(angle) * r;
+                
+                if (i === 0) {
+                    context.moveTo(px, py);
+                } else {
+                    context.lineTo(px, py);
+                }
+            }
+            
+            context.closePath();
+            context.fillStyle = color;
+            context.fill();
+            context.restore();
+        }
+        
+        // Draw a single droplet
+        function drawDroplet(context, x, y, radius, opacity, isMask) {
+            const gradient = context.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
+            gradient.addColorStop(0, getBloodColor(opacity, isMask));
+            gradient.addColorStop(0.7, getDarkBloodColor(opacity * 0.8, isMask));
+            gradient.addColorStop(1, getDarkBloodColor(opacity * 0.3, isMask));
+            
+            context.beginPath();
+            context.arc(x, y, radius, 0, Math.PI * 2);
+            context.fillStyle = gradient;
+            context.fill();
+        }
+        
+        // Radial splatter pattern
+        function drawRadialSplatter(context, x, y, size, intensity, dropletCount, isMask) {
+            // Randomize main splatter body sizes
+            const outerSize = size * rng.random(0.55, 0.65);
+            const innerSize = size * rng.random(0.35, 0.45);
+            
+            drawIrregularBlob(context, x, y, outerSize, getDarkBloodColor(intensity, isMask));
+            drawIrregularBlob(context, x, y, innerSize, getBloodColor(intensity * rng.random(0.85, 0.95), isMask));
+            
+            // Radiating streaks - randomized count and spacing
+            const streakCount = rng.randomInt(10, 20);
+            const angleOffset = rng.random(0, Math.PI * 2);
+            const skipChance = rng.random(0.1, 0.3);
+            
+            for (let i = 0; i < streakCount; i++) {
+                if (rng.next() < skipChance) continue;
+                
+                const angle = angleOffset + (i * (Math.PI * 2) / streakCount) + rng.random(-0.15, 0.15);
+                const length = rng.random(size * 0.35, size * 0.85);
+                const startWidth = rng.random(0.3, 1.8);
+                const endWidth = rng.random(2.5, 6.5);
+                
+                const endX = Math.cos(angle) * length;
+                const endY = Math.sin(angle) * length;
+                
+                context.save();
+                
+                const gradient = context.createLinearGradient(x, y, x + endX, y + endY);
+                const midPoint = rng.random(0.5, 0.7);
+                gradient.addColorStop(0, getDarkBloodColor(intensity * rng.random(0.6, 0.8), isMask));
+                gradient.addColorStop(midPoint, getBloodColor(intensity * rng.random(0.4, 0.6), isMask));
+                gradient.addColorStop(1, getBloodColor(0, isMask));
+                
+                context.beginPath();
+                const perpX = -Math.sin(angle);
+                const perpY = Math.cos(angle);
+                context.moveTo(x + perpX * startWidth * 0.5, y + perpY * startWidth * 0.5);
+                context.lineTo(x - perpX * startWidth * 0.5, y - perpY * startWidth * 0.5);
+                context.lineTo(x + endX + perpX * endWidth * 0.5, y + endY + perpY * endWidth * 0.5);
+                context.lineTo(x + endX - perpX * endWidth * 0.5, y + endY - perpY * endWidth * 0.5);
+                context.closePath();
+                context.fillStyle = gradient;
+                context.fill();
+                context.restore();
+                
+                // Droplet at end of streak
+                const dropletThreshold = rng.random(0.3, 0.5);
+                if (rng.next() > dropletThreshold) {
+                    const dx = x + endX;
+                    const dy = y + endY;
+                    const dropletRadius = rng.random(1.5, 4.5);
+                    const dropletOpacity = intensity * rng.random(0.5, 0.7);
+                    drawDroplet(context, dx, dy, dropletRadius, dropletOpacity, isMask);
+                }
+            }
+            
+            // Scattered droplets radiating in all directions
+            const actualDropletCount = rng.randomInt(Math.floor(dropletCount * 0.7), Math.ceil(dropletCount * 1.3));
+            for (let i = 0; i < actualDropletCount; i++) {
+                const angle = (i * (Math.PI * 2) / actualDropletCount) + rng.random(-0.4, 0.4);
+                const distance = rng.random(size * 0.5, size * 1.3);
+                const dx = x + Math.cos(angle) * distance;
+                const dy = y + Math.sin(angle) * distance;
+                const radius = rng.random(0.5, 3.5) * (1 - distance / (size * 1.5));
+                drawDroplet(context, dx, dy, radius, intensity * rng.random(0.3, 0.9), isMask);
+            }
+        }
+        
+        
+        // Droplet cluster
+        function drawDropletCluster(context, x, y, size, intensity, dropletCount, isMask) {
+            // Central large splat with randomized size
+            drawIrregularBlob(context, x, y, size * rng.random(0.35, 0.5), getDarkBloodColor(intensity, isMask));
+            
+            // Cluster of various sized droplets
+            const actualCount = rng.randomInt(Math.floor(dropletCount * 1.2), Math.ceil(dropletCount * 1.8));
+            const maxDistance = size * rng.random(1.3, 1.7);
+            const falloffPower = rng.random(0.4, 0.6);
+            
+            for (let i = 0; i < actualCount; i++) {
+                const angle = rng.random(0, Math.PI * 2);
+                const distance = rng.random(0, maxDistance) * Math.pow(rng.next(), falloffPower);
+                const dx = x + Math.cos(angle) * distance;
+                const dy = y + Math.sin(angle) * distance;
+                const radius = rng.random(1.5, 9) * (1 - distance / maxDistance);
+                
+                drawDroplet(context, dx, dy, radius, intensity * rng.random(0.5, 1.0), isMask);
+            }
+        }
+        
+        // Spray pattern
+        function drawSprayPattern(context, x, y, size, intensity, dropletCount, isMask) {
+            const direction = rng.random(0, Math.PI * 2);
+            const spread = rng.random(1.0, 1.4);
+            const density = rng.random(1.8, 2.3);
+            
+            // Fine mist of tiny droplets
+            const mistCount = Math.floor(dropletCount * density);
+            for (let i = 0; i < mistCount; i++) {
+                const spreadAngle = rng.random(direction - spread, direction + spread);
+                const falloff = rng.random(0.25, 0.35);
+                const distance = rng.random(size * 0.4, size * 3.2) * Math.pow(rng.next(), falloff);
+                const dx = x + Math.cos(spreadAngle) * distance;
+                const dy = y + Math.sin(spreadAngle) * distance;
+                const radius = rng.random(0.4, 2.8);
+                
+                drawDroplet(context, dx, dy, radius, intensity * rng.random(0.2, 0.7), isMask);
+            }
+            
+            // Some larger droplets mixed in
+            const largeCount = rng.randomInt(Math.floor(dropletCount * 0.2), Math.ceil(dropletCount * 0.4));
+            const largeSpread = rng.random(0.5, 0.8);
+            
+            for (let i = 0; i < largeCount; i++) {
+                const spreadAngle = rng.random(direction - largeSpread, direction + largeSpread);
+                const distance = rng.random(size * 0.2, size * 2.0);
+                const dx = x + Math.cos(spreadAngle) * distance;
+                const dy = y + Math.sin(spreadAngle) * distance;
+                const radius = rng.random(2.5, 8);
+                
+                drawDroplet(context, dx, dy, radius, intensity * rng.random(0.5, 0.95), isMask);
+            }
+        }
+        
+        // Main splatter function - draws to both canvases deterministically
+        function createSplatter(x, y) {
+            let style = styleSelect.value;
+            let size = parseFloat(sizeSlider.value);
+            let intensity = parseFloat(intensitySlider.value);
+            let dropletCount = parseInt(countSlider.value);
+            
+            // Randomize properties if toggle is enabled
+            if (randomizeToggle.checked) {
+                const tempRng = new SeededRandom(Date.now());
+                const styles = ['radial', 'droplet', 'spray'];
+                style = styles[tempRng.randomInt(0, 2)];
+                size = tempRng.random(80, 250);
+                intensity = tempRng.random(0.5, 1.0);
+                dropletCount = tempRng.randomInt(20, 60);
+            }
+            
+            // Create a seed for this splatter
+            const seed = Date.now() + Math.floor(x * 1000 + y);
+            
+            // Draw to color canvas
+            rng = new SeededRandom(seed);
+            switch(style) {
+                case 'radial':
+                    drawRadialSplatter(ctx, x, y, size, intensity, dropletCount, false);
+                    break;
+                case 'droplet':
+                    drawDropletCluster(ctx, x, y, size, intensity, dropletCount, false);
+                    break;
+                case 'spray':
+                    drawSprayPattern(ctx, x, y, size, intensity, dropletCount, false);
+                    break;
+            }
+            
+            // Draw to mask canvas (reset RNG with same seed)
+            rng = new SeededRandom(seed);
+            switch(style) {
+                case 'radial':
+                    drawRadialSplatter(maskCtx, x, y, size, intensity, dropletCount, true);
+                    break;
+                case 'droplet':
+                    drawDropletCluster(maskCtx, x, y, size, intensity, dropletCount, true);
+                    break;
+                case 'spray':
+                    drawSprayPattern(maskCtx, x, y, size, intensity, dropletCount, true);
+                    break;
+            }
+        }
+        
+        // Blur function - applies blur to both canvases
+        function applyBlur() {
+            const blurAmount = parseInt(blurSlider.value);
+            
+            // Blur color canvas
+            ctx.filter = `blur(${blurAmount}px)`;
+            ctx.drawImage(canvas, 0, 0);
+            ctx.filter = 'none';
+            
+            // Blur mask canvas
+            maskCtx.filter = `blur(${blurAmount}px)`;
+            maskCtx.drawImage(maskCanvas, 0, 0);
+            maskCtx.filter = 'none';
+        }
+        
+        // Event handlers for both canvases
+        function handleCanvasClick(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            createSplatter(x, y);
+        }
+        
+        canvas.addEventListener('click', handleCanvasClick);
+        maskCanvas.addEventListener('click', handleCanvasClick);
+        
+        clearBtn.addEventListener('click', () => {
+            ctx.fillStyle = '#f5f5f0';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            maskCtx.fillStyle = '#000';
+            maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+        });
+        
+        blurBtn.addEventListener('click', () => {
+            applyBlur();
+        });
+        
+        toggleViewBtn.addEventListener('click', () => {
+            showMask = !showMask;
+            if (showMask) {
+                canvas.style.display = 'none';
+                maskCanvas.style.display = 'block';
+                toggleViewBtn.textContent = 'Toggle View (Mask)';
+            } else {
+                canvas.style.display = 'block';
+                maskCanvas.style.display = 'none';
+                toggleViewBtn.textContent = 'Toggle View (Color)';
+            }
+        });
+        
+        randomBtn.addEventListener('click', () => {
+            ctx.fillStyle = '#f5f5f0';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            maskCtx.fillStyle = '#000';
+            maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+            
+            const tempRng = new SeededRandom(Date.now());
+            const count = tempRng.randomInt(5, 12);
+            for (let i = 0; i < count; i++) {
+                const x = tempRng.random(100, canvas.width - 100);
+                const y = tempRng.random(100, canvas.height - 100);
+                
+                // Randomize settings
+                const styles = ['radial', 'droplet', 'spray'];
+                styleSelect.value = styles[tempRng.randomInt(0, 2)];
+                sizeSlider.value = tempRng.random(80, 220);
+                intensitySlider.value = tempRng.random(0.5, 1.0);
+                countSlider.value = tempRng.randomInt(25, 55);
+                
+                createSplatter(x, y);
+            }
+        });
+        
+        // Initialize with clean canvases
+        ctx.fillStyle = '#f5f5f0';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        maskCtx.fillStyle = '#000';
+        maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+    </script>
+</body>
+</html>

@@ -8,7 +8,8 @@ import {
   FIXED_TIMESTEP,
   VoxelGrid,
   type RockColliderMesh,
-  type RockTransform
+  type RockTransform,
+  type WaterLevelProvider
 } from '@spong/shared';
 import type { TreeColliderMesh } from '@spong/shared/dist/src/treegen/TreeMesh';
 import type { TreeTransform } from '@spong/shared/dist/src/treegen/TreeMeshTransform';
@@ -16,6 +17,8 @@ import { ShadowManager } from './ShadowManager';
 import { createPlayerArmorMesh, disposePlayerArmorMesh } from './PlayerArmorMesh';
 import { createPlayerHelmetMesh, disposePlayerHelmetMesh } from './PlayerHelmetMesh';
 import type { BuildingCollisionManager } from './BuildingCollisionManager';
+import { WeaponHolder } from './WeaponHolder';
+import type { WeaponType } from './WeaponSystem';
 
 interface InputSnapshot {
   sequence: number;
@@ -26,21 +29,27 @@ export class LocalTransform {
   readonly entityId: number;
   private node: TransformNode;
   private headNode: Mesh;
+  private bodyNode: Mesh;
   private armorNode: TransformNode | null = null;
   private helmetNode: TransformNode | null = null;
+  private weaponHolder: WeaponHolder;
   private state: CharacterState;
   private voxelGrid?: VoxelGrid;
   private buildingCollisionManager?: BuildingCollisionManager;
   private treeColliderGetter?: () => Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>;
   private rockColliderGetter?: () => Array<{ mesh: RockColliderMesh; transform: RockTransform }>;
+  private octreeGetter?: () => any;
+  private waterLevelProviderGetter?: () => WaterLevelProvider | undefined;
   private scene: Scene;
 
-  // Current input (updated each frame, consumed by fixedUpdate)
+  // Current input (updated each physics tick, consumed by fixedUpdate)
   private input: CharacterInput = {
     forward: 0,
     right: 0,
     cameraYaw: 0,
-    jump: false
+    cameraPitch: 0,
+    jump: false,
+    sprint: false
   };
 
   // Local vs remote
@@ -94,7 +103,9 @@ export class LocalTransform {
     voxelGrid?: VoxelGrid,
     buildingCollisionManager?: BuildingCollisionManager,
     treeColliderGetter?: () => Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>,
-    rockColliderGetter?: () => Array<{ mesh: RockColliderMesh; transform: RockTransform }>
+    rockColliderGetter?: () => Array<{ mesh: RockColliderMesh; transform: RockTransform }>,
+    octreeGetter?: () => any,
+    waterLevelProviderGetter?: () => WaterLevelProvider | undefined
   ) {
     this.entityId = entityId;
     this.isLocal = isLocal;
@@ -102,11 +113,33 @@ export class LocalTransform {
     this.buildingCollisionManager = buildingCollisionManager;
     this.treeColliderGetter = treeColliderGetter;
     this.rockColliderGetter = rockColliderGetter;
+    this.octreeGetter = octreeGetter;
+    this.waterLevelProviderGetter = waterLevelProviderGetter;
     this.scene = scene;
     this.node = new TransformNode(`local_${entityId}`, scene);
     this.node.position = Vector3.Zero();
     this.node.rotationQuaternion = Quaternion.Identity();
     this.state = createCharacterState();
+    
+    // Create body cube
+    this.bodyNode = MeshBuilder.CreateBox(`body_${entityId}`, {
+      width: 0.8,
+      height: 1.0,
+      depth: 0.8
+    }, scene);
+    this.bodyNode.parent = this.node;
+    this.bodyNode.position.set(0, 0.5, 0);
+    
+    // Hide local player's body in first-person view
+    if (isLocal) {
+      this.bodyNode.isVisible = false;
+    }
+    
+    const bodyMat = new StandardMaterial(`bodyMat_${entityId}`, scene);
+    bodyMat.diffuseColor = new Color3(0.3, 0.3, 0.35); // Dark gray body
+    bodyMat.emissiveColor = new Color3(0, 0, 0);
+    bodyMat.specularColor = new Color3(0.1, 0.1, 0.1);
+    this.bodyNode.material = bodyMat;
     
     // Create head cube
     this.headNode = MeshBuilder.CreateBox(`head_${entityId}`, {
@@ -115,7 +148,12 @@ export class LocalTransform {
       depth: 0.6
     }, scene);
     this.headNode.parent = this.node;
-    this.headNode.position.set(0, 0.8, 0);
+    this.headNode.position.set(0, 1.3, 0);
+    
+    // Hide local player's head in first-person view
+    if (isLocal) {
+      this.headNode.isVisible = false;
+    }
     
     const headMat = new StandardMaterial(`headMat_${entityId}`, scene);
     headMat.diffuseColor = new Color3(0.6, 0.5, 0.4); // Darker skin tone
@@ -127,12 +165,16 @@ export class LocalTransform {
     if (this.hasShadows) {
       this.registerShadows();
     }
+
+    // Initialize weapon holder
+    this.weaponHolder = new WeaponHolder(scene, `player_${entityId}`, isLocal);
   }
 
   private registerShadows(): void {
     const sm = ShadowManager.getInstance();
     if (!sm) return;
     
+    sm.addShadowCaster(this.bodyNode, true); // Enable self-shadows
     sm.addShadowCaster(this.headNode, true); // Enable self-shadows
   }
 
@@ -146,11 +188,13 @@ export class LocalTransform {
     }
   }
 
-  setInput(forward: number, right: number, cameraYaw: number, jump: boolean) {
+  setInput(forward: number, right: number, cameraYaw: number, jump: boolean, sprint: boolean = false, cameraPitch: number = 0) {
     this.input.forward = forward;
     this.input.right = right;
     this.input.cameraYaw = cameraYaw;
+    this.input.cameraPitch = cameraPitch;
     this.input.jump = jump;
+    this.input.sprint = sprint;
   }
 
   setHeadPitch(pitch: number) {
@@ -181,7 +225,9 @@ export class LocalTransform {
       forward: this.input.forward,
       right: this.input.right,
       cameraYaw: this.input.cameraYaw,
-      jump: this.input.jump
+      cameraPitch: this.input.cameraPitch,
+      jump: this.input.jump,
+      sprint: this.input.sprint
     };
 
     this.inputBuffer.push({
@@ -195,10 +241,19 @@ export class LocalTransform {
 
     // Get collision data for client-side prediction (must match server exactly)
     const blockColliders = this.buildingCollisionManager?.getBlockColliders();
-    const treeColliders = this.treeColliderGetter?.();
-    const rockColliders = this.rockColliderGetter?.();
+    let treeColliders = this.treeColliderGetter?.() ?? [];
+    let rockColliders = this.rockColliderGetter?.() ?? [];
     
-    stepCharacter(this.state, this.input, deltaTime, this.voxelGrid, treeColliders, rockColliders, blockColliders);
+    // Query octree for nearby colliders (broad-phase culling)
+    const octree = this.octreeGetter?.();
+    if (octree) {
+      const nearby = octree.queryPoint(this.state.posX, this.state.posY, this.state.posZ, 8);
+      treeColliders = nearby.filter((e: any) => e.type === 'tree').map((e: any) => e.data);
+      rockColliders = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
+    }
+    
+    const waterProvider = this.waterLevelProviderGetter ? this.waterLevelProviderGetter() : undefined;
+    stepCharacter(this.state, this.input, deltaTime, this.voxelGrid, treeColliders, rockColliders, blockColliders, waterProvider);
   }
 
   /**
@@ -234,14 +289,41 @@ export class LocalTransform {
       this.state.velX = data.velocity.x;
       this.state.velY = data.velocity.y;
       this.state.velZ = data.velocity.z;
+      
+      // Sync water state from server
+      if (data.isInWater !== undefined) {
+        this.state.isInWater = data.isInWater;
+      }
+      if (data.isHeadUnderwater !== undefined) {
+        this.state.isHeadUnderwater = data.isHeadUnderwater;
+      }
+      if (data.breathRemaining !== undefined) {
+        this.state.breathRemaining = data.breathRemaining;
+      }
+      if (data.waterDepth !== undefined) {
+        this.state.waterDepth = data.waterDepth;
+      }
+      if (data.isExhausted !== undefined) {
+        this.state.isExhausted = data.isExhausted;
+      }
 
       // 4. Replay all unacknowledged inputs
       // CRITICAL: Must use same collision data as initial prediction
       const blockColliders = this.buildingCollisionManager?.getBlockColliders();
-      const treeColliders = this.treeColliderGetter?.();
-      const rockColliders = this.rockColliderGetter?.();
+      let treeColliders = this.treeColliderGetter?.() ?? [];
+      let rockColliders = this.rockColliderGetter?.() ?? [];
+      
+      // Query octree for nearby colliders (broad-phase culling)
+      const octree = this.octreeGetter?.();
+      if (octree) {
+        const nearby = octree.queryPoint(this.state.posX, this.state.posY, this.state.posZ, 8);
+        treeColliders = nearby.filter((e: any) => e.type === 'tree').map((e: any) => e.data);
+        rockColliders = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
+      }
+      
       for (const snapshot of this.inputBuffer) {
-        stepCharacter(this.state, snapshot.input, FIXED_TIMESTEP, this.voxelGrid, treeColliders, rockColliders, blockColliders);
+        const waterProvider = this.waterLevelProviderGetter ? this.waterLevelProviderGetter() : undefined;
+        stepCharacter(this.state, snapshot.input, FIXED_TIMESTEP, this.voxelGrid, treeColliders, rockColliders, blockColliders, waterProvider);
       }
 
       // 5. How much did our prediction change?
@@ -270,14 +352,58 @@ export class LocalTransform {
       }
     } else {
       // Remote player — set up interpolation targets
-      this.prevPosition.copyFrom(this.node.position);
-      if (this.node.rotationQuaternion) {
-        this.prevRotation.copyFrom(this.node.rotationQuaternion);
+      const newTargetX = data.position.x;
+      const newTargetY = data.position.y;
+      const newTargetZ = data.position.z;
+      
+      // Check for large teleport (respawn/death)
+      const deltaX = newTargetX - this.node.position.x;
+      const deltaY = newTargetY - this.node.position.y;
+      const deltaZ = newTargetZ - this.node.position.z;
+      const dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+      
+      if (dist > 4.0) {
+        // Large teleport (respawn) - snap immediately without interpolation
+        this.node.position.set(newTargetX, newTargetY, newTargetZ);
+        this.prevPosition.copyFrom(this.node.position);
+        this.targetPosition.copyFrom(this.node.position);
+        
+        if (this.node.rotationQuaternion) {
+          this.node.rotationQuaternion.set(data.rotation.x, data.rotation.y, data.rotation.z, data.rotation.w);
+          this.prevRotation.copyFrom(this.node.rotationQuaternion);
+          this.targetRotation.copyFrom(this.node.rotationQuaternion);
+        }
+        this.targetHeadPitch = data.headPitch || 0;
+        this.headNode.rotation.x = this.targetHeadPitch;
+        this.interpT = 1.0;
+      } else {
+        // Normal movement - interpolate smoothly
+        this.prevPosition.copyFrom(this.node.position);
+        if (this.node.rotationQuaternion) {
+          this.prevRotation.copyFrom(this.node.rotationQuaternion);
+        }
+        this.targetPosition.set(newTargetX, newTargetY, newTargetZ);
+        this.targetRotation.set(data.rotation.x, data.rotation.y, data.rotation.z, data.rotation.w);
+        this.targetHeadPitch = data.headPitch || 0;
+        this.interpT = 0;
       }
-      this.targetPosition.set(data.position.x, data.position.y, data.position.z);
-      this.targetRotation.set(data.rotation.x, data.rotation.y, data.rotation.z, data.rotation.w);
-      this.targetHeadPitch = data.headPitch || 0;
-      this.interpT = 0;
+      
+      // Sync water state for remote players too (for future effects)
+      if (data.isInWater !== undefined) {
+        this.state.isInWater = data.isInWater;
+      }
+      if (data.isHeadUnderwater !== undefined) {
+        this.state.isHeadUnderwater = data.isHeadUnderwater;
+      }
+      if (data.breathRemaining !== undefined) {
+        this.state.breathRemaining = data.breathRemaining;
+      }
+      if (data.waterDepth !== undefined) {
+        this.state.waterDepth = data.waterDepth;
+      }
+      if (data.isExhausted !== undefined) {
+        this.state.isExhausted = data.isExhausted;
+      }
     }
   }
 
@@ -349,6 +475,9 @@ export class LocalTransform {
       Vector3.LerpToRef(this.prevPosition, this.targetPosition, this.interpT, this.node.position);
       Quaternion.SlerpToRef(this.prevRotation, this.targetRotation, this.interpT, this.node.rotationQuaternion);
       this.headNode.rotation.x = this.targetHeadPitch;
+
+      // Update remote player's weapon holder (third-person view)
+      this.updateWeaponHolder();
     }
   }
 
@@ -398,6 +527,48 @@ export class LocalTransform {
     }
   }
 
+  /**
+   * Equip a weapon (shows weapon mesh)
+   */
+  equipWeapon(weaponType: WeaponType): void {
+    this.weaponHolder.equipWeapon(weaponType);
+  }
+
+  /**
+   * Clear weapon (removes weapon mesh)
+   */
+  clearWeapon(): void {
+    this.weaponHolder.clearWeapon();
+  }
+
+  /**
+   * Set visibility of player mesh (for debug third-person view)
+   */
+  setMeshVisibility(visible: boolean): void {
+    this.headNode.isVisible = visible;
+    this.bodyNode.isVisible = visible;
+  }
+
+  /**
+   * Get weapon holder (for debug panel)
+   */
+  getWeaponHolder(): WeaponHolder {
+    return this.weaponHolder;
+  }
+
+  /**
+   * Update weapon holder position (pass camera for local player in first-person)
+   */
+  updateWeaponHolder(camera?: any): void {
+    if (camera) {
+      // First-person mode (weapon attached to camera)
+      this.weaponHolder.updateFirstPerson(camera);
+    } else {
+      // Third-person mode (weapon attached to player node)
+      this.weaponHolder.updateThirdPerson(this.node);
+    }
+  }
+
   dispose() {
     if (this.armorNode) {
       disposePlayerArmorMesh(`player_${this.entityId}`, this.scene);
@@ -407,6 +578,8 @@ export class LocalTransform {
       disposePlayerHelmetMesh(`player_${this.entityId}`, this.scene);
       this.helmetNode = null;
     }
+    this.weaponHolder.dispose();
+    this.bodyNode.dispose();
     this.headNode.dispose();
     this.node.dispose();
   }

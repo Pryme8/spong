@@ -316,11 +316,11 @@ export class ProjectileManager {
 
         const pos = transform.getPosition();
         const bx = pos.x;
-        const by = pos.y + PLAYER_HITBOX_CENTER_Y;
+        const by = pos.y; // pos.y is already the hitbox center
         const bz = pos.z;
 
         // Check HEAD hitbox first (matches server priority)
-        const headY = by + 0.8;
+        const headY = by + 1.3; // Head positioned +1.3 above body center (matches visual)
         const headHalfSize = 0.3;
         const headResult = rayVsAABB(
           stepStartX, stepStartY, stepStartZ,

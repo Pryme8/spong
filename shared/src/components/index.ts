@@ -37,6 +37,8 @@ export interface PlayerComponent {
   lastProcessedInput: number;
   lastShootTime: number; // Timestamp (seconds) of last shot for rate limiting
   headPitch: number; // Current pitch of head for hitbox calculation and visualization
+  /** Server-side input queue — one entry per received client input, processed one per tick. */
+  inputQueue?: Array<CharacterInput & { sequence: number }>;
 }
 
 export interface HealthComponent {
@@ -46,6 +48,7 @@ export interface HealthComponent {
 
 export interface ProjectileComponent {
   ownerId: number;      // entity ID of the shooter
+  weaponType: string;   // weapon type that fired this projectile
   dirX: number;         // normalized direction
   dirY: number;
   dirZ: number;

@@ -10,6 +10,7 @@
       :room-id="roomId"
       :my-entity-id="myEntityId"
       :players="players"
+      :kill-feed-entries="killFeedEntries"
       :player-health="playerHealth"
       :max-health="maxHealth"
       :player-armor="playerArmor"
@@ -17,6 +18,10 @@
       :player-stamina="playerStamina"
       :player-is-exhausted="playerIsExhausted"
       :player-has-infinite-stamina="playerHasInfiniteStamina"
+      :player-breath-remaining="playerBreathRemaining"
+      :player-max-breath="playerMaxBreath"
+      :player-is-underwater="playerIsUnderwater"
+      :player-is-in-water="playerIsInWater"
       :has-weapon="hasWeapon"
       :weapon-type="weaponType"
       :current-ammo="currentAmmo"
@@ -25,6 +30,7 @@
       :reload-progress="reloadProgress"
       :latency="latency"
       :ping-color-class="pingColorClass"
+      :hit-marker-visible="hitMarkerVisible"
       :has-hammer="hasHammer"
       :build-mode="buildMode"
       :build-selected-grid-id="buildSelectedGridId"
@@ -38,6 +44,12 @@
 
     <!-- Shadow Debug Panel (only if ?shadowDebug URL flag is present) -->
     <ShadowDebugPanel v-if="showShadowDebug" />
+
+    <!-- Water Debug Panel (only if ?waterDebug URL flag is present) -->
+    <WaterDebugPanel v-if="showWaterDebug" />
+
+    <!-- World Debug Panel (only if ?debugWorld URL flag is present) -->
+    <WorldDebugPanel v-if="showWorldDebug" />
   </div>
 </template>
 
@@ -48,13 +60,17 @@ import { useGameSession } from '../composables/useGameSession';
 import { PLAYER_MAX_HEALTH } from '@spong/shared';
 import GameHud from '../components/GameHud.vue';
 import ShadowDebugPanel from '../components/ShadowDebugPanel.vue';
+import WaterDebugPanel from '../components/WaterDebugPanel.vue';
+import WorldDebugPanel from '../components/WorldDebugPanel.vue';
 // BuildModeManager removed - now using BuildSystem via useGameSession
 
 const route = useRoute();
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 
-// Check for shadowDebug URL flag
+// Check for debug URL flags
 const showShadowDebug = ref(route.query.shadowDebug !== undefined);
+const showWaterDebug = ref(route.query.waterDebug !== undefined);
+const showWorldDebug = ref(route.query.debugWorld !== undefined);
 
 // Initialize game session
 const session = useGameSession();
@@ -72,6 +88,10 @@ const {
   playerStamina,
   playerIsExhausted,
   playerHasInfiniteStamina,
+  playerBreathRemaining,
+  playerMaxBreath,
+  playerIsUnderwater,
+  playerIsInWater,
   hasWeapon,
   weaponType,
   currentAmmo,
@@ -80,6 +100,8 @@ const {
   reloadProgress,
   latency,
   pingColorClass,
+  killFeedEntries,
+  hitMarkerVisible,
   hasHammer,
   buildMode,
   buildSelectedGridId,

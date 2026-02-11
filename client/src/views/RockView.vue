@@ -10,6 +10,7 @@
       :room-id="roomId"
       :my-entity-id="myEntityId"
       :players="players"
+      :kill-feed-entries="killFeedEntries"
       :player-health="playerHealth"
       :max-health="maxHealth"
       :player-armor="playerArmor"
@@ -17,6 +18,10 @@
       :player-stamina="playerStamina"
       :player-is-exhausted="playerIsExhausted"
       :player-has-infinite-stamina="playerHasInfiniteStamina"
+      :player-breath-remaining="playerBreathRemaining"
+      :player-max-breath="playerMaxBreath"
+      :player-is-underwater="playerIsUnderwater"
+      :player-is-in-water="playerIsInWater"
       :has-weapon="hasWeapon"
       :weapon-type="weaponType"
       :current-ammo="currentAmmo"
@@ -25,6 +30,7 @@
       :reload-progress="reloadProgress"
       :latency="latency"
       :ping-color-class="pingColorClass"
+      :hit-marker-visible="hitMarkerVisible"
     />
 
     <!-- Rock Generator UI Overlay -->
@@ -202,6 +208,10 @@ const {
   playerStamina,
   playerIsExhausted,
   playerHasInfiniteStamina,
+  playerBreathRemaining,
+  playerMaxBreath,
+  playerIsUnderwater,
+  playerIsInWater,
   hasWeapon,
   weaponType,
   currentAmmo,
@@ -209,7 +219,9 @@ const {
   isReloading,
   reloadProgress,
   latency,
-  pingColorClass
+  pingColorClass,
+  killFeedEntries,
+  hitMarkerVisible
 } = session;
 
 // Health computed
@@ -227,6 +239,7 @@ let colliderMesh: RockColliderMesh | null = null;
 // Single source of truth for rock center offset (computed once from fullMesh bounds)
 const rockBoundsCenter = { x: 0, y: 0, z: 0 };
 const ROCK_X = 10; // To the right from spawn
+const ROCK_SCALE = 0.5; // Match game scaling (same as LevelRockManager)
 
 const seed = ref<string>('');
 const rockGridSize = ref(0);
@@ -237,7 +250,7 @@ const meshTimeMs = ref(0);
 const showColliders = ref(false);
 const showColliderMesh = ref(false);
 const showFullMesh = ref(true);
-const showGround = ref(false);
+const showGround = ref(true);
 const gridResolution = ref(16);
 const maxDepth = ref(3);
 const fillThreshold = ref(0.4);
@@ -268,7 +281,7 @@ watch([isInRoom, () => {
 
 function updateGroundVisibility() {
   if (!scene) return;
-  const ground = scene.getMeshByName('rangeGround');
+  const ground = scene.getMeshByName('level');
   if (ground) {
     ground.setEnabled(showGround.value);
   }
@@ -380,7 +393,8 @@ function createRockMesh(quads: RockQuad[]): Mesh {
   mesh.convertToFlatShadedMesh();
 
   // Position to the right of player, centered vertically
-  mesh.position.set(ROCK_X - rockBoundsCenter.x, -rockBoundsCenter.y, -rockBoundsCenter.z);
+  mesh.position.set(ROCK_X - rockBoundsCenter.x * ROCK_SCALE, -rockBoundsCenter.y * ROCK_SCALE, -rockBoundsCenter.z * ROCK_SCALE);
+  mesh.scaling.setAll(ROCK_SCALE); // Match game scaling
 
   // Rock material - grayish
   const mat = new StandardMaterial('rockMat', scene!);
@@ -432,7 +446,8 @@ function updateRockMesh(mesh: Mesh, quads: RockQuad[]): void {
   mesh.convertToFlatShadedMesh();
 
   // Update position with new bounds center
-  mesh.position.set(ROCK_X - rockBoundsCenter.x, -rockBoundsCenter.y, -rockBoundsCenter.z);
+  mesh.position.set(ROCK_X - rockBoundsCenter.x * ROCK_SCALE, -rockBoundsCenter.y * ROCK_SCALE, -rockBoundsCenter.z * ROCK_SCALE);
+  mesh.scaling.setAll(ROCK_SCALE); // Match game scaling
 }
 
 function generateQuadGeometry(quad: RockQuad): {
@@ -540,6 +555,7 @@ function createBoundingBox() {
 
   // Position at rock center
   box.position.set(ROCK_X, 0, 0);
+  box.scaling.setAll(ROCK_SCALE); // Match rock scaling
 
   const mat = new StandardMaterial('gridBoxMat', scene);
   mat.emissiveColor = new Color3(0.5, 0.4, 0.3);
@@ -595,10 +611,11 @@ function updateColliderVisualization() {
     }, scene);
     
     // Position collider relative to the shared rock center
-    const centerX = (col.minX + col.maxX) * 0.5 - rockBoundsCenter.x + ROCK_X;
-    const centerY = (col.minY + col.maxY) * 0.5 - rockBoundsCenter.y;
-    const centerZ = (col.minZ + col.maxZ) * 0.5 - rockBoundsCenter.z;
+    const centerX = ((col.minX + col.maxX) * 0.5 - rockBoundsCenter.x) * ROCK_SCALE + ROCK_X;
+    const centerY = ((col.minY + col.maxY) * 0.5 - rockBoundsCenter.y) * ROCK_SCALE;
+    const centerZ = ((col.minZ + col.maxZ) * 0.5 - rockBoundsCenter.z) * ROCK_SCALE;
     box.position.set(centerX, centerY, centerZ);
+    box.scaling.setAll(ROCK_SCALE); // Match rock scaling
     
     // Wireframe material - green with transparency
     const mat = new StandardMaterial('colliderMat', scene);
@@ -646,7 +663,8 @@ function createColliderMeshVisualization() {
   mesh.convertToFlatShadedMesh();
 
   // Use the shared rock center (same reference as visual rock mesh)
-  mesh.position.set(ROCK_X - rockBoundsCenter.x, -rockBoundsCenter.y, -rockBoundsCenter.z);
+  mesh.position.set(ROCK_X - rockBoundsCenter.x * ROCK_SCALE, -rockBoundsCenter.y * ROCK_SCALE, -rockBoundsCenter.z * ROCK_SCALE);
+  mesh.scaling.setAll(ROCK_SCALE); // Match rock scaling
 
   // Wireframe material - yellow/green
   const mat = new StandardMaterial('colliderMeshMat', scene);

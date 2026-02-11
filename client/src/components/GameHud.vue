@@ -3,6 +3,12 @@
     <!-- Kill Feed -->
     <KillFeed v-if="isInRoom" :entries="killFeedEntries" />
     
+    <!-- Hit Marker (white X when you hit someone) -->
+    <div v-if="hitMarkerVisible" class="hit-marker">
+      <div class="hit-marker-line hit-marker-line-1"></div>
+      <div class="hit-marker-line hit-marker-line-2"></div>
+    </div>
+    
     <!-- Combined Status Bars -->
     <div v-if="isInRoom" class="status-bars-overlay">
       <v-card class="status-bars-card" variant="flat">
@@ -30,6 +36,15 @@
               class="stamina-bar" 
               :class="staminaBarClass"
               :style="{ width: staminaPercent + '%' }"
+            ></div>
+          </div>
+
+          <!-- Breath Bar (show whenever in water to see status) -->
+          <div v-if="playerIsInWater" class="bar-container">
+            <div 
+              class="breath-bar" 
+              :class="breathBarClass"
+              :style="{ width: breathPercent + '%' }"
             ></div>
           </div>
 
@@ -175,6 +190,10 @@ interface Props {
   playerStamina: number;
   playerIsExhausted: boolean;
   playerHasInfiniteStamina: boolean;
+  playerBreathRemaining: number;
+  playerMaxBreath: number;
+  playerIsUnderwater: boolean;
+  playerIsInWater: boolean;
   hasWeapon: boolean;
   weaponType: string | null;
   currentAmmo: number;
@@ -183,6 +202,7 @@ interface Props {
   reloadProgress: number;
   latency: number;
   pingColorClass: string;
+  hitMarkerVisible?: boolean;
   // Build system props
   hasHammer?: boolean;
   hasLadder?: boolean;
@@ -227,6 +247,17 @@ const staminaBarClass = computed(() => {
   return 'stamina-normal';
 });
 
+const breathPercent = computed(() => {
+  return Math.max(0, Math.min(100, (props.playerBreathRemaining / props.playerMaxBreath) * 100));
+});
+
+const breathBarClass = computed(() => {
+  const percent = breathPercent.value;
+  if (percent > 50) return 'breath-normal';
+  if (percent > 20) return 'breath-low';
+  return 'breath-critical';
+});
+
 // Build system computed properties
 const COLOR_PALETTE = [
   '#ffffff', '#808080', '#333333', '#ff0000', '#00ff00', '#0000ff',
@@ -261,6 +292,48 @@ const materialsPercent = computed(() => {
   height: 100%;
   pointer-events: none;
   z-index: 1000;
+}
+
+/* Hit Marker */
+.hit-marker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: hit-marker-fade 0.25s ease-out;
+}
+
+.hit-marker-line {
+  position: absolute;
+  width: 100%;
+  height: 1px;
+  background: white;
+}
+
+.hit-marker-line-1 {
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%) rotate(45deg) scaleY(0.25);
+}
+
+.hit-marker-line-2 {
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%) rotate(-45deg) scaleY(0.25);
+}
+
+@keyframes hit-marker-fade {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.5);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
 /* Combined Status Bars */
@@ -374,6 +447,46 @@ const materialsPercent = computed(() => {
   }
   50% {
     background: linear-gradient(90deg, #ffdd00 0%, #ffffff 100%);
+  }
+}
+
+/* Breath Bar */
+.breath-bar {
+  height: 100%;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.breath-normal {
+  background: linear-gradient(90deg, #00ccff 0%, #0088cc 100%);
+  color: #00ccff;
+}
+
+.breath-low {
+  background: linear-gradient(90deg, #ffaa00 0%, #ff8800 100%);
+  color: #ffaa00;
+  animation: breath-warning 1s ease-in-out infinite;
+}
+
+.breath-critical {
+  background: linear-gradient(90deg, #ff3333 0%, #cc0000 100%);
+  color: #ff3333;
+  animation: breath-critical 0.5s ease-in-out infinite;
+}
+
+@keyframes breath-warning {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes breath-critical {
+  0%, 100% { 
+    opacity: 1;
+    box-shadow: 0 0 8px #ff3333;
+  }
+  50% { 
+    opacity: 0.4;
+    box-shadow: 0 0 16px #ff3333;
   }
 }
 

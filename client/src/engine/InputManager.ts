@@ -1,21 +1,21 @@
 import { Scene, KeyboardEventTypes, KeyboardInfo, PointerEventTypes } from '@babylonjs/core';
 
-export type InputStateChangeCallback = (forward: number, right: number, jump: boolean, sprint: boolean) => void;
 export type ShootCallback = () => void;
 export type DropCallback = () => void;
 export type ReloadCallback = () => void;
 export type PickupCallback = () => void;
 export type ZoomCallback = (isZooming: boolean) => void;
+export type DebugCameraToggleCallback = () => void;
 
 export class InputManager {
   private keys = new Map<string, boolean>();
   private scene: Scene;
-  private onStateChangeCallback: InputStateChangeCallback | null = null;
   private onShootCallback: ShootCallback | null = null;
   private onDropCallback: DropCallback | null = null;
   private onReloadCallback: ReloadCallback | null = null;
   private onPickupCallback: PickupCallback | null = null;
   private onZoomCallback: ZoomCallback | null = null;
+  private onDebugCameraToggleCallback: DebugCameraToggleCallback | null = null;
   private shootLocked = false;
   private isMouseDown = false;
   private isRightMouseDown = false;
@@ -24,7 +24,7 @@ export class InputManager {
   private lastRight = 0;
   private lastJump = false;
   private lastSprint = false;
-  private syncInterval: ReturnType<typeof setInterval> | null = null;
+  private jumpBuffered = false;
   private isMobile: boolean;
   
   constructor(scene: Scene, isMobile: boolean = false) {
@@ -37,8 +37,6 @@ export class InputManager {
     if (!isMobile) {
       this.setupPointerObservable();
     }
-    
-    this.startSyncLoop();
   }
   
   private setupKeyboardObservable() {
@@ -62,6 +60,11 @@ export class InputManager {
           this.onReloadCallback?.();
           return;
         }
+        if (key === 'y') {
+          kbInfo.event.preventDefault();
+          this.onDebugCameraToggleCallback?.();
+          return;
+        }
       }
       
       // Handle movement keys (including shift for sprint)
@@ -74,33 +77,18 @@ export class InputManager {
       const isPressed = kbInfo.type === KeyboardEventTypes.KEYDOWN;
       this.keys.set(key, isPressed);
       
-      // Fire immediately on key change
+      // Buffer jump press so it's never lost between physics ticks
+      if (key === ' ' && isPressed) {
+        this.jumpBuffered = true;
+      }
+      
+      // Update cached state
       const { forward, right } = this.getMovementInput();
-      const jump = this.keys.get(' ') || false;
-      const sprint = this.keys.get('shift') || false;
       this.lastForward = forward;
       this.lastRight = right;
-      this.lastJump = jump;
-      this.lastSprint = sprint;
-      
-      if (this.onStateChangeCallback) {
-        this.onStateChangeCallback(forward, right, jump, sprint);
-      }
+      this.lastJump = this.keys.get(' ') || false;
+      this.lastSprint = this.keys.get('shift') || false;
     });
-  }
-  
-  /**
-   * Continuously send input at 30Hz so the server gets updated camera yaw
-   * even when standing still (keeps character rotation synced with camera).
-   * 30Hz keeps max yaw desync to ~33ms.
-   */
-  private startSyncLoop() {
-    this.syncInterval = setInterval(() => {
-      // Always send, even when standing still (for camera rotation sync)
-      if (this.onStateChangeCallback) {
-        this.onStateChangeCallback(this.lastForward, this.lastRight, this.lastJump, this.lastSprint);
-      }
-    }, 33); // ~30Hz continuous
   }
   
   getMovementInput(): { forward: number; right: number } {
@@ -157,10 +145,6 @@ export class InputManager {
     });
   }
 
-  onStateChange(callback: InputStateChangeCallback) {
-    this.onStateChangeCallback = callback;
-  }
-
   onShoot(callback: ShootCallback) {
     this.onShootCallback = callback;
   }
@@ -181,6 +165,10 @@ export class InputManager {
     this.onZoomCallback = callback;
   }
 
+  onDebugCameraToggle(callback: DebugCameraToggleCallback) {
+    this.onDebugCameraToggleCallback = callback;
+  }
+
   /** Set a function to check if right-click should be skipped (for BuildSystem). */
   setSkipRightClickCheck(callback: () => boolean) {
     this.shouldSkipRightClick = callback;
@@ -191,13 +179,19 @@ export class InputManager {
     this.onShootCallback?.();
   }
 
-  /** Get the current input state. */
-  getCurrentState(): { forward: number; right: number; jump: boolean } {
+  /** Get the current input state (includes buffered jump so short presses aren't missed). */
+  getCurrentState(): { forward: number; right: number; jump: boolean; sprint: boolean } {
     return {
       forward: this.lastForward,
       right: this.lastRight,
-      jump: this.lastJump
+      jump: this.jumpBuffered || this.lastJump,
+      sprint: this.lastSprint
     };
+  }
+
+  /** Consume the buffered jump flag. Call once per physics tick after reading state. */
+  consumeJump(): void {
+    this.jumpBuffered = false;
   }
   
   /** Check if left mouse button is currently held down. */
@@ -211,19 +205,15 @@ export class InputManager {
   }
   
   dispose() {
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
-      this.syncInterval = null;
-    }
     if (this.autoFireInterval) {
       clearInterval(this.autoFireInterval);
       this.autoFireInterval = null;
     }
     this.keys.clear();
-    this.onStateChangeCallback = null;
     this.onShootCallback = null;
     this.onDropCallback = null;
     this.onReloadCallback = null;
     this.onZoomCallback = null;
+    this.onDebugCameraToggleCallback = null;
   }
 }

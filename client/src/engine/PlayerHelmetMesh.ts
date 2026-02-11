@@ -19,7 +19,7 @@ export function createPlayerHelmetMesh(name: string, scene: Scene): TransformNod
   const helmetColor = new Color3(0.5, 0.55, 0.6);
   const helmetGlow = new Color3(0.1, 0.12, 0.14);
 
-  // Player head is 0.6x0.6x0.6 at position (0, 0.8, 0) relative to body
+  // Player head is 0.6x0.6x0.6 at position (0, 1.3, 0) relative to body
   // These positions are relative to the head node
   // Move each piece half its size toward the head to eliminate gaps
 

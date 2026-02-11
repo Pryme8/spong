@@ -2,7 +2,7 @@ import { ref } from 'vue';
 import { Scene } from '@babylonjs/core';
 import { NetworkClient } from '../network/NetworkClient';
 import { LocalTransform } from '../engine/LocalTransform';
-import { Opcode, TransformData, VoxelGrid, capsuleVsCapsule, PLAYER_CAPSULE_RADIUS, type RockColliderMesh, type RockTransform } from '@spong/shared';
+import { Opcode, TransformData, VoxelGrid, type RockColliderMesh, type RockTransform, type WaterLevelProvider } from '@spong/shared';
 import type { BuildingCollisionManager } from '../engine/BuildingCollisionManager';
 import type { TreeColliderMesh } from '@spong/shared/dist/src/treegen/TreeMesh';
 import type { TreeTransform } from '@spong/shared/dist/src/treegen/TreeMeshTransform';
@@ -12,9 +12,15 @@ export interface ColliderGetters {
   getRockColliders?: () => Array<{ mesh: RockColliderMesh; transform: RockTransform }>;
 }
 
-export function useTransformSync(networkClient: NetworkClient, scene: Scene, buildingCollisionManager?: BuildingCollisionManager, colliderGetters?: ColliderGetters) {
+export function useTransformSync(
+  networkClient: NetworkClient, 
+  scene: Scene, 
+  buildingCollisionManager?: BuildingCollisionManager, 
+  colliderGetters?: ColliderGetters, 
+  octreeGetter?: () => any,
+  waterLevelProviderGetter?: () => WaterLevelProvider | undefined
+) {
   const transforms = ref<Map<number, LocalTransform>>(new Map());
-  let myEntityId: number | null = null;
 
   // Handle transform updates from server
   networkClient.onHighFrequency(Opcode.TransformUpdate, (data: TransformData) => {
@@ -28,10 +34,11 @@ export function useTransformSync(networkClient: NetworkClient, scene: Scene, bui
     const transform = new LocalTransform(
       entityId, scene, isLocal, voxelGrid, buildingCollisionManager,
       colliderGetters?.getTreeColliders,
-      colliderGetters?.getRockColliders
+      colliderGetters?.getRockColliders,
+      octreeGetter,
+      waterLevelProviderGetter
     );
     transforms.value.set(entityId, transform);
-    if (isLocal) myEntityId = entityId;
     console.log(`Created LocalTransform for entity ${entityId} (local=${isLocal})`);
     return transform;
   };
@@ -60,52 +67,11 @@ export function useTransformSync(networkClient: NetworkClient, scene: Scene, bui
     transforms.value.forEach(transform => {
       transform.fixedUpdate(fixedDt);
     });
-    
-    // Resolve player-vs-player collisions (client-side prediction)
-    // Only apply to local player to match server authority
-    if (myEntityId !== null) {
-      const localTransform = transforms.value.get(myEntityId);
-      if (localTransform) {
-        const localState = localTransform.getState();
-        
-        // Check against all other players
-        transforms.value.forEach((otherTransform, otherId) => {
-          if (otherId === myEntityId) return; // Skip self
-          
-          const otherPos = otherTransform.getPosition();
-          
-          // Check capsule collision in XZ plane
-          const result = capsuleVsCapsule(
-            localState.posX, localState.posZ,
-            otherPos.x, otherPos.z,
-            PLAYER_CAPSULE_RADIUS,
-            PLAYER_CAPSULE_RADIUS
-          );
-          
-          if (result.colliding) {
-            // Push local player away (server will do the same)
-            // We apply directly to the state which gets synced
-            (localState as any).posX += result.pushX;
-            (localState as any).posZ += result.pushZ;
-            
-            // Zero out velocity in collision direction
-            const dx = otherPos.x - localState.posX;
-            const dz = otherPos.z - localState.posZ;
-            const dist = Math.sqrt(dx * dx + dz * dz);
-            if (dist > 0.001) {
-              const nx = dx / dist;
-              const nz = dz / dist;
-              
-              const velDot = localState.velX * nx + localState.velZ * nz;
-              if (velDot > 0) { // Moving toward other player
-                (localState as any).velX -= nx * velDot;
-                (localState as any).velZ -= nz * velDot;
-              }
-            }
-          }
-        });
-      }
-    }
+    // NOTE: Player-vs-player collision is handled server-side only.
+    // Client-side PvP prediction used stale interpolated positions,
+    // causing constant desync and rubber-banding. The server resolves
+    // PvP overlap authoritatively and corrections are absorbed via
+    // the error offset in LocalTransform.
   };
 
   const getAllTransforms = (): Map<number, LocalTransform> => {

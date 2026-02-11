@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wind Sway Demo - Foliage Animation</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+      background: #0a0a1a;
+    }
+    #renderCanvas {
+      width: 100%;
+      height: 100vh;
+      display: block;
+    }
+    #controls {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(10, 10, 26, 0.95);
+      border: 1px solid rgba(0, 150, 255, 0.3);
+      border-radius: 8px;
+      padding: 16px;
+      color: #e0e0ff;
+      min-width: 280px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    #controls h2 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+      color: #4da6ff;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-bottom: 1px solid rgba(0, 150, 255, 0.3);
+      padding-bottom: 8px;
+    }
+    .control-group {
+      margin-bottom: 16px;
+    }
+    .control-group label {
+      display: block;
+      font-size: 11px;
+      color: #4da6ff;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .control-group input[type="range"] {
+      width: 100%;
+      height: 4px;
+      background: rgba(0, 150, 255, 0.3);
+      border-radius: 2px;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    .control-group input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      background: #4da6ff;
+      cursor: pointer;
+      border-radius: 50%;
+      box-shadow: 0 0 4px rgba(0, 150, 255, 0.5);
+    }
+    .control-group input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      background: #4da6ff;
+      cursor: pointer;
+      border-radius: 50%;
+      border: none;
+      box-shadow: 0 0 4px rgba(0, 150, 255, 0.5);
+    }
+    .value-display {
+      font-size: 11px;
+      color: #7c4dff;
+      float: right;
+    }
+    .section-header {
+      font-size: 10px;
+      color: #4da6ff;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-bottom: 1px solid rgba(0, 150, 255, 0.2);
+      padding: 4px 0;
+      margin: 16px 0 10px 0;
+    }
+    #info {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(10, 10, 26, 0.8);
+      border: 1px solid rgba(0, 150, 255, 0.3);
+      border-radius: 4px;
+      padding: 12px 16px;
+      color: #4da6ff;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  
+  <div id="controls">
+    <h2>Wind Controls</h2>
+    
+    <div class="section-header">Wind Direction</div>
+    <div class="control-group">
+      <label>Wind X <span class="value-display" id="windXValue">1.00</span></label>
+      <input type="range" id="windX" min="-1" max="1" step="0.05" value="1.0">
+    </div>
+    
+    <div class="control-group">
+      <label>Wind Z <span class="value-display" id="windZValue">0.50</span></label>
+      <input type="range" id="windZ" min="-1" max="1" step="0.05" value="0.5">
+    </div>
+    
+    <div class="section-header">Wind Intensity</div>
+    <div class="control-group">
+      <label>Speed <span class="value-display" id="speedValue">0.30</span></label>
+      <input type="range" id="speed" min="0" max="2" step="0.05" value="0.3">
+    </div>
+    
+    <div class="control-group">
+      <label>Strength <span class="value-display" id="strengthValue">1.00</span></label>
+      <input type="range" id="strength" min="0" max="3" step="0.1" value="1.0">
+    </div>
+    
+    <div class="section-header">Camera</div>
+    <div class="control-group">
+      <label>Auto Rotate <span class="value-display" id="rotateValue">ON</span></label>
+      <input type="range" id="autoRotate" min="0" max="1" step="1" value="1">
+    </div>
+  </div>
+  
+  <div id="info">
+    <strong>Wind Sway Demo</strong><br>
+    Mouse: Rotate camera<br>
+    Scroll: Zoom<br>
+    Adjust sliders to change wind
+  </div>
+
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+  
+  <script>
+    const canvas = document.getElementById('renderCanvas');
+    const engine = new BABYLON.Engine(canvas, true);
+    
+    // Wind parameters (global)
+    const wind = {
+      directionX: 1.0,
+      directionZ: 0.5,
+      speed: 0.3,
+      strength: 1.0
+    };
+    
+    let gameTime = 0;
+    let autoRotate = true;
+    
+    // Create scene
+    const createScene = () => {
+      const scene = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color3(0.1, 0.15, 0.25);
+      
+      // Camera
+      const camera = new BABYLON.ArcRotateCamera('camera', Math.PI * 0.5, Math.PI * 0.4, 20, BABYLON.Vector3.Zero(), scene);
+      camera.attachControl(canvas, true);
+      camera.wheelPrecision = 50;
+      camera.minZ = 0.1;
+      
+      // Lighting
+      const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0.5, 1, 0.3), scene);
+      light.intensity = 0.9;
+      
+      // Ground
+      const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 30, height: 30 }, scene);
+      const groundMat = new BABYLON.StandardMaterial('groundMat', scene);
+      groundMat.diffuseColor = new BABYLON.Color3(0.2, 0.25, 0.15);
+      groundMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+      ground.material = groundMat;
+      
+      // Create foliage material factory
+      const createFoliageMaterial = (name, color, heightOffset = 0, heightMult = 0.1, swayAmp = 0.2) => {
+        const mat = new BABYLON.CustomMaterial(name, scene);
+        mat.diffuseColor = color;
+        mat.specularColor = new BABYLON.Color3(0.03, 0.03, 0.03);
+        
+        mat.AddUniform('windTime', 'float', 0);
+        mat.AddUniform('windDir', 'vec2', [wind.directionX, wind.directionZ]);
+        mat.AddUniform('windSpeed', 'float', wind.speed);
+        mat.AddUniform('windStrength', 'float', wind.strength);
+        mat.AddUniform('heightOffset', 'float', heightOffset);
+        mat.AddUniform('heightMult', 'float', heightMult);
+        mat.AddUniform('swayAmp', 'float', swayAmp);
+        
+        mat.Vertex_Definitions(`
+          varying vec3 vWorldPos;
+          
+          float hash1(vec2 p) {
+            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+          }
+          
+          float noise2D(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            float a = hash1(i);
+            float b = hash1(i + vec2(1.0, 0.0));
+            float c = hash1(i + vec2(0.0, 1.0));
+            float d = hash1(i + vec2(1.0, 1.0));
+            return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+          }
+        `);
+        
+        mat.Vertex_Before_PositionUpdated(`
+          vec4 worldPos = world * vec4(position, 1.0);
+          vWorldPos = worldPos.xyz;
+          
+          float heightFactor = max(0.0, position.y + heightOffset) * heightMult;
+          
+          vec2 noiseInput = worldPos.xz * 0.3 + windDir * windTime * windSpeed * 0.5;
+          float noise = noise2D(noiseInput);
+          
+          float windPhase = windTime * 2.0 + worldPos.x * 0.3 + worldPos.z * 0.3;
+          
+          vec3 sway = vec3(
+            sin(windPhase) * windDir.x + noise * 0.5,
+            sin(windPhase * 1.3) * 0.3,
+            sin(windPhase) * windDir.y + noise * 0.5
+          ) * heightFactor * windStrength * swayAmp;
+          
+          positionUpdated += sway;
+        `);
+        
+        mat.onBindObservable.add(() => {
+          const effect = mat.getEffect();
+          if (!effect) return;
+          effect.setFloat('windTime', gameTime);
+          effect.setFloat2('windDir', wind.directionX, wind.directionZ);
+          effect.setFloat('windSpeed', wind.speed);
+          effect.setFloat('windStrength', wind.strength);
+        });
+        
+        return mat;
+      };
+      
+      // Create tree-like foliage (tall)
+      const leafMat = createFoliageMaterial('leafMat', new BABYLON.Color3(0.15, 0.45, 0.12), 8, 0.1, 0.2);
+      
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        const radius = 8 + Math.random() * 4;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        
+        // Tree trunk
+        const trunk = BABYLON.MeshBuilder.CreateCylinder(`trunk${i}`, { 
+          height: 5, 
+          diameter: 0.8 
+        }, scene);
+        trunk.position.set(x, 2.5, z);
+        const trunkMat = new BABYLON.StandardMaterial(`trunkMat${i}`, scene);
+        trunkMat.diffuseColor = new BABYLON.Color3(0.25, 0.18, 0.1);
+        trunk.material = trunkMat;
+        
+        // Foliage sphere
+        const foliage = BABYLON.MeshBuilder.CreateSphere(`foliage${i}`, { 
+          diameter: 4 + Math.random() * 2,
+          segments: 16
+        }, scene);
+        foliage.position.set(x, 6 + Math.random(), z);
+        foliage.material = leafMat;
+      }
+      
+      // Create bush-like foliage (short)
+      const bushMat = createFoliageMaterial('bushMat', new BABYLON.Color3(0.12, 0.4, 0.1), 0, 0.15, 0.25);
+      
+      for (let i = 0; i < 12; i++) {
+        const angle = (i / 12) * Math.PI * 2 + 0.2;
+        const radius = 5 + Math.random() * 3;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        
+        const bush = BABYLON.MeshBuilder.CreateSphere(`bush${i}`, { 
+          diameter: 1.5 + Math.random() * 0.8,
+          segments: 12
+        }, scene);
+        bush.position.set(x, 0.8 + Math.random() * 0.3, z);
+        bush.scaling.y = 0.7;
+        bush.material = bushMat;
+      }
+      
+      // Wind direction indicator (arrow on ground)
+      const createWindArrow = () => {
+        const arrow = BABYLON.MeshBuilder.CreateCylinder('windArrow', {
+          height: 5,
+          diameter: 0.2
+        }, scene);
+        arrow.position.y = 0.1;
+        arrow.rotation.x = Math.PI * 0.5;
+        
+        const tip = BABYLON.MeshBuilder.CreateCylinder('windTip', {
+          height: 0.8,
+          diameterTop: 0,
+          diameterBottom: 0.5
+        }, scene);
+        tip.parent = arrow;
+        tip.position.z = 2.9;
+        
+        const arrowMat = new BABYLON.StandardMaterial('arrowMat', scene);
+        arrowMat.emissiveColor = new BABYLON.Color3(0.3, 0.6, 1.0);
+        arrow.material = arrowMat;
+        tip.material = arrowMat;
+        
+        return arrow;
+      };
+      
+      const windArrow = createWindArrow();
+      
+      // Animation loop
+      scene.onBeforeRenderObservable.add(() => {
+        gameTime += engine.getDeltaTime() * 0.001;
+        
+        // Update wind arrow rotation
+        const windAngle = Math.atan2(wind.directionZ, wind.directionX);
+        windArrow.rotation.y = windAngle;
+        
+        // Auto-rotate camera
+        if (autoRotate) {
+          camera.alpha += 0.002;
+        }
+      });
+      
+      return scene;
+    };
+    
+    const scene = createScene();
+    
+    // Controls
+    const setupControls = () => {
+      const windX = document.getElementById('windX');
+      const windZ = document.getElementById('windZ');
+      const speed = document.getElementById('speed');
+      const strength = document.getElementById('strength');
+      const rotate = document.getElementById('autoRotate');
+      
+      const windXValue = document.getElementById('windXValue');
+      const windZValue = document.getElementById('windZValue');
+      const speedValue = document.getElementById('speedValue');
+      const strengthValue = document.getElementById('strengthValue');
+      const rotateValue = document.getElementById('rotateValue');
+      
+      windX.addEventListener('input', (e) => {
+        wind.directionX = parseFloat(e.target.value);
+        windXValue.textContent = wind.directionX.toFixed(2);
+      });
+      
+      windZ.addEventListener('input', (e) => {
+        wind.directionZ = parseFloat(e.target.value);
+        windZValue.textContent = wind.directionZ.toFixed(2);
+      });
+      
+      speed.addEventListener('input', (e) => {
+        wind.speed = parseFloat(e.target.value);
+        speedValue.textContent = wind.speed.toFixed(2);
+      });
+      
+      strength.addEventListener('input', (e) => {
+        wind.strength = parseFloat(e.target.value);
+        strengthValue.textContent = wind.strength.toFixed(2);
+      });
+      
+      rotate.addEventListener('input', (e) => {
+        autoRotate = parseInt(e.target.value) === 1;
+        rotateValue.textContent = autoRotate ? 'ON' : 'OFF';
+      });
+    };
+    
+    setupControls();
+    
+    // Render loop
+    engine.runRenderLoop(() => {
+      scene.render();
+    });
+    
+    // Resize
+    window.addEventListener('resize', () => {
+      engine.resize();
+    });
+  </script>
+</body>
+</html>

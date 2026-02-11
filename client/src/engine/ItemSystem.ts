@@ -7,8 +7,10 @@ import { createPistolMesh } from './PistolMesh';
 import { createSMGMesh } from './SMGMesh';
 import { createLMGMesh } from './LMGMesh';
 import { createShotgunMesh } from './ShotgunMesh';
+import { createDoubleBarrelShotgunMesh } from './DoubleBarrelShotgunMesh';
 import { createSniperMesh } from './SniperMesh';
 import { createAssaultRifleMesh } from './AssaultRifleMesh';
+import { createDMRMesh } from './DMRMesh';
 import { createRocketLauncherMesh } from './RocketLauncherMesh';
 import { createHammerMesh } from './HammerMesh';
 import { createMedicPackMesh } from './MedicPackMesh';
@@ -45,10 +47,14 @@ export class ItemSystem {
       node = createLMGMesh(`item_${payload.entityId}`, scene);
     } else if (payload.itemType === 'shotgun') {
       node = createShotgunMesh(`item_${payload.entityId}`, scene);
+    } else if (payload.itemType === 'doublebarrel') {
+      node = createDoubleBarrelShotgunMesh(`item_${payload.entityId}`, scene);
     } else if (payload.itemType === 'sniper') {
       node = createSniperMesh(`item_${payload.entityId}`, scene);
     } else if (payload.itemType === 'assault') {
       node = createAssaultRifleMesh(`item_${payload.entityId}`, scene);
+    } else if (payload.itemType === 'dmr') {
+      node = createDMRMesh(`item_${payload.entityId}`, scene);
     } else if (payload.itemType === 'rocket') {
       node = createRocketLauncherMesh(`item_${payload.entityId}`, scene);
     } else if (payload.itemType === 'hammer') {
@@ -84,8 +90,8 @@ export class ItemSystem {
       const currentBaseY = node.metadata?.settled ? node.metadata.settledY : baseY;
       const time = performance.now() * 0.001; // Time in seconds
 
-      // Bouncing animation: sin wave for smooth up/down
-      node.position.y = currentBaseY + Math.sin(time * 2.5) * 0.3;
+      // Bouncing animation: sin wave for smooth up/down (shifted up 0.25 to prevent ground clipping)
+      node.position.y = currentBaseY + 0.25 + Math.sin(time * 2.5) * 0.3;
 
       // Rotating animation: constant spin
       node.rotation.y = time * 1.5; // Full rotation every ~4 seconds
@@ -123,7 +129,8 @@ export class ItemSystem {
     weaponSystem: WeaponSystem,
     scene: Scene,
     hasHammer?: { value: boolean },
-    hasLadder?: { value: boolean }
+    hasLadder?: { value: boolean },
+    playerTransform?: any
   ): void {
     console.log(`[ItemSystem] Pickup: entity=${payload.entityId} by player=${payload.playerId}`);
 
@@ -172,7 +179,16 @@ export class ItemSystem {
         // It's a weapon, equip it
         weaponSystem.equipWeapon(payload.itemType as WeaponType);
         console.log(`[ItemSystem] We picked up a ${payload.itemType}! Shooting enabled.`);
+        // Also equip visual weapon on player transform
+        if (playerTransform) {
+          playerTransform.equipWeapon(payload.itemType as WeaponType);
+        }
       }
+    } else if (playerTransform && payload.itemType !== 'medic_pack' && payload.itemType !== 'large_medic_pack' && 
+               payload.itemType !== 'apple' && payload.itemType !== 'pill_bottle' && payload.itemType !== 'kevlar' && 
+               payload.itemType !== 'helmet' && payload.itemType !== 'hammer' && payload.itemType !== 'ladder') {
+      // Remote player picked up a weapon - equip visual on their transform
+      playerTransform.equipWeapon(payload.itemType as WeaponType);
     }
   }
 
@@ -210,10 +226,14 @@ export class ItemSystem {
       this.tossingItemNode = createLMGMesh('tossingItem', scene);
     } else if (weaponType === 'shotgun') {
       this.tossingItemNode = createShotgunMesh('tossingItem', scene);
+    } else if (weaponType === 'doublebarrel') {
+      this.tossingItemNode = createDoubleBarrelShotgunMesh('tossingItem', scene);
     } else if (weaponType === 'sniper') {
       this.tossingItemNode = createSniperMesh('tossingItem', scene);
     } else if (weaponType === 'assault') {
       this.tossingItemNode = createAssaultRifleMesh('tossingItem', scene);
+    } else if (weaponType === 'dmr') {
+      this.tossingItemNode = createDMRMesh('tossingItem', scene);
     } else if (weaponType === 'rocket') {
       this.tossingItemNode = createRocketLauncherMesh('tossingItem', scene);
     } else if (weaponType === 'hammer') {

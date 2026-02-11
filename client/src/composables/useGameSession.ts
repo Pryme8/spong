@@ -1,13 +1,15 @@
 import { ref, computed, Ref, watch } from 'vue';
 import type { Engine, Scene } from '@babylonjs/core';
-import { MeshBuilder, StandardMaterial, Color3, Vector3, PostProcess, Effect } from '@babylonjs/core';
+import { MeshBuilder, StandardMaterial, Color3, Vector3, PostProcess, Effect, DirectionalLight, HemisphericLight } from '@babylonjs/core';
 import {
   FIXED_TIMESTEP,
   Opcode,
   InputData,
   PLAYER_MAX_HEALTH,
   VoxelGrid,
-  GreedyMesher
+  GreedyMesher,
+  Octree,
+  type OctreeEntry
 } from '@spong/shared';
 import { NetworkClient } from '../network/NetworkClient';
 import { useRoom } from './useRoom';
@@ -22,21 +24,25 @@ import { LevelMesh } from '../engine/LevelMesh';
 import { LevelTreeManager } from '../engine/LevelTreeManager';
 import { LevelRockManager } from '../engine/LevelRockManager';
 import { LevelBushManager } from '../engine/LevelBushManager';
+import { LevelWaterManager } from '../engine/LevelWaterManager';
+import { TimeManager } from '../engine/TimeManager';
 import { CloudPostProcess } from '../engine/CloudPostProcess';
 import { LevelCloudManager } from '../engine/LevelCloudManager';
 import { FinalPostProcess } from '../engine/FinalPostProcess';
 import { SkyPickSphere } from '../engine/SkyPickSphere';
 import { AudioManager } from '../engine/AudioManager';
 import { SOUND_MANIFEST } from '../engine/soundManifest';
-import { playSFX3D } from '../engine/audioHelpers';
+import { playSFX, playSFX3D } from '../engine/audioHelpers';
 import { WeaponSystem } from '../engine/WeaponSystem';
 import { ItemSystem } from '../engine/ItemSystem';
 import { GameLoop } from '../engine/GameLoop';
 import { BushLeafEffect } from '../engine/BushLeafEffect';
+import { BloodSplatterEffect } from '../engine/BloodSplatterEffect';
 import { BuildingCollisionManager } from '../engine/BuildingCollisionManager';
 import { BuildSystem } from '../engine/BuildSystem';
 import { LadderPlacementSystem } from '../engine/LadderPlacementSystem';
 import { createLadderSegmentMesh, disposeLadderMesh } from '../engine/LadderMesh';
+import { FootstepManager } from '../engine/FootstepManager';
 import type { 
   BuildingInitialStateMessage, 
   BuildingCreatedMessage,
@@ -56,6 +62,7 @@ export interface KillFeedEntry {
   victimEntityId: number;
   victimColor: string;
   weaponType: string | null;
+  isHeadshot: boolean;
   timestamp: number;
 }
 
@@ -80,9 +87,29 @@ export function useGameSession() {
   const playerStamina = ref(100);
   const playerIsExhausted = ref(false);
   const playerHasInfiniteStamina = ref(false);
+  const playerBreathRemaining = ref(10.0);
+  const playerMaxBreath = ref(10.0);
+  const playerIsUnderwater = ref(false);
+  const playerIsInWater = ref(false);
   const playerX = ref(0);
   const playerY = ref(0);
   const playerZ = ref(0);
+  
+  // Blood splatter damage notification state
+  const bloodSplatterTimer = ref(0); // 0 to 3.0
+  const bloodSplatterAlpha = computed(() => bloodSplatterTimer.value / 3.0);
+  
+  // Hit marker feedback when we hit someone
+  const hitMarkerTimer = ref(0); // 0 to 0.25 seconds
+  const hitMarkerVisible = computed(() => hitMarkerTimer.value > 0);
+  
+  // Drowning hurt sound cooldown to prevent spam
+  let lastDrowningHurtSoundTime = 0;
+  const DROWNING_HURT_SOUND_COOLDOWN = 1.0; // seconds
+  
+  // Low health heartbeat sound tracking
+  let heartbeatSoundId: string | null = null;
+  let isHeartbeatPlaying = false;
   
   // Round state (needs to be at top level to be returned)
   const roundState = useRoundState();
@@ -113,6 +140,8 @@ export function useGameSession() {
   let treeManager: LevelTreeManager | null = null;
   let rockManager: LevelRockManager | null = null;
   let bushManager: LevelBushManager | null = null;
+  let waterManager: LevelWaterManager | null = null;
+  let octree: any = null; // Octree for broad-phase collision culling
   let cloudPostProcess: CloudPostProcess | null = null;
   let cloudManager: LevelCloudManager | null = null;
   let finalPostProcess: FinalPostProcess | null = null;
@@ -120,12 +149,17 @@ export function useGameSession() {
   let shadowManager: any = null;
   let leafEffect: BushLeafEffect | null = null;
   let leafTriggerPost: PostProcess | null = null;
+  let bloodSplatterEffect: BloodSplatterEffect | null = null;
+  let bloodSplatterPost: PostProcess | null = null;
   let currentTreeIndex = -1;
   let currentBushIndex = -1;
   let wasInLeavesLastFrame = false;
   let leafEntryX = 0;
   let leafEntryY = 0;
   let leafEntryZ = 0;
+  let bloodEntryX = 0;
+  let bloodEntryY = 0;
+  let bloodEntryZ = 0;
   let selectedTextureIndex1 = 0;
   let selectedTextureIndex2 = 1;
   let inputSequence = 0;
@@ -144,6 +178,30 @@ export function useGameSession() {
   // Systems
   const weaponSystem = new WeaponSystem();
   const itemSystem = new ItemSystem();
+  let footstepManager: FootstepManager | null = null;
+
+  // Track remote players' weapon types for spatial audio
+  const remotePlayerWeapons = new Map<number, string>();
+
+  /** Map weapon type to its fire sound name + volume. */
+  function getWeaponFireSound(weaponType: string): { sound: string; volume: number } {
+    switch (weaponType) {
+      case 'shotgun': return { sound: 'shotgun_shoot', volume: 0.8 };
+      case 'doublebarrel': return { sound: 'shotgun_shoot', volume: 0.8 };
+      case 'lmg': return { sound: 'LMG_shoot', volume: 0.4 };
+      default: return { sound: 'pistol_shot', volume: 0.8 };
+    }
+  }
+
+  /** Map weapon type to its reload sound name. */
+  function getWeaponReloadSound(weaponType: string): string {
+    switch (weaponType) {
+      case 'shotgun': return 'shotgun_reload';
+      case 'doublebarrel': return 'shotgun_reload';
+      case 'lmg': return 'LMG_reload';
+      default: return 'pistol_reload';
+    }
+  }
   const gameLoop = new GameLoop();
 
   // Build system state
@@ -176,6 +234,10 @@ export function useGameSession() {
     const sceneResult = createGameScene(engine, sunConfig);
     scene = sceneResult.scene;
     shadowManager = sceneResult.shadowManager;
+    
+    // Initialize global time manager (must be first)
+    TimeManager.Initialize(scene);
+    
     cameraController = new CameraController(scene);
     
     // Create invisible sky pick sphere for catching sky shots
@@ -187,6 +249,8 @@ export function useGameSession() {
       const audioManager = AudioManager.Initialize();
       await audioManager.loadSounds(SOUND_MANIFEST);
       audioManager.setMasterVolume(0.8);
+      footstepManager = new FootstepManager();
+      console.log('[GameSession] FootstepManager initialized');
     } catch (error) {
       console.error('[GameSession] Failed to initialize audio:', error);
     }
@@ -207,6 +271,22 @@ export function useGameSession() {
       levelMesh = new LevelMesh(scene);
       levelMesh.createFromQuads(quads);
       console.log('[GameSession] Level mesh created');
+      
+      // Initialize water manager
+      try {
+        waterManager = new LevelWaterManager(scene);
+        await waterManager.initialize(voxelGrid);
+        console.log('[GameSession] Water manager initialized');
+        
+        // Update water ripples every frame (time comes from TimeManager)
+        scene.onBeforeRenderObservable.add(() => {
+          if (waterManager) {
+            waterManager.update();
+          }
+        });
+      } catch (error) {
+        console.error('[GameSession] Failed to initialize water manager:', error);
+      }
       
       // Get disable flags from level config
       const disableSpawns = (config.levelConfig?.disableSpawns || []) as string[];
@@ -260,29 +340,36 @@ export function useGameSession() {
         console.error('[GameSession] Failed to initialize cloud manager:', error);
       }
       
-      // Initialize final post-processing (FXAA + vignette)
-      finalPostProcess = new FinalPostProcess(scene, cameraController.getCamera());
-      
-      // Initialize leaf effect
+      // Initialize leaf effect and blood splatter (creates their post-processes)
       await initializeLeafEffect(scene, cameraController.getCamera());
+      
+      // Initialize final post-processing (FXAA + vignette) LAST so it's applied after all other effects
+      finalPostProcess = new FinalPostProcess(scene, cameraController.getCamera());
     } else if (scene) {
-      // Flat ground for shooting range / builder rooms
-      console.log('[GameSession] Creating flat ground');
-      const groundSize = 200;
-      const ground = MeshBuilder.CreateGround('rangeGround', { width: groundSize, height: groundSize }, scene);
-      ground.position.y = -0.5; // Move down to prevent clipping with player
-      const terrainMaterial = new StandardMaterial('terrainMat', scene);
-      terrainMaterial.diffuseColor = new Color3(0.3, 0.5, 0.3);
-      terrainMaterial.specularColor = new Color3(0, 0, 0);
-      ground.material = terrainMaterial;
-      ground.receiveShadows = true;
+      // Flat terrain for shooting range / builder / editor rooms
+      console.log('[GameSession] Creating flat terrain');
+      
+      // Generate flat terrain at y=0 (50 voxels * 0.5 height = 25 units, offset by LEVEL_OFFSET_Y = -25)
+      voxelGrid = new VoxelGrid();
+      voxelGrid.generateFromNoise(config.roomId, 0.02, 3, 50);
+      console.log(`[GameSession] Generated ${voxelGrid.getSolidCount()} solid voxels for flat terrain`);
+      
+      // Run greedy meshing
+      const mesher = new GreedyMesher(voxelGrid);
+      const quads = mesher.generateMesh();
+      console.log(`[GameSession] Optimized to ${quads.length} quads`);
+      
+      // Create Babylon.js mesh
+      levelMesh = new LevelMesh(scene);
+      levelMesh.createFromQuads(quads);
+      console.log('[GameSession] Flat terrain mesh created');
 
       // Initialize tree and rock managers using roomId as seed (for builder rooms, etc.)
       try {
         const treeSeed = config.roomId + '_tree';
         treeManager = new LevelTreeManager(scene, treeSeed);
         await treeManager.initialize();
-        console.log('[GameSession] Tree manager initialized for flat ground room with seed:', treeSeed);
+        console.log('[GameSession] Tree manager initialized for flat terrain room with seed:', treeSeed);
       } catch (error) {
         console.error('[GameSession] Failed to initialize tree manager:', error);
       }
@@ -291,7 +378,7 @@ export function useGameSession() {
         const rockSeed = config.roomId + '_rock';
         rockManager = new LevelRockManager(scene, rockSeed);
         await rockManager.initialize();
-        console.log('[GameSession] Rock manager initialized for flat ground room with seed:', rockSeed);
+        console.log('[GameSession] Rock manager initialized for flat terrain room with seed:', rockSeed);
       } catch (error) {
         console.error('[GameSession] Failed to initialize rock manager:', error);
       }
@@ -333,13 +420,41 @@ export function useGameSession() {
     networkClient = new NetworkClient(wsUrl);
     const room = useRoom(networkClient);
     buildingCollisionManager = new BuildingCollisionManager();
-    transformSync = useTransformSync(networkClient, scene, buildingCollisionManager, {
-      getTreeColliders: () => treeManager?.getColliderMeshes() ?? [],
-      getRockColliders: () => rockManager?.getColliderMeshes() ?? []
-    });
+    transformSync = useTransformSync(
+      networkClient, 
+      scene, 
+      buildingCollisionManager, 
+      {
+        getTreeColliders: () => treeManager?.getColliderMeshes() ?? [],
+        getRockColliders: () => rockManager?.getColliderMeshes() ?? []
+      }, 
+      () => octree,
+      () => waterManager ?? undefined
+    );
     projectileManager = new ProjectileManager(scene);
     
-    // Track latency
+    // Expose debug functions to browser console
+    (window as any).toggleLeafDebug = (visible: boolean = true) => {
+      if (treeManager) {
+        treeManager.toggleLeafCollisionDebug(visible);
+      } else {
+        console.warn('Tree manager not initialized yet');
+      }
+    };
+    (window as any).toggleWoodDebug = (visible: boolean = true) => {
+      if (treeManager) {
+        treeManager.toggleWoodCollisionDebug(visible);
+      } else {
+        console.warn('Tree manager not initialized yet');
+      }
+    };
+    console.log('🌲 Debug commands available:');
+    console.log('  toggleLeafDebug(true)  - Show leaf trigger volumes (green wireframe)');
+    console.log('  toggleWoodDebug(true)  - Show wood collision meshes (red wireframe)');
+    console.log('  toggleLeafDebug(false) - Hide leaf triggers');
+    console.log('  toggleWoodDebug(false) - Hide wood collision');
+    
+    // Track latency and update remote player footsteps
     networkClient.onHighFrequency(Opcode.TransformUpdate, (data: any) => {
       if (data.entityId === myEntityId.value && lastInputSendTime > 0) {
         const now = performance.now();
@@ -351,15 +466,38 @@ export function useGameSession() {
         const sum = latencySamples.reduce((acc, val) => acc + val, 0);
         latency.value = sum / latencySamples.length;
       }
+      
+      // Update footsteps for remote players ONLY (never for local player)
+      if (data.entityId !== myEntityId.value && myEntityId.value !== null && footstepManager) {
+        footstepManager.updatePlayer(
+          data.entityId,
+          data.position.x, data.position.y, data.position.z,
+          data.velocity.x, data.velocity.y, data.velocity.z,
+          true, // isGrounded - TODO: sync this from server if needed
+          data.isInWater || false,
+          false // isLocalPlayer - this is always a remote player
+        );
+      }
     });
     
     // Handle server projectile events
     networkClient.onProjectileSpawn((data) => {
       projectileManager?.spawnFromServer(data);
+      // Play remote gunshot sound (skip if it's our own shot - we already play locally)
+      if (data.ownerId !== myEntityId.value) {
+        const weaponType = remotePlayerWeapons.get(data.ownerId) || 'pistol';
+        const { sound, volume } = getWeaponFireSound(weaponType);
+        playSFX3D(sound, data.posX, data.posY, data.posZ, volume);
+      }
     });
     
     networkClient.onProjectileSpawnBatch((dataArray) => {
       projectileManager?.spawnBatchFromServer(dataArray);
+      // Batch = shotgun. Play one shotgun sound at the first pellet's position.
+      if (dataArray.length > 0 && dataArray[0].ownerId !== myEntityId.value) {
+        const d = dataArray[0];
+        playSFX3D('shotgun_shoot', d.posX, d.posY, d.posZ, 0.8);
+      }
     });
     
     networkClient.onProjectileDestroy((data) => {
@@ -372,10 +510,74 @@ export function useGameSession() {
     // Handle health/damage events
     networkClient.onLowFrequency(Opcode.EntityDamage, (payload: any) => {
       if (payload.entityId === myEntityId.value) {
+        const previousHealth = playerHealth.value;
         playerHealth.value = payload.newHealth;
-        if (myTransform.value) {
-          const state = myTransform.value.getState();
-          playSFX3D('player_hurt', state.posX, state.posY, state.posZ, 0.9);
+        
+        const tookHealthDamage = payload.newHealth < previousHealth;
+        const isDrowning = payload.attackerId === 0;
+        
+        // Trigger blood splatter only when actual health drops (not armor-only hits)
+        if (tookHealthDamage && !isDrowning && bloodSplatterEffect) {
+          // Blur existing splatters before adding new ones
+          // This creates a layering effect where old blood is blurred and new blood is sharp
+          if (bloodSplatterTimer.value > 0) {
+            bloodSplatterEffect.blurExistingSplatters();
+          }
+          
+          bloodSplatterTimer.value = 3.0; // Reset timer to 3 seconds
+          const splatCount = Math.floor(Math.random() * 3) + 1; // 1-3 splats
+          bloodSplatterEffect.addSplatters(splatCount);
+          
+          // Store camera position for parallax offset calculation
+          if (scene && scene.activeCamera) {
+            const camPos = scene.activeCamera.position;
+            bloodEntryX = camPos.x;
+            bloodEntryY = camPos.y;
+            bloodEntryZ = camPos.z;
+          }
+        }
+        
+        // Play hurt sound with cooldown for drowning
+        if (myTransform.value && tookHealthDamage) {
+          const currentTime = performance.now() / 1000;
+          const shouldPlaySound = !isDrowning || (currentTime - lastDrowningHurtSoundTime >= DROWNING_HURT_SOUND_COOLDOWN);
+          
+          if (shouldPlaySound) {
+            const state = myTransform.value.getState();
+            playSFX3D('player_hurt', state.posX, state.posY, state.posZ, 0.9);
+            
+            if (isDrowning) {
+              lastDrowningHurtSoundTime = currentTime;
+            }
+          }
+        }
+      } else if (transformSync) {
+        // Remote player took damage - play hurt sound at their position
+        const remoteTransform = transformSync.getTransform(payload.entityId);
+        if (remoteTransform) {
+          const state = remoteTransform.getState();
+          playSFX3D('player_hurt', state.posX, state.posY, state.posZ, 0.7);
+        }
+      }
+      
+      // Hit marker feedback: if we hit another player, show the hit marker and play sound
+      if (payload.attackerId === myEntityId.value && payload.entityId !== myEntityId.value) {
+        hitMarkerTimer.value = 0.25; // Show for 0.25 seconds
+        playSFX('bullet_impact', 0.5); // Play 2D sound locally
+      }
+    });
+
+    // Handle remote reload sounds
+    networkClient.onLowFrequency(Opcode.ReloadStarted, (payload: any) => {
+      // Check if we should play: either no excludeSender flag, or we're not the sender
+      const shouldPlay = !payload.excludeSender || payload.entityId !== myEntityId.value;
+      
+      if (shouldPlay && payload.entityId !== myEntityId.value && transformSync) {
+        const remoteTransform = transformSync.getTransform(payload.entityId);
+        if (remoteTransform) {
+          const state = remoteTransform.getState();
+          const reloadSound = getWeaponReloadSound(payload.weaponType);
+          playSFX3D(reloadSound, state.posX, state.posY, state.posZ, 0.6);
         }
       }
     });
@@ -536,6 +738,8 @@ export function useGameSession() {
         playerHealth.value = PLAYER_MAX_HEALTH;
         weaponSystem.clearWeapon();
       }
+      // Clear weapon tracking on death (player drops weapon)
+      remotePlayerWeapons.delete(payload.entityId);
       
       // Add to kill feed
       const killerName = roundState.getPlayerName(payload.killerId);
@@ -544,6 +748,7 @@ export function useGameSession() {
     });
     
     networkClient.onLowFrequency(Opcode.KillFeed, (payload: KillFeedMessage) => {
+      console.log('[KillFeed] Received payload:', payload);
       const entry: KillFeedEntry = {
         id: killFeedIdCounter++,
         killerEntityId: payload.killerEntityId,
@@ -551,8 +756,10 @@ export function useGameSession() {
         victimEntityId: payload.victimEntityId,
         victimColor: payload.victimColor,
         weaponType: payload.weaponType,
+        isHeadshot: payload.isHeadshot,
         timestamp: payload.timestamp
       };
+      console.log('[KillFeed] Created entry with isHeadshot:', entry.isHeadshot);
       
       // Add to feed (max 5 entries)
       killFeedEntries.value.push(entry);
@@ -580,7 +787,13 @@ export function useGameSession() {
     
     // Sync room state to template refs
     watch(() => room.roomId.value, (val) => { roomId.value = val; });
-    watch(() => room.myEntityId.value, (val) => { myEntityId.value = val; });
+    watch(() => room.myEntityId.value, (val) => {
+      // Clean up old entity's footsteps before switching
+      if (myEntityId.value !== null && myEntityId.value !== val && footstepManager) {
+        footstepManager.removePlayer(myEntityId.value);
+      }
+      myEntityId.value = val;
+    });
     watch(() => room.players.value, (val) => { players.value = new Map(val); }, { deep: true });
     watch(() => room.isInRoom.value, (val) => { isInRoom.value = val; });
     
@@ -643,10 +856,46 @@ export function useGameSession() {
     // Handle item pickup events from server
     networkClient.onLowFrequency(Opcode.ItemPickup, (payload) => {
       console.log(`[GameSession] ItemPickup received: type=${payload.itemType}, playerId=${payload.playerId}, myEntityId=${myEntityId.value}`);
-      if (scene) {
-        itemSystem.handlePickup(payload, myEntityId.value, weaponSystem, scene, hasHammer, hasLadder);
+      if (scene && transformSync) {
+        // Get player's transform to equip visual weapon
+        const playerTransform = transformSync.getTransform(payload.playerId);
+        itemSystem.handlePickup(payload, myEntityId.value, weaponSystem, scene, hasHammer, hasLadder, playerTransform);
+      }
+      
+      // Play pickup sound
+      if (payload.playerId === myEntityId.value) {
+        // Local player: play globally (non-spatial)
+        console.log(`[GameSession] Playing local pickup sound`);
+        playSFX('item_pickup', 0.8);
+      } else if (transformSync) {
+        // Remote player: play spatially at their position
+        const remoteTransform = transformSync.getTransform(payload.playerId);
+        if (remoteTransform) {
+          const state = remoteTransform.getState();
+          console.log(`[GameSession] Playing remote pickup sound at (${state.posX}, ${state.posY}, ${state.posZ})`);
+          playSFX3D('item_pickup', state.posX, state.posY, state.posZ, 0.8);
+        }
+      }
+      
+      // Track weapon type for remote audio
+      const weaponTypes = ['pistol', 'smg', 'lmg', 'shotgun', 'sniper', 'assault', 'rocket'];
+      if (weaponTypes.includes(payload.itemType)) {
+        remotePlayerWeapons.set(payload.playerId, payload.itemType);
       }
       console.log(`[GameSession] After pickup: hasLadder=${hasLadder.value}, hasHammer=${hasHammer.value}`);
+    });
+    
+    // Handle item drop sound events from server (for remote players)
+    networkClient.onLowFrequency(Opcode.ItemDropSound, (payload: any) => {
+      // Check if we should play: either no excludeSender flag, or we're not the sender
+      const shouldPlay = !payload.excludeSender || payload.entityId !== myEntityId.value;
+      
+      console.log(`[GameSession] ItemDropSound received: entityId=${payload.entityId}, myEntityId=${myEntityId.value}, excludeSender=${payload.excludeSender}, shouldPlay=${shouldPlay}`);
+      
+      if (shouldPlay && payload.entityId !== myEntityId.value) {
+        console.log(`[GameSession] Playing remote drop sound at (${payload.posX}, ${payload.posY}, ${payload.posZ})`);
+        playSFX3D('item_pickup', payload.posX, payload.posY, payload.posZ, 0.8);
+      }
     });
     
     // Handle tree spawns from server (level rooms only)
@@ -660,6 +909,9 @@ export function useGameSession() {
         rotationY: t.rotationY
       }));
       treeManager.spawnTreeInstances(instances);
+      
+      // Build/rebuild octree
+      buildOctreeFromManagers();
     });
     
     // Handle rock spawns from server (level rooms only)
@@ -674,6 +926,9 @@ export function useGameSession() {
         scale: r.scale
       }));
       rockManager.spawnRockInstances(instances);
+      
+      // Build/rebuild octree
+      buildOctreeFromManagers();
     });
     
     // Handle bush spawns from server (level rooms only)
@@ -690,7 +945,62 @@ export function useGameSession() {
         worldZ: b.posZ
       }));
       bushManager.spawnBushInstances(instances);
+      
+      // Build/rebuild octree
+      buildOctreeFromManagers();
     });
+    
+    // Helper: Build octree from manager collision data
+    function buildOctreeFromManagers() {
+      const treeColliders = treeManager?.getColliderMeshes() ?? [];
+      const rockColliders = rockManager?.getColliderMeshes() ?? [];
+      
+      if (treeColliders.length === 0 && rockColliders.length === 0) {
+        return; // Nothing to build yet
+      }
+      
+      console.log(`[GameSession] Building octree with ${treeColliders.length} trees, ${rockColliders.length} rocks...`);
+      
+      // Create octree covering play area
+      octree = new Octree(0, 10, 0, 110, 6, 8);
+      
+      let nextId = 0;
+      
+      // Insert trees
+      for (const treeData of treeColliders) {
+        const entry: OctreeEntry = {
+          id: nextId++,
+          type: 'tree',
+          data: treeData,
+          minX: treeData.transform.posX - 5,
+          minY: treeData.transform.posY - 1,
+          minZ: treeData.transform.posZ - 5,
+          maxX: treeData.transform.posX + 5,
+          maxY: treeData.transform.posY + 20,
+          maxZ: treeData.transform.posZ + 5
+        };
+        octree.insert(entry);
+      }
+      
+      // Insert rocks
+      for (const rockData of rockColliders) {
+        const radius = 3 * rockData.transform.scale;
+        const entry: OctreeEntry = {
+          id: nextId++,
+          type: 'rock',
+          data: rockData,
+          minX: rockData.transform.posX - radius,
+          minY: rockData.transform.posY - radius,
+          minZ: rockData.transform.posZ - radius,
+          maxX: rockData.transform.posX + radius,
+          maxY: rockData.transform.posY + radius,
+          maxZ: rockData.transform.posZ + radius
+        };
+        octree.insert(entry);
+      }
+      
+      console.log(`[GameSession] Octree built with ${treeColliders.length + rockColliders.length} colliders`);
+    }
     
     // Handle other players joining
     room.onPlayerJoined((playerInfo) => {
@@ -700,12 +1010,19 @@ export function useGameSession() {
       const cube = createPlayerInstance(`cube_${playerInfo.entityId}`, scene, playerColor);
       cube.parent = transform.getNode();
       cube.position.y = 0;
+      
+      // Register body cube for shadows
+      if (shadowManager) {
+        shadowManager.addShadowCaster(cube, true);
+      }
     });
     
     // Handle players leaving
     room.onPlayerLeft((entityId) => {
       if (!transformSync) return;
       transformSync.removeTransform(entityId);
+      remotePlayerWeapons.delete(entityId);
+      footstepManager?.removePlayer(entityId);
     });
     
     // Register loading phase handlers BEFORE connecting so we never miss messages
@@ -774,6 +1091,12 @@ export function useGameSession() {
       const cube = createPlayerInstance(`cube_${entityId}`, scene, playerColor);
       cube.parent = myTransform.value.getNode();
       cube.position.y = 0;
+      cube.isVisible = false; // Hide local player's body in first-person
+      
+      // Register body cube for shadows
+      if (shadowManager) {
+        shadowManager.addShadowCaster(cube, true);
+      }
       
       console.log(`[GameSession] Spawned local player cube for entity ${entityId}`);
       
@@ -896,37 +1219,11 @@ export function useGameSession() {
         }
       });
       
-      // Input handler
-      const sendInputToServer = (forward: number, right: number, jump: boolean, sprint: boolean = false) => {
-        if (!myTransform.value || !networkClient || !cameraController) return;
-        
-        const camYaw = cameraController.getYaw();
-        const camPitch = cameraController.getPitch();
-        
-        myTransform.value.setInput(forward, right, camYaw, jump);
-        
-        inputSequence++;
-        myTransform.value.setCurrentSequence(inputSequence);
-        
-        const input: InputData = {
-          sequence: inputSequence,
-          deltaTime: FIXED_TIMESTEP,
-          forward,
-          right,
-          cameraYaw: camYaw,
-          cameraPitch: camPitch,
-          jump,
-          sprint,
-          timestamp: performance.now()
-        };
-        
-        lastInputSendTime = performance.now();
-        networkClient.sendInput(input);
-      };
-      
-      inputManager.onStateChange((forward, right, jump, sprint) => {
-        sendInputToServer(forward, right, jump, sprint);
-      });
+      // Input is now sent once per physics tick via the onFixedTick callback
+      // in GameLoop, ensuring 1:1 correspondence between sequence numbers,
+      // input buffer entries, and physics steps. This eliminates the desync
+      // caused by event-driven sends advancing the sequence counter faster
+      // than the physics tick rate.
       
       // Shoot handler
       inputManager.onShoot(() => {
@@ -942,9 +1239,10 @@ export function useGameSession() {
         if (!weaponSystem.hasWeapon.value || itemSystem.isTossing() || !myTransform.value || !scene || !networkClient) return;
         
         weaponSystem.clearWeapon();
+        myTransform.value.clearWeapon(); // Clear visual weapon
         
         if (cameraController) {
-          itemSystem.handleDrop(
+          const dropSuccess = itemSystem.handleDrop(
             myTransform.value,
             cameraController.getYaw(),
             weaponSystem.getWeaponType(),
@@ -952,6 +1250,12 @@ export function useGameSession() {
             networkClient,
             voxelGrid || undefined
           );
+          
+          // Play drop sound globally for local player
+          if (dropSuccess) {
+            console.log(`[GameSession] Playing local drop sound`);
+            playSFX('item_pickup', 0.8);
+          }
         }
       });
       
@@ -982,6 +1286,11 @@ export function useGameSession() {
           cameraController.resetZoom();
         }
       });
+
+      // Debug camera toggle handler (Y key)
+      inputManager.onDebugCameraToggle(() => {
+        cameraController.toggleDebugThirdPerson(myTransform.value);
+      });
       
       // Point camera at player
       if (cameraController) {
@@ -1005,6 +1314,111 @@ export function useGameSession() {
             playerX.value = x;
             playerY.value = y;
             playerZ.value = z;
+            
+            // Update water and breath state from transform
+            if (myTransform.value) {
+              const state = myTransform.value.getState();
+              playerBreathRemaining.value = state.breathRemaining;
+              playerIsUnderwater.value = state.isHeadUnderwater;
+              playerIsInWater.value = state.isInWater;
+              
+              // Update local player footsteps
+              if (footstepManager && myEntityId.value !== null) {
+                footstepManager.updatePlayer(
+                  myEntityId.value,
+                  state.posX, state.posY, state.posZ,
+                  state.velX, state.velY, state.velZ,
+                  state.isGrounded,
+                  state.isInWater,
+                  true // isLocalPlayer
+                );
+              }
+            }
+          },
+          // Per-frame updates (timers, UI, etc.)
+          onVariableTick: (deltaTime) => {
+            // Update blood splatter timer
+            if (bloodSplatterTimer.value > 0) {
+              bloodSplatterTimer.value = Math.max(0, bloodSplatterTimer.value - deltaTime);
+              
+              // Clear textures when timer hits 0
+              if (bloodSplatterTimer.value === 0 && bloodSplatterEffect) {
+                bloodSplatterEffect.clearTextures();
+              }
+            }
+            
+            // Update hit marker timer
+            if (hitMarkerTimer.value > 0) {
+              hitMarkerTimer.value = Math.max(0, hitMarkerTimer.value - deltaTime);
+            }
+            
+            // Update low health effects
+            const healthPercent = playerHealth.value / PLAYER_MAX_HEALTH;
+            
+            // Update post-process with health
+            if (finalPostProcess) {
+              finalPostProcess.setHealthPercentage(healthPercent);
+            }
+            
+            // Manage heartbeat sound based on health
+            if (healthPercent < 0.5 && healthPercent > 0) {
+              // Calculate intensities
+              const lowHealthIntensity = 1.0 - (healthPercent * 2.0); // 0 at 50%, 1 at 0%
+              const volume = 0.1 + (lowHealthIntensity * 0.9); // 10% to 100%
+              const playbackRate = 1.0 + lowHealthIntensity; // 1x to 2x speed
+              
+              if (!isHeartbeatPlaying) {
+                // Start heartbeat
+                const audioManager = AudioManager.getInstance();
+                audioManager.play('heartbeat', { loop: true, volume, playbackRate });
+                isHeartbeatPlaying = true;
+              } else {
+                // Update existing heartbeat volume and speed
+                const audioManager = AudioManager.getInstance();
+                audioManager.updateSoundProperties('heartbeat', { volume, playbackRate });
+              }
+            } else if (isHeartbeatPlaying) {
+              // Stop heartbeat when health is above 50% or at 0
+              const audioManager = AudioManager.getInstance();
+              audioManager.stop('heartbeat');
+              isHeartbeatPlaying = false;
+            }
+          },
+          // Send input exactly once per physics tick — keeps sequence numbers
+          // in lock-step with both client and server physics steps
+          onFixedTick: () => {
+            if (!myTransform.value || !networkClient || !cameraController || !inputManager) return;
+
+            // Read current input state (jump is buffered so short presses aren't missed)
+            const state = inputManager.getCurrentState();
+            const camYaw = cameraController.getYaw();
+            const camPitch = cameraController.getPitch();
+
+            // Set input on the local transform for this physics tick
+            myTransform.value.setInput(state.forward, state.right, camYaw, state.jump, state.sprint, camPitch);
+
+            // Increment sequence — exactly once per physics tick
+            inputSequence++;
+            myTransform.value.setCurrentSequence(inputSequence);
+
+            // Consume jump buffer so it only fires for one tick
+            inputManager.consumeJump();
+
+            // Send the same input to the server
+            const input: InputData = {
+              sequence: inputSequence,
+              deltaTime: FIXED_TIMESTEP,
+              forward: state.forward,
+              right: state.right,
+              cameraYaw: camYaw,
+              cameraPitch: camPitch,
+              jump: state.jump,
+              sprint: state.sprint,
+              timestamp: performance.now()
+            };
+
+            lastInputSendTime = performance.now();
+            networkClient.sendInput(input);
           }
         });
       }
@@ -1040,16 +1454,28 @@ export function useGameSession() {
     treeManager?.dispose();
     rockManager?.dispose();
     bushManager?.dispose();
+    waterManager?.dispose();
     cloudManager?.dispose();
+    footstepManager?.dispose();
+    TimeManager.Dispose();
     cloudPostProcess?.dispose();
     finalPostProcess?.dispose();
     leafTriggerPost?.dispose();
     leafEffect = null;
+    bloodSplatterPost?.dispose();
+    bloodSplatterEffect?.dispose();
+    bloodSplatterEffect = null;
     skyPickSphere?.dispose();
     shadowManager?.dispose();
     buildingCollisionManager?.clear();
     buildSystem?.dispose();
     ladderPlacementSystem?.dispose();
+    // Stop heartbeat sound if playing
+    if (isHeartbeatPlaying) {
+      const audioManager = AudioManager.getInstance();
+      audioManager.stop('heartbeat');
+      isHeartbeatPlaying = false;
+    }
     // Dispose ladder meshes and triggers
     ladderMeshes.forEach((mesh, id) => {
       if (scene) disposeLadderMesh(`ladder_${id}`, scene);
@@ -1081,6 +1507,12 @@ export function useGameSession() {
       console.log(`[GameSession] Initial texture sets selected: ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
       
       setupLeafTriggerDetection(scene, camera);
+      
+      // Initialize blood splatter effect and post-process
+      console.log('[GameSession] Initializing blood splatter effect...');
+      bloodSplatterEffect = new BloodSplatterEffect(scene);
+      setupBloodSplatterPostProcess(scene, camera);
+      console.log('[GameSession] Blood splatter effect initialized');
     } catch (error) {
       console.error('[GameSession] Failed to generate leaf textures:', error);
     }
@@ -1195,6 +1627,94 @@ export function useGameSession() {
     console.log('[GameSession] Leaf trigger detection and post-process set up');
   }
 
+  function setupBloodSplatterPostProcess(scene: Scene, camera: any) {
+    if (!scene) return;
+
+    Effect.ShadersStore['bloodSplatterFragmentShader'] = `
+      precision highp float;
+      varying vec2 vUV;
+      uniform sampler2D textureSampler;
+      uniform sampler2D bloodColorTexture;
+      uniform sampler2D bloodMaskTexture;
+      uniform float alpha;
+      uniform vec2 screenSize;
+      uniform vec2 textureSize;
+      uniform vec3 cameraOffset;
+      
+      void main() {
+        vec4 sceneColor = texture2D(textureSampler, vUV);
+        
+        if (alpha < 0.01) {
+          gl_FragColor = sceneColor;
+          return;
+        }
+        
+        // Calculate aspect ratios for proper scaling
+        float screenAspect = screenSize.x / screenSize.y;
+        float textureAspect = textureSize.x / textureSize.y;
+        
+        vec2 scale;
+        if (screenAspect > textureAspect) {
+          scale = vec2(1.0, screenAspect / textureAspect);
+        } else {
+          scale = vec2(textureAspect / screenAspect, 1.0);
+        }
+        
+        // Add slight overdraw scale to ensure full coverage
+        float overdrawScale = 1.032;
+        scale *= overdrawScale;
+        
+        // Apply parallax offset based on camera movement
+        vec2 parallaxOffset = vec2(cameraOffset.x * 0.012, cameraOffset.z * 0.012);
+        
+        // Center and scale UV coordinates with parallax
+        vec2 bloodUV = (vUV - 0.5) / scale + 0.5 + parallaxOffset;
+        
+        vec4 bloodColor = texture2D(bloodColorTexture, bloodUV);
+        vec4 bloodMask = texture2D(bloodMaskTexture, bloodUV);
+        
+        // Use mask's red channel as alpha, multiply by timer alpha
+        float maskAlpha = bloodMask.r * alpha;
+        
+        // Blend blood splatter over scene
+        vec3 finalColor = mix(sceneColor.rgb, bloodColor.rgb, maskAlpha);
+        gl_FragColor = vec4(finalColor, 1.0);
+      }
+    `;
+
+    bloodSplatterPost = new PostProcess(
+      'bloodSplatter',
+      'bloodSplatter',
+      ['alpha', 'screenSize', 'textureSize', 'cameraOffset'],
+      ['bloodColorTexture', 'bloodMaskTexture'],
+      1.0,
+      camera
+    );
+
+    bloodSplatterPost.onApply = (effect) => {
+      if (bloodSplatterEffect && scene && camera) {
+        effect.setTexture('bloodColorTexture', bloodSplatterEffect.getColorTexture());
+        effect.setTexture('bloodMaskTexture', bloodSplatterEffect.getMaskTexture());
+        effect.setFloat('alpha', bloodSplatterAlpha.value);
+        
+        const engine = scene.getEngine();
+        effect.setFloat2('screenSize', engine.getRenderWidth(), engine.getRenderHeight());
+        effect.setFloat2('textureSize', 1024, 1024);
+        
+        // Calculate camera offset for parallax movement
+        const camPos = camera.position;
+        const offsetX = camPos.x - bloodEntryX;
+        const offsetY = camPos.y - bloodEntryY;
+        const offsetZ = camPos.z - bloodEntryZ;
+        effect.setFloat3('cameraOffset', offsetX, offsetY, offsetZ);
+      } else {
+        effect.setFloat('alpha', 0.0);
+      }
+    };
+
+    console.log('[GameSession] Blood splatter post-process set up');
+  }
+
   function checkCameraInLeaves() {
     if (!scene || !scene.activeCamera) {
       currentTreeIndex = -1;
@@ -1238,7 +1758,7 @@ export function useGameSession() {
     
     try {
       const audioManager = AudioManager.getInstance();
-      audioManager.play('rustle', { volume: 0.5 });
+      audioManager.play('rustle', { volume: 0.5, position: { x, y, z } });
     } catch (e) {
       console.warn('[GameSession] AudioManager not initialized yet');
     }
@@ -1258,7 +1778,7 @@ export function useGameSession() {
     
     try {
       const audioManager = AudioManager.getInstance();
-      audioManager.play('rustle', { volume: 0.4 });
+      audioManager.play('rustle', { volume: 0.4, position: { x: leafEntryX, y: leafEntryY, z: leafEntryZ } });
     } catch (e) {
       console.warn('[GameSession] AudioManager not initialized yet');
     }
@@ -1294,6 +1814,161 @@ export function useGameSession() {
     gameBeginCallbacks.push(callback);
   };
 
+  const color3ToHex = (color: Color3): string => {
+    const clamp = (value: number) => Math.max(0, Math.min(1, value));
+    const toHex = (value: number) => Math.round(clamp(value) * 255).toString(16).padStart(2, '0');
+    return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
+  };
+
+  const getDirectionalLight = (): DirectionalLight | null => {
+    if (!scene) return null;
+    const light = scene.getLightByName('dirLight');
+    return light instanceof DirectionalLight ? light : null;
+  };
+
+  const getHemisphericLight = (): HemisphericLight | null => {
+    if (!scene) return null;
+    const light = scene.getLightByName('hemiLight');
+    return light instanceof HemisphericLight ? light : null;
+  };
+
+  // Post-process debug methods
+  const setPostProcessExposure = (value: number) => finalPostProcess?.setExposure(value);
+  const setPostProcessContrast = (value: number) => finalPostProcess?.setContrast(value);
+  const setPostProcessSaturation = (value: number) => finalPostProcess?.setSaturation(value);
+  const setPostProcessChromaticAberration = (value: number) => finalPostProcess?.setChromaticAberration(value);
+  const setPostProcessSharpening = (value: number) => finalPostProcess?.setSharpening(value);
+  const setPostProcessGrainIntensity = (value: number) => finalPostProcess?.setGrainIntensity(value);
+  const setPostProcessHealthPercentage = (value: number) => finalPostProcess?.setHealthPercentage(value);
+  const setPostProcessPencilEnabled = (value: boolean) => finalPostProcess?.setPencilEnabled(value);
+  const setPostProcessPencilEdgeStrength = (value: number) => finalPostProcess?.setPencilEdgeStrength(value);
+  const setPostProcessPencilDepthWeight = (value: number) => finalPostProcess?.setPencilDepthWeight(value);
+  const setPostProcessPencilNormalWeight = (value: number) => finalPostProcess?.setPencilNormalWeight(value);
+  const setPostProcessPencilEdgeThreshold = (value: number) => finalPostProcess?.setPencilEdgeThreshold(value);
+  const setPostProcessPencilHatchIntensity = (value: number) => finalPostProcess?.setPencilHatchIntensity(value);
+  const setPostProcessPencilHatchScale = (value: number) => finalPostProcess?.setPencilHatchScale(value);
+  const setPostProcessPencilPaperIntensity = (value: number) => finalPostProcess?.setPencilPaperIntensity(value);
+
+  // Lighting debug methods
+  const setDirectionalLightIntensity = (value: number) => {
+    const light = getDirectionalLight();
+    if (light) light.intensity = value;
+  };
+
+  const setDirectionalLightColor = (value: string) => {
+    const light = getDirectionalLight();
+    if (light) light.diffuse = hexToColor3(value);
+  };
+
+  const setHemisphericLightIntensity = (value: number) => {
+    const light = getHemisphericLight();
+    if (light) light.intensity = value;
+  };
+
+  const setHemisphericLightColor = (value: string) => {
+    const light = getHemisphericLight();
+    if (light) light.diffuse = hexToColor3(value);
+  };
+
+  const setHemisphericGroundColor = (value: string) => {
+    const light = getHemisphericLight();
+    if (!light) return;
+    const baseColor = hexToColor3(value);
+    light.metadata = {
+      ...light.metadata,
+      baseGroundColor: baseColor
+    };
+    const dirLight = getDirectionalLight();
+    if (!dirLight) {
+      light.groundColor = baseColor;
+      return;
+    }
+
+    const dir = dirLight.direction;
+    const len = dir.length();
+    const normY = len > 0.0001 ? dir.y / len : dir.y;
+    const sunUp = Math.max(0, -normY);
+    const factor = Math.min(1, Math.max(0, sunUp * dirLight.intensity * 1.45));
+
+    light.groundColor.r = baseColor.r * factor;
+    light.groundColor.g = baseColor.g * factor;
+    light.groundColor.b = baseColor.b * factor;
+  };
+
+  const setAmbientTintStrength = (value: number) => {
+    if (!scene) return;
+    const current = (scene.metadata as { ambientParams?: { tintStrength: number; minIntensity: number; maxIntensity: number } } | undefined)?.ambientParams;
+    scene.metadata = {
+      ...scene.metadata,
+      ambientParams: {
+        tintStrength: Math.max(0, Math.min(1.0, value)),
+        minIntensity: current?.minIntensity ?? 0.25,
+        maxIntensity: current?.maxIntensity ?? 1.0
+      }
+    };
+  };
+
+  const setAmbientMinIntensity = (value: number) => {
+    if (!scene) return;
+    const current = (scene.metadata as { ambientParams?: { tintStrength: number; minIntensity: number; maxIntensity: number } } | undefined)?.ambientParams;
+    scene.metadata = {
+      ...scene.metadata,
+      ambientParams: {
+        tintStrength: current?.tintStrength ?? 0.35,
+        minIntensity: Math.max(0, Math.min(1.0, value)),
+        maxIntensity: current?.maxIntensity ?? 1.0
+      }
+    };
+  };
+
+  const setAmbientMaxIntensity = (value: number) => {
+    if (!scene) return;
+    const current = (scene.metadata as { ambientParams?: { tintStrength: number; minIntensity: number; maxIntensity: number } } | undefined)?.ambientParams;
+    scene.metadata = {
+      ...scene.metadata,
+      ambientParams: {
+        tintStrength: current?.tintStrength ?? 0.35,
+        minIntensity: current?.minIntensity ?? 0.25,
+        maxIntensity: Math.max(0, Math.min(1.0, value))
+      }
+    };
+  };
+  
+  const getPostProcessValues = () => {
+    const dirLight = getDirectionalLight();
+    const hemiLight = getHemisphericLight();
+
+    const ambientParams = (scene?.metadata as { ambientParams?: { tintStrength: number; minIntensity: number; maxIntensity: number } } | undefined)?.ambientParams;
+
+    return {
+      exposure: finalPostProcess?.exposure ?? 1.05,
+      contrast: finalPostProcess?.contrast ?? 1.1,
+      saturation: finalPostProcess?.saturation ?? 1.5,
+      chromaticAberration: finalPostProcess?.chromaticAberrationStrength ?? 3.1,
+      sharpening: finalPostProcess?.sharpenStrength ?? 0.29,
+      grainIntensity: finalPostProcess?.grainIntensity ?? 0.03,
+      healthPercentage: 1.0,
+      pencilEnabled: finalPostProcess?.pencilEnabled ?? false,
+      pencilEdgeStrength: finalPostProcess?.pencilEdgeStrength ?? 1.2,
+      pencilDepthWeight: finalPostProcess?.pencilDepthWeight ?? 0.7,
+      pencilNormalWeight: finalPostProcess?.pencilNormalWeight ?? 0.9,
+      pencilEdgeThreshold: finalPostProcess?.pencilEdgeThreshold ?? 0.12,
+      pencilHatchIntensity: finalPostProcess?.pencilHatchIntensity ?? 0.35,
+      pencilHatchScale: finalPostProcess?.pencilHatchScale ?? 1.4,
+      pencilPaperIntensity: finalPostProcess?.pencilPaperIntensity ?? 0.08,
+      dirLightIntensity: dirLight?.intensity ?? 0.8,
+      dirLightColor: dirLight ? color3ToHex(dirLight.diffuse) : '#fff2d9',
+      hemiLightIntensity: hemiLight?.intensity ?? 0.25,
+      hemiLightColor: hemiLight ? color3ToHex(hemiLight.diffuse) : '#8080b3',
+      hemiGroundColor: hemiLight
+        ? color3ToHex((hemiLight.metadata as { baseGroundColor?: Color3 } | undefined)?.baseGroundColor ?? hemiLight.groundColor)
+        : '#ffffff',
+      ambientTintStrength: ambientParams?.tintStrength ?? 0.35,
+      ambientMinIntensity: ambientParams?.minIntensity ?? 0.25,
+      ambientMaxIntensity: ambientParams?.maxIntensity ?? 1.0
+    };
+  };
+
   return {
     init,
     dispose,
@@ -1308,6 +1983,10 @@ export function useGameSession() {
     playerStamina,
     playerIsExhausted,
     playerHasInfiniteStamina,
+    playerBreathRemaining,
+    playerMaxBreath,
+    playerIsUnderwater,
+    playerIsInWater,
     playerX,
     playerY,
     playerZ,
@@ -1332,6 +2011,8 @@ export function useGameSession() {
     killFeedEntries,
     // Round system
     roundState,
+    // Hit marker
+    hitMarkerVisible,
     // Loading phase
     sendClientReady,
     onPlayersReadyUpdate,
@@ -1343,6 +2024,32 @@ export function useGameSession() {
     getScene: () => scene,
     getCamera: () => cameraController?.getCamera() || null,
     getPlayerTransform: () => myTransform.value,
-    getNetworkClient: () => networkClient
+    myTransform, // Direct ref access for debug panels
+    getNetworkClient: () => networkClient,
+    // Post-process debug
+    setPostProcessExposure,
+    setPostProcessContrast,
+    setPostProcessSaturation,
+    setPostProcessChromaticAberration,
+    setPostProcessSharpening,
+    setPostProcessGrainIntensity,
+    setPostProcessHealthPercentage,
+    setPostProcessPencilEnabled,
+    setPostProcessPencilEdgeStrength,
+    setPostProcessPencilDepthWeight,
+    setPostProcessPencilNormalWeight,
+    setPostProcessPencilEdgeThreshold,
+    setPostProcessPencilHatchIntensity,
+    setPostProcessPencilHatchScale,
+    setPostProcessPencilPaperIntensity,
+    setDirectionalLightIntensity,
+    setDirectionalLightColor,
+    setHemisphericLightIntensity,
+    setHemisphericLightColor,
+    setHemisphericGroundColor,
+    setAmbientTintStrength,
+    setAmbientMinIntensity,
+    setAmbientMaxIntensity,
+    getPostProcessValues
   };
 }

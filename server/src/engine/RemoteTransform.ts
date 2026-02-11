@@ -19,7 +19,8 @@ export class RemoteTransform {
     forward: 0,
     right: 0,
     cameraYaw: 0,
-    jump: false
+    jump: false,
+    sprint: false
   };
 
   constructor(entityId: number, scene: Scene) {

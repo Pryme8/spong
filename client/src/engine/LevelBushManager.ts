@@ -107,7 +107,7 @@ export class LevelBushManager {
     const normals: number[] = [];
     const indices: number[] = [];
 
-    const BUSH_SCALE = 0.5;
+    const BUSH_SCALE = 0.25;
     
     // Center offset
     const halfW = BUSH_GRID_W * BUSH_VOXEL_SIZE * 0.5;
@@ -166,7 +166,7 @@ export class LevelBushManager {
     
     // Collider vertices are in raw world units (BUSH_VOXEL_SIZE scale)
     // Need to center and scale them like the visible mesh
-    const BUSH_SCALE = 0.5;
+    const BUSH_SCALE = 0.25;
     const halfW = BUSH_GRID_W * BUSH_VOXEL_SIZE * 0.5;
     const halfD = BUSH_GRID_D * BUSH_VOXEL_SIZE * 0.5;
     
@@ -283,7 +283,7 @@ export class LevelBushManager {
    * Returns the bush index if inside, -1 if outside all bushes.
    */
   checkCameraInBushes(cameraX: number, cameraY: number, cameraZ: number): number {
-    const triggerMargin = 0.5;
+    const triggerMargin = -0.1;
     const maxCheckDistance = 15;
     const maxCheckDistanceSq = maxCheckDistance * maxCheckDistance;
 

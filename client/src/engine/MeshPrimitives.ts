@@ -69,7 +69,7 @@ export class MeshPrimitives {
     this.masterCylinder = MeshBuilder.CreateCylinder('masterCylinder', {
       diameter: 1,
       height: 1,
-      tessellation: 16
+      tessellation: 8
     }, scene);
     
     // Create default material for cylinders

@@ -10,6 +10,7 @@
       :room-id="roomId"
       :my-entity-id="myEntityId"
       :players="players"
+      :kill-feed-entries="killFeedEntries"
       :player-health="playerHealth"
       :max-health="maxHealth"
       :player-armor="playerArmor"
@@ -17,6 +18,10 @@
       :player-stamina="playerStamina"
       :player-is-exhausted="playerIsExhausted"
       :player-has-infinite-stamina="playerHasInfiniteStamina"
+      :player-breath-remaining="playerBreathRemaining"
+      :player-max-breath="playerMaxBreath"
+      :player-is-underwater="playerIsUnderwater"
+      :player-is-in-water="playerIsInWater"
       :has-weapon="hasWeapon"
       :weapon-type="weaponType"
       :current-ammo="currentAmmo"
@@ -25,6 +30,7 @@
       :reload-progress="reloadProgress"
       :latency="latency"
       :ping-color-class="pingColorClass"
+      :hit-marker-visible="hitMarkerVisible"
     />
 
     <!-- Bush Parameter UI Overlay -->
@@ -195,6 +201,10 @@ const {
   playerStamina,
   playerIsExhausted,
   playerHasInfiniteStamina,
+  playerBreathRemaining,
+  playerMaxBreath,
+  playerIsUnderwater,
+  playerIsInWater,
   playerX,
   playerY,
   playerZ,
@@ -205,7 +215,9 @@ const {
   isReloading,
   reloadProgress,
   latency,
-  pingColorClass
+  pingColorClass,
+  killFeedEntries,
+  hitMarkerVisible
 } = session;
 
 // Health computed
@@ -247,7 +259,7 @@ const colorCanvases: (HTMLCanvasElement | null)[] = new Array(3).fill(null);
 const maskCanvases: (HTMLCanvasElement | null)[] = new Array(3).fill(null);
 
 const BUSH_X = -10; // Bush positioned to the left of spawn
-const BUSH_SCALE = 0.5; // Scale factor for the bush mesh
+const BUSH_SCALE = 0.25; // Scale factor for the bush mesh
 
 // Grid world-space size (before scaling)
 const gridWorldW = BUSH_GRID_W * BUSH_VOXEL_SIZE;
@@ -289,7 +301,7 @@ watch(showLeafTextures, (show) => {
 
 function updateGroundVisibility() {
   if (!scene) return;
-  const ground = scene.getMeshByName('rangeGround');
+  const ground = scene.getMeshByName('level');
   if (ground) {
     ground.setEnabled(showGround.value);
   }
@@ -847,7 +859,7 @@ function onBushEnter() {
   
   try {
     const audioManager = AudioManager.getInstance();
-    audioManager.play('rustle', { volume: 0.5 });
+    audioManager.play('rustle', { volume: 0.5, position: { x: bushEntryX, y: bushEntryY, z: bushEntryZ } });
   } catch (e) {
     console.warn('[BushView] AudioManager not initialized yet');
   }
@@ -872,7 +884,7 @@ function onBushLeave() {
   
   try {
     const audioManager = AudioManager.getInstance();
-    audioManager.play('rustle', { volume: 0.4 });
+    audioManager.play('rustle', { volume: 0.4, position: { x: bushEntryX, y: bushEntryY, z: bushEntryZ } });
   } catch (e) {
     console.warn('[BushView] AudioManager not initialized yet');
   }

@@ -6,10 +6,12 @@ export * from './physics.js';
 export * from './ecs/index.js';
 export * from './components/index.js';
 export * from './projectile.js';
+export * from './weaponStats.js';
 export * from './items.js';
 export * from './collectablePhysics.js';
 export * from './collision.js';
 // export * from './collision/index.js'; // Temporarily disabled - BoxCollider conflict with physics.js
+export * from './Octree.js';
 export * from './rng.js';
 export * from './noise.js';
 export * from './levelgen/index.js';

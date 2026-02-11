@@ -42,12 +42,27 @@ export class VoxelGrid {
    * @param seed String seed for deterministic generation
    * @param scale Noise scale (smaller = smoother terrain)
    * @param octaves Number of FBM octaves for detail
+   * @param flatHeight Optional fixed height for flat terrain (in voxels). When provided, generates flat terrain at this height instead of using noise.
    */
   generateFromNoise(
     seed: string,
     scale: number = 0.02,
-    octaves: number = 3
+    octaves: number = 3,
+    flatHeight?: number
   ): void {
+    // If flatHeight is specified, generate flat terrain
+    if (flatHeight !== undefined) {
+      const height = Math.floor(flatHeight);
+      for (let x = 0; x < this.width; x++) {
+        for (let z = 0; z < this.depth; z++) {
+          for (let y = 0; y < height; y++) {
+            this.setVoxel(x, y, z, true);
+          }
+        }
+      }
+      return;
+    }
+
     const heightNoise = new Noise2D(seed);
     const primaryMaskNoise = new Noise2D(seed + '_mask1');
     const secondaryMaskNoise = new Noise2D(seed + '_mask2');

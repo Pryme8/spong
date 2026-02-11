@@ -1,10 +1,10 @@
 import { TransformData, InputData, ShootData, ProjectileSpawnData, ProjectileDestroyData } from './protocol.js';
 
 // Binary codec for transform updates
-// Format: [opcode:1][entityId:4][posX:4][posY:4][posZ:4][rotX:4][rotY:4][rotZ:4][rotW:4][velX:4][velY:4][velZ:4][headPitch:4][lastInputSeq:4]
-// Total: 53 bytes
+// Format: [opcode:1][entityId:4][posX:4][posY:4][posZ:4][rotX:4][rotY:4][rotZ:4][rotW:4][velX:4][velY:4][velZ:4][headPitch:4][lastInputSeq:4][isInWater:1][isHeadUnderwater:1][breathRemaining:4][waterDepth:4][isExhausted:1]
+// Total: 64 bytes
 
-export const TRANSFORM_PACKET_SIZE = 53;
+export const TRANSFORM_PACKET_SIZE = 64;
 
 // Binary codec for input updates
 // Format: [opcode:1][sequence:4][deltaTime:4][forward:1][right:1][cameraYaw:4][cameraPitch:4][jump:1][sprint:1][timestamp:8]
@@ -58,6 +58,18 @@ export function encodeTransform(opcode: number, data: TransformData): ArrayBuffe
   
   // Last processed input sequence (4 bytes, uint32)
   view.setUint32(offset, data.lastProcessedInput || 0, true);
+  offset += 4;
+  
+  // Water state (11 bytes total)
+  view.setUint8(offset, data.isInWater ? 1 : 0);
+  offset += 1;
+  view.setUint8(offset, data.isHeadUnderwater ? 1 : 0);
+  offset += 1;
+  view.setFloat32(offset, data.breathRemaining || 10.0, true);
+  offset += 4;
+  view.setFloat32(offset, data.waterDepth || 0.0, true);
+  offset += 4;
+  view.setUint8(offset, data.isExhausted ? 1 : 0);
   
   return buffer;
 }
@@ -102,8 +114,32 @@ export function decodeTransform(buffer: ArrayBuffer): TransformData {
   
   // Last processed input sequence
   const lastProcessedInput = view.getUint32(offset, true);
+  offset += 4;
   
-  return { entityId, position, rotation, velocity, headPitch, lastProcessedInput };
+  // Water state
+  const isInWater = view.getUint8(offset) === 1;
+  offset += 1;
+  const isHeadUnderwater = view.getUint8(offset) === 1;
+  offset += 1;
+  const breathRemaining = view.getFloat32(offset, true);
+  offset += 4;
+  const waterDepth = view.getFloat32(offset, true);
+  offset += 4;
+  const isExhausted = view.getUint8(offset) === 1;
+  
+  return { 
+    entityId, 
+    position, 
+    rotation, 
+    velocity, 
+    headPitch, 
+    lastProcessedInput,
+    isInWater,
+    isHeadUnderwater,
+    breathRemaining,
+    waterDepth,
+    isExhausted
+  };
 }
 
 export function encodeInput(opcode: number, data: InputData): ArrayBuffer {
@@ -201,7 +237,7 @@ export function decodeInput(buffer: ArrayBuffer): InputData {
 // Format: [opcode:1][timestamp:8][dirX:4][dirY:4][dirZ:4]
 // Total: 21 bytes
 
-export const SHOOT_PACKET_SIZE = 21;
+export const SHOOT_PACKET_SIZE = 33; // 1 + 8 + 6*4 = 33 bytes
 
 export function encodeShoot(opcode: number, data: ShootData): ArrayBuffer {
   const buffer = new ArrayBuffer(SHOOT_PACKET_SIZE);
@@ -216,6 +252,12 @@ export function encodeShoot(opcode: number, data: ShootData): ArrayBuffer {
   view.setFloat32(offset, data.dirY, true);
   offset += 4;
   view.setFloat32(offset, data.dirZ, true);
+  offset += 4;
+  view.setFloat32(offset, data.spawnX, true);
+  offset += 4;
+  view.setFloat32(offset, data.spawnY, true);
+  offset += 4;
+  view.setFloat32(offset, data.spawnZ, true);
   return buffer;
 }
 
@@ -229,7 +271,13 @@ export function decodeShoot(buffer: ArrayBuffer): ShootData {
   const dirY = view.getFloat32(offset, true);
   offset += 4;
   const dirZ = view.getFloat32(offset, true);
-  return { timestamp, dirX, dirY, dirZ };
+  offset += 4;
+  const spawnX = view.getFloat32(offset, true);
+  offset += 4;
+  const spawnY = view.getFloat32(offset, true);
+  offset += 4;
+  const spawnZ = view.getFloat32(offset, true);
+  return { timestamp, dirX, dirY, dirZ, spawnX, spawnY, spawnZ };
 }
 
 // ── Projectile Spawn ──────────────────────────────────────────

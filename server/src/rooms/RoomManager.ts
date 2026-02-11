@@ -221,11 +221,15 @@ export class RoomManager {
     const room = this.rooms.get(conn.roomId);
     if (!room) return;
 
-    // Decode the aim direction from the shoot packet
+    // Decode the aim direction and spawn position from the shoot packet
     const shootData = decodeShoot(buffer);
 
-    // Spawn projectile(s) using the client-provided aim direction
-    const spawnData = room.spawnProjectile(conn.id, shootData.dirX, shootData.dirY, shootData.dirZ);
+    // Spawn projectile(s) using the client-provided aim direction and spawn position
+    const spawnData = room.spawnProjectile(
+      conn.id, 
+      shootData.dirX, shootData.dirY, shootData.dirZ,
+      shootData.spawnX, shootData.spawnY, shootData.spawnZ
+    );
     if (!spawnData) return;
 
     // Handle both single projectile and multiple pellets (shotgun)

@@ -125,6 +125,14 @@ export function useLobbySession() {
         query.pistols = payload.config.pistolCount.toString();
       }
       
+      if (payload.config.headshotDmg !== undefined) {
+        query.hsDmg = payload.config.headshotDmg.toString();
+      }
+      
+      if (payload.config.normalDmg !== undefined) {
+        query.nsDmg = payload.config.normalDmg.toString();
+      }
+      
       router.push({
         name: 'level',
         query
@@ -138,6 +146,7 @@ export function useLobbySession() {
       Opcode.ItemSpawn,
       Opcode.ItemUpdate,
       Opcode.ItemPickup,
+      Opcode.ItemDropSound,
       Opcode.ReloadRequest,
       Opcode.ExplosionSpawn,
       Opcode.StaminaUpdate,

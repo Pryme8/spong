@@ -84,6 +84,7 @@ import {
   LadderDestroyMessage,
   LadderDestroyedMessage,
   ItemPickupMessage,
+  ItemDropSoundMessage,
   TreeSpawnMessage,
   RockSpawnMessage,
   ExplosionSpawnMessage,
@@ -97,6 +98,7 @@ import {
   PlayerScore,
   RoundStateMessage,
   ScoreUpdateMessage,
+  ReloadStartedMessage,
   ProjectileSpawnData,
   VoxelGrid,
   rayVsVoxelGrid,
@@ -106,6 +108,7 @@ import {
   createShotgun,
   createSniper,
   createAssaultRifle,
+  createDMR,
   createRocketLauncher,
   createHammer,
   createMedicPack,
@@ -129,11 +132,14 @@ import {
   type BushInstance,
   type BushVariation,
   type RockTransform,
-  buildCollisionWorld,
-  CollisionWorld
+  Octree,
+  type OctreeEntry,
+  WATER,
+  STAMINA
 } from '@spong/shared';
 import type { TreeColliderMesh } from '@spong/shared/dist/src/treegen/TreeMesh.js';
 import type { TreeTransform } from '@spong/shared/dist/src/treegen/TreeMeshTransform.js';
+import { ServerWaterLevelProvider } from '../WaterLevelProvider.js';
 
 export interface Player {
   id: string;
@@ -141,6 +147,55 @@ export interface Player {
   entityId: number;
   color: string;
 }
+
+type BlockColliderEntry = {
+  gridX: number;
+  gridY: number;
+  gridZ: number;
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
+};
+
+// ============================================================================
+// Entity Spawn System
+// ============================================================================
+
+type EntityFactory = (entity: Entity) => Entity;
+type ItemType = 'pistol' | 'smg' | 'lmg' | 'shotgun' | 'sniper' | 'assault' | 'dmr' | 'rocket' | 'hammer' | 
+                'medic_pack' | 'large_medic_pack' | 'apple' | 'pill_bottle' | 'kevlar' | 'helmet';
+
+interface EntitySpawnConfig {
+  factory: EntityFactory;
+  name: string;
+  size?: number;
+  yOffset?: number;
+  yOffsetBase?: number;
+  validateUnderwater?: boolean;
+  onGround?: boolean;
+  broadcastSpawn?: boolean;
+}
+
+const ENTITY_CONFIGS: Record<ItemType, EntitySpawnConfig> = {
+  pistol: { factory: createPistol, name: 'Pistol', yOffset: 0.5, validateUnderwater: true, onGround: true },
+  smg: { factory: createSMG, name: 'SMG', yOffset: 0.5, validateUnderwater: true, onGround: true },
+  lmg: { factory: createLMG, name: 'LMG', yOffset: 1.0, yOffsetBase: 0, validateUnderwater: true, onGround: false },
+  shotgun: { factory: createShotgun, name: 'Shotgun', yOffset: 0.5, validateUnderwater: true, onGround: true },
+  sniper: { factory: createSniper, name: 'Sniper', yOffset: 0.5, validateUnderwater: true, onGround: true },
+  assault: { factory: createAssaultRifle, name: 'Assault Rifle', yOffset: 0.5, validateUnderwater: true, onGround: true },
+  dmr: { factory: createDMR, name: 'DMR', yOffset: 0.5, validateUnderwater: true, onGround: true },
+  rocket: { factory: createRocketLauncher, name: 'Rocket Launcher', yOffset: 0.5, validateUnderwater: true, onGround: true },
+  hammer: { factory: createHammer, name: 'Hammer', yOffset: 0.5, validateUnderwater: false, onGround: true, broadcastSpawn: true },
+  medic_pack: { factory: createMedicPack, name: 'Medic Pack', yOffset: 0.5, validateUnderwater: false, onGround: true },
+  large_medic_pack: { factory: createLargeMedicPack, name: 'Large Medic Pack', yOffset: 0.5, validateUnderwater: false, onGround: true },
+  apple: { factory: createApple, name: 'Apple', yOffset: 0.5, validateUnderwater: false, onGround: true },
+  pill_bottle: { factory: createPillBottle, name: 'Pill Bottle', yOffset: 0.5, validateUnderwater: false, onGround: true },
+  kevlar: { factory: createKevlar, name: 'Kevlar', yOffset: 0.5, validateUnderwater: true, onGround: true },
+  helmet: { factory: createHelmet, name: 'Helmet', yOffset: 0.5, validateUnderwater: true, onGround: true }
+};
 
 export class Room {
   readonly id: string;
@@ -154,16 +209,22 @@ export class Room {
   private connectionHandler: ConnectionHandler;
   private isInitialized = false;
   private voxelGrid?: VoxelGrid;
+  private waterLevelProvider?: ServerWaterLevelProvider;
   private treeInstances: TreeInstance[] = [];
   private treeColliderMeshes: Array<{ mesh: TreeColliderMesh; transform: TreeTransform }> = [];
   private rockInstances: RockInstance[] = [];
   private rockColliderMeshes: Array<{ mesh: RockColliderMesh; transform: RockTransform }> = [];
   private bushInstances: BushInstance[] = [];
+  private octree!: any; // Octree for broad-phase culling
   private buildingEntities = new Map<number, Entity>(); // Map of building entities (key: buildingEntityId)
   private blockPhysics = new Map<string, any>(); // Physics bodies for blocks (key: "buildingId_x_y_z")
+  private blockColliderCache = new Map<number, Map<string, BlockColliderEntry>>();
+  private pickupGridCellSize = 2.0;
+  private pickupGrid = new Map<string, Set<number>>();
+  private pickupGridCells = new Map<number, string>();
   private ladderEntities = new Map<number, Entity>(); // Map of ladder entities (key: ladderEntityId)
   private ownerId: string | null = null;
-  private lobbyConfig: { seed?: string; pistolCount?: number } = {};
+  private lobbyConfig: { seed?: string; pistolCount?: number; headshotDmg?: number; normalDmg?: number } = {};
 
   // Game start state
   private gameStartState: {
@@ -208,10 +269,119 @@ export class Room {
   private physicsRate = 60;
   private broadcastRate = 30;
 
+  // Cache last broadcast values to avoid unnecessary network traffic
+  private lastBroadcastCache = new Map<number, {
+    stamina?: number;
+    isExhausted?: boolean;
+    armor?: number;
+    hasHelmet?: boolean;
+    helmetHealth?: number;
+  }>();
+
   constructor(id: string, connectionHandler: ConnectionHandler) {
     this.id = id;
     this.connectionHandler = connectionHandler;
     console.log(`Room constructing: ${id}`);
+  }
+
+  // ============================================================================
+  // Generic Entity Spawn Functions
+  // ============================================================================
+
+  /**
+   * Generic spawn function for entities on terrain.
+   * Handles terrain sampling, underwater validation, physics setup, and optional broadcasting.
+   * @returns true if spawned successfully, false if rejected (underwater)
+   */
+  private spawnEntityOnTerrain(itemType: ItemType, worldX: number, worldZ: number): boolean {
+    const config = ENTITY_CONFIGS[itemType];
+    
+    let surfaceY = 0;
+    if (this.voxelGrid) {
+      surfaceY = this.voxelGrid.getWorldSurfaceY(worldX, worldZ);
+      if (config.yOffsetBase !== undefined) {
+        surfaceY = surfaceY + config.yOffsetBase;
+      }
+    }
+    
+    const spawnY = surfaceY + (config.yOffset ?? 0.5);
+
+    if (config.validateUnderwater && this.waterLevelProvider && 
+        !this.waterLevelProvider.isValidSpawnPosition(worldX, spawnY, worldZ)) {
+      return false;
+    }
+
+    const entity = this.world.createEntity();
+    config.factory(entity);
+
+    const physics: PhysicsComponent = {
+      posX: worldX,
+      posY: spawnY,
+      posZ: worldZ,
+      velX: 0,
+      velY: 0,
+      velZ: 0,
+      size: config.size ?? 0.5,
+      onGround: config.onGround ?? true
+    };
+
+    entity.add(COMP_PHYSICS, physics);
+    this.upsertPickupGrid(entity.id, worldX, worldZ);
+
+    if (config.broadcastSpawn) {
+      const weaponType = entity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
+      const spawnMsg: ItemSpawnMessage = {
+        entityId: entity.id,
+        itemType: weaponType?.type || itemType,
+        posX: worldX,
+        posY: spawnY,
+        posZ: worldZ
+      };
+      this.broadcastLow(Opcode.ItemSpawn, spawnMsg);
+    }
+
+    console.log(`Spawned ${config.name} at (${worldX.toFixed(1)}, ${spawnY.toFixed(1)}, ${worldZ.toFixed(1)}) entity ${entity.id}`);
+    return true;
+  }
+
+  /**
+   * Generic spawn function for entities at fixed positions (shooting range).
+   * @param itemType The type of entity to spawn
+   * @param worldX World X coordinate
+   * @param worldY World Y coordinate (fixed, not terrain-sampled)
+   * @param worldZ World Z coordinate
+   */
+  private spawnEntityAtPosition(itemType: ItemType, worldX: number, worldY: number, worldZ: number): void {
+    const config = ENTITY_CONFIGS[itemType];
+    
+    const entity = this.world.createEntity();
+    config.factory(entity);
+
+    const physics: PhysicsComponent = {
+      posX: worldX,
+      posY: worldY,
+      posZ: worldZ,
+      velX: 0,
+      velY: 0,
+      velZ: 0,
+      size: config.size ?? 0.5,
+      onGround: true
+    };
+
+    entity.add(COMP_PHYSICS, physics);
+    this.upsertPickupGrid(entity.id, worldX, worldZ);
+
+    const weaponType = entity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
+    const spawnMsg: ItemSpawnMessage = {
+      entityId: entity.id,
+      itemType: weaponType?.type || itemType,
+      posX: worldX,
+      posY: worldY,
+      posZ: worldZ
+    };
+    this.broadcastLow(Opcode.ItemSpawn, spawnMsg);
+
+    console.log(`Spawned ${config.name} at (${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)}) entity ${entity.id}`);
   }
 
   async initialize(): Promise<void> {
@@ -232,6 +402,10 @@ export class Room {
       this.voxelGrid = new VoxelGrid();
       this.voxelGrid.generateFromNoise(seed);
       console.log(`[Room] Generated ${this.voxelGrid.getSolidCount()} solid voxels`);
+
+      // Create water level provider for physics
+      this.waterLevelProvider = new ServerWaterLevelProvider(this.voxelGrid);
+      console.log(`[Room] Water level provider initialized`);
 
       // Cell occupancy tracker (shared between pistols and trees)
       const occupiedCells = new Set<string>();
@@ -283,14 +457,17 @@ export class Room {
       const baseZ = 5;
       const baseY = 0.5;
       
-      // Pistol at x=-5
-      this.spawnWeaponAtPosition('pistol', -5 * weaponSpacing * 0.5, baseY, baseZ);
+      // Pistol at x=-6 (more spaced out)
+      this.spawnWeaponAtPosition('pistol', -6, baseY, baseZ);
       
-      // SMG at x=-3
-      this.spawnWeaponAtPosition('smg', -3 * weaponSpacing * 0.5, baseY, baseZ);
+      // SMG at x=-4.5
+      this.spawnWeaponAtPosition('smg', -4.5, baseY, baseZ);
       
-      // Assault Rifle at x=-1
-      this.spawnWeaponAtPosition('assault', -1 * weaponSpacing * 0.5, baseY, baseZ);
+      // Assault Rifle at x=-3
+      this.spawnWeaponAtPosition('assault', -3 * weaponSpacing * 0.5, baseY, baseZ);
+      
+      // DMR at x=-1
+      this.spawnWeaponAtPosition('dmr', -1 * weaponSpacing * 0.5, baseY, baseZ);
       
       // LMG at x=1
       this.spawnWeaponAtPosition('lmg', 1 * weaponSpacing * 0.5, baseY, baseZ);
@@ -380,7 +557,9 @@ export class Room {
         }
       });
       
-      console.log('Spawned hammer, tree, and rock in builder room');
+      // Build octree for builder room
+      this.buildOctree();
+      console.log('Spawned hammer, tree, and rock in builder room with octree');
     }
 
     // Check if this is a rock editor room (format: "rock_editor_<id>")
@@ -412,7 +591,8 @@ export class Room {
       input: { forward: 0, right: 0, cameraYaw: 0, jump: false, sprint: false },
       lastProcessedInput: 0,
       lastShootTime: 0,
-      headPitch: 0
+      headPitch: 0,
+      inputQueue: []
     };
     const healthComp: HealthComponent = {
       current: PLAYER_MAX_HEALTH,
@@ -683,17 +863,6 @@ export class Room {
 
     }, 100);
 
-    // Send starting ladder as a fake pickup after client has processed RoomState
-    setTimeout(() => {
-      const pickupMsg: ItemPickupMessage = {
-        entityId: -1, // No real entity - just a flag to equip ladder
-        playerId: entity.id,
-        itemType: 'ladder'
-      };
-      this.connectionHandler.sendLow(conn, Opcode.ItemPickup, pickupMsg);
-      console.log(`[Room] Player ${entity.id} starts with ladder equipped`);
-    }, 1000);
-
     // Send current round state to newly joined player
     setTimeout(() => {
       this.connectionHandler.sendLow(conn, Opcode.RoundState, this.getRoundStateMessage());
@@ -706,255 +875,108 @@ export class Room {
   }
 
   /**
-   * Spawn a pistol placed directly on the terrain surface.
-   * If a voxelGrid exists, samples surface height; otherwise uses the given Y.
+   * Find a valid spawn position (not underwater, on solid ground).
+   * Tries origin first, then searches in expanding radius.
+   * @returns {x, y, z} spawn position
    */
-  spawnPistolOnTerrain(worldX: number, worldZ: number): void {
-    // Sample the terrain to get the surface Y, then offset slightly above
-    let surfaceY = 0;
-    if (this.voxelGrid) {
-      surfaceY = this.voxelGrid.getWorldSurfaceY(worldX, worldZ) + 0.5;
+  findValidSpawnPosition(): { x: number; y: number; z: number } {
+    // Try origin first
+    if (this.waterLevelProvider) {
+      if (this.waterLevelProvider.isValidSpawnPosition(0, 0, 0)) {
+        return { x: 0, y: 0, z: 0 };
+      }
+
+      // Search in expanding radius
+      const maxAttempts = 100;
+      const maxRadius = 50;
+      
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * maxRadius;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        
+        // Get terrain height at this position
+        let y = 0;
+        if (this.voxelGrid) {
+          y = this.voxelGrid.getWorldSurfaceY(x, z) + 0.5;
+        }
+        
+        // Check if valid (not underwater)
+        if (this.waterLevelProvider.isValidSpawnPosition(x, y, z)) {
+          return { x, y, z };
+        }
+      }
+      
+      console.warn('[Room] Could not find valid spawn position after 100 attempts, using origin');
     }
-
-    const pistolEntity = this.world.createEntity();
-    createPistol(pistolEntity);
-
-    const physics: PhysicsComponent = {
-      posX: worldX,
-      posY: surfaceY,
-      posZ: worldZ,
-      velX: 0,
-      velY: 0,
-      velZ: 0,
-      size: 0.5,
-      onGround: true // Already on ground, no physics needed
-    };
-
-    pistolEntity.add(COMP_PHYSICS, physics);
-
-    console.log(`Spawned pistol at (${worldX.toFixed(1)}, ${surfaceY.toFixed(1)}, ${worldZ.toFixed(1)}) entity ${pistolEntity.id}`);
+    
+    // Fallback to origin
+    return { x: 0, y: 0, z: 0 };
   }
 
-  /**
-   * Spawn a weapon of any type at a fixed position (for shooting range).
-   */
+  spawnPistolOnTerrain(worldX: number, worldZ: number): boolean {
+    return this.spawnEntityOnTerrain('pistol', worldX, worldZ);
+  }
+
   spawnWeaponAtPosition(weaponType: 'pistol' | 'smg' | 'lmg' | 'shotgun' | 'sniper' | 'assault' | 'rocket' | 'hammer', worldX: number, worldY: number, worldZ: number): void {
-    const weaponEntity = this.world.createEntity();
-    
-    // Create the appropriate weapon type
-    if (weaponType === 'pistol') {
-      createPistol(weaponEntity);
-    } else if (weaponType === 'smg') {
-      createSMG(weaponEntity);
-    } else if (weaponType === 'lmg') {
-      createLMG(weaponEntity);
-    } else if (weaponType === 'shotgun') {
-      createShotgun(weaponEntity);
-    } else if (weaponType === 'sniper') {
-      createSniper(weaponEntity);
-    } else if (weaponType === 'assault') {
-      createAssaultRifle(weaponEntity);
-    } else if (weaponType === 'rocket') {
-      createRocketLauncher(weaponEntity);
-    } else if (weaponType === 'hammer') {
-      createHammer(weaponEntity);
-    }
-
-    const physics: PhysicsComponent = {
-      posX: worldX,
-      posY: worldY,
-      posZ: worldZ,
-      velX: 0,
-      velY: 0,
-      velZ: 0,
-      size: 0.5,
-      onGround: true
-    };
-
-    weaponEntity.add(COMP_PHYSICS, physics);
-
-    // Broadcast spawn
-    const weaponType_Component = weaponEntity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
-    const spawnMsg: ItemSpawnMessage = {
-      entityId: weaponEntity.id,
-      itemType: weaponType_Component?.type || 'pistol',
-      posX: worldX,
-      posY: worldY,
-      posZ: worldZ
-    };
-    this.broadcastLow(Opcode.ItemSpawn, spawnMsg);
-
-    console.log(`Spawned ${weaponType} at (${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)}) entity ${weaponEntity.id}`);
+    this.spawnEntityAtPosition(weaponType, worldX, worldY, worldZ);
   }
 
-  /**
-   * Spawn a pickup item at a fixed position (for shooting range).
-   */
   spawnPickupAtPosition(pickupType: 'medic_pack' | 'large_medic_pack' | 'apple' | 'pill_bottle' | 'kevlar' | 'helmet', worldX: number, worldY: number, worldZ: number): void {
-    const pickupEntity = this.world.createEntity();
-    
-    // Create the appropriate pickup type
-    if (pickupType === 'medic_pack') {
-      createMedicPack(pickupEntity);
-    } else if (pickupType === 'large_medic_pack') {
-      createLargeMedicPack(pickupEntity);
-    } else if (pickupType === 'apple') {
-      createApple(pickupEntity);
-    } else if (pickupType === 'pill_bottle') {
-      createPillBottle(pickupEntity);
-    } else if (pickupType === 'kevlar') {
-      createKevlar(pickupEntity);
-    } else if (pickupType === 'helmet') {
-      createHelmet(pickupEntity);
-    }
-
-    const physics: PhysicsComponent = {
-      posX: worldX,
-      posY: worldY,
-      posZ: worldZ,
-      velX: 0,
-      velY: 0,
-      velZ: 0,
-      size: 0.5,
-      onGround: true
-    };
-
-    pickupEntity.add(COMP_PHYSICS, physics);
-
-    // Broadcast spawn
-    const spawnMsg: ItemSpawnMessage = {
-      entityId: pickupEntity.id,
-      itemType: pickupType,
-      posX: worldX,
-      posY: worldY,
-      posZ: worldZ
-    };
-    this.broadcastLow(Opcode.ItemSpawn, spawnMsg);
-
-    console.log(`Spawned ${pickupType} at (${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)}) entity ${pickupEntity.id}`);
+    this.spawnEntityAtPosition(pickupType, worldX, worldY, worldZ);
   }
 
-  /**
-   * Spawn an SMG placed directly on the terrain surface.
-   * If a voxelGrid exists, samples surface height; otherwise uses the given Y.
-   */
   spawnHammerOnTerrain(worldX: number, worldZ: number): void {
-    // Sample the terrain to get the surface Y, then offset slightly above
-    let surfaceY = 0;
-    if (this.voxelGrid) {
-      surfaceY = this.voxelGrid.getWorldSurfaceY(worldX, worldZ) + 0.5;
-    }
-
-    const hammerEntity = this.world.createEntity();
-    createHammer(hammerEntity);
-
-    const physics: PhysicsComponent = {
-      posX: worldX,
-      posY: surfaceY,
-      posZ: worldZ,
-      velX: 0,
-      velY: 0,
-      velZ: 0,
-      size: 0.5,
-      onGround: true
-    };
-
-    hammerEntity.add(COMP_PHYSICS, physics);
-
-    // Broadcast spawn
-    const weaponType = hammerEntity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
-    const spawnMsg: ItemSpawnMessage = {
-      entityId: hammerEntity.id,
-      itemType: weaponType?.type || 'hammer',
-      posX: worldX,
-      posY: surfaceY,
-      posZ: worldZ
-    };
-    this.broadcastLow(Opcode.ItemSpawn, spawnMsg);
+    this.spawnEntityOnTerrain('hammer', worldX, worldZ);
   }
 
-  spawnSMGOnTerrain(worldX: number, worldZ: number): void {
-    // Sample the terrain to get the surface Y, then offset slightly above
-    let surfaceY = 0;
-    if (this.voxelGrid) {
-      surfaceY = this.voxelGrid.getWorldSurfaceY(worldX, worldZ) + 0.5;
-    }
-
-    const smgEntity = this.world.createEntity();
-    createSMG(smgEntity);
-
-    const physics: PhysicsComponent = {
-      posX: worldX,
-      posY: surfaceY,
-      posZ: worldZ,
-      velX: 0,
-      velY: 0,
-      velZ: 0,
-      size: 0.5,
-      onGround: true // Already on ground, no physics needed
-    };
-
-    smgEntity.add(COMP_PHYSICS, physics);
-
-    console.log(`Spawned SMG at (${worldX.toFixed(1)}, ${surfaceY.toFixed(1)}, ${worldZ.toFixed(1)}) entity ${smgEntity.id}`);
+  spawnSMGOnTerrain(worldX: number, worldZ: number): boolean {
+    return this.spawnEntityOnTerrain('smg', worldX, worldZ);
   }
 
-  /**
-   * Spawn an LMG placed directly on the terrain surface.
-   * If a voxelGrid exists, samples surface height; otherwise uses the given Y.
-   */
-  spawnLMGOnTerrain(worldX: number, worldZ: number): void {
-    // Sample the terrain to get the surface Y, then offset slightly above
-    let surfaceY = 0;
-    if (this.voxelGrid) {
-      surfaceY = this.voxelGrid.getWorldSurfaceY(worldX, worldZ);
-    }
-
-    const lmgEntity = this.world.createEntity();
-    createLMG(lmgEntity);
-
-    const physics: PhysicsComponent = {
-      posX: worldX,
-      posY: surfaceY + 1.0, // Spawn 1 unit above terrain
-      posZ: worldZ,
-      velX: 0,
-      velY: 0,
-      velZ: 0,
-      size: 0.5,
-      onGround: false
-    };
-
-    lmgEntity.add(COMP_PHYSICS, physics);
+  spawnLMGOnTerrain(worldX: number, worldZ: number): boolean {
+    return this.spawnEntityOnTerrain('lmg', worldX, worldZ);
   }
 
-  /**
-   * Spawn a Shotgun placed directly on the terrain surface.
-   * If a voxelGrid exists, samples surface height; otherwise uses the given Y.
-   */
-  spawnShotgunOnTerrain(worldX: number, worldZ: number): void {
-    // Sample the terrain to get the surface Y, then offset slightly above
-    let surfaceY = 0;
-    if (this.voxelGrid) {
-      surfaceY = this.voxelGrid.getWorldSurfaceY(worldX, worldZ) + 0.5;
-    }
+  spawnShotgunOnTerrain(worldX: number, worldZ: number): boolean {
+    return this.spawnEntityOnTerrain('shotgun', worldX, worldZ);
+  }
 
-    const shotgunEntity = this.world.createEntity();
-    createShotgun(shotgunEntity);
+  spawnAssaultOnTerrain(worldX: number, worldZ: number): boolean {
+    return this.spawnEntityOnTerrain('assault', worldX, worldZ);
+  }
 
-    const physics: PhysicsComponent = {
-      posX: worldX,
-      posY: surfaceY,
-      posZ: worldZ,
-      velX: 0,
-      velY: 0,
-      velZ: 0,
-      size: 0.5,
-      onGround: true // Already on ground, no physics needed
-    };
+  spawnSniperOnTerrain(worldX: number, worldZ: number): boolean {
+    return this.spawnEntityOnTerrain('sniper', worldX, worldZ);
+  }
 
-    shotgunEntity.add(COMP_PHYSICS, physics);
+  spawnRocketOnTerrain(worldX: number, worldZ: number): boolean {
+    return this.spawnEntityOnTerrain('rocket', worldX, worldZ);
+  }
 
-    console.log(`Spawned Shotgun at (${worldX.toFixed(1)}, ${surfaceY.toFixed(1)}, ${worldZ.toFixed(1)}) entity ${shotgunEntity.id}`);
+  spawnMedicPackOnTerrain(worldX: number, worldZ: number): void {
+    this.spawnEntityOnTerrain('medic_pack', worldX, worldZ);
+  }
+
+  spawnLargeMedicPackOnTerrain(worldX: number, worldZ: number): void {
+    this.spawnEntityOnTerrain('large_medic_pack', worldX, worldZ);
+  }
+
+  spawnAppleOnTerrain(worldX: number, worldZ: number): void {
+    this.spawnEntityOnTerrain('apple', worldX, worldZ);
+  }
+
+  spawnPillBottleOnTerrain(worldX: number, worldZ: number): void {
+    this.spawnEntityOnTerrain('pill_bottle', worldX, worldZ);
+  }
+
+  spawnKevlarOnTerrain(worldX: number, worldZ: number): boolean {
+    return this.spawnEntityOnTerrain('kevlar', worldX, worldZ);
+  }
+
+  spawnHelmetOnTerrain(worldX: number, worldZ: number): boolean {
+    return this.spawnEntityOnTerrain('helmet', worldX, worldZ);
   }
 
   /**
@@ -975,82 +997,226 @@ export class Room {
     const HALF_EXTENT = 90; // Stay slightly inside the edges
 
     // Spawn one pistol 3 units in front of player spawn (0, 0, 0)
-    this.spawnPistolOnTerrain(3, 0);
-    // Mark cell as occupied
-    const spawnCellX = Math.floor((3 + 100) / CELL_SIZE);
-    const spawnCellZ = Math.floor((0 + 100) / CELL_SIZE);
-    occupiedCells.add(`${spawnCellX},${spawnCellZ}`);
+    let spawned = this.spawnPistolOnTerrain(3, 0);
+    if (spawned) {
+      const spawnCellX = Math.floor((3 + 100) / CELL_SIZE);
+      const spawnCellZ = Math.floor((0 + 100) / CELL_SIZE);
+      occupiedCells.add(`${spawnCellX},${spawnCellZ}`);
+    }
 
     // Spawn the rest scattered around the map
-    for (let i = 0; i < PISTOL_COUNT - 1; i++) {
+    let pistolsSpawned = spawned ? 1 : 0;
+    const maxAttempts = PISTOL_COUNT * 3; // Allow some retries for underwater positions
+    for (let attempt = 0; attempt < maxAttempts && pistolsSpawned < PISTOL_COUNT; attempt++) {
       const wx = (rng() * 2 - 1) * HALF_EXTENT;
       const wz = (rng() * 2 - 1) * HALF_EXTENT;
-      this.spawnPistolOnTerrain(wx, wz);
       
-      // Mark cell as occupied
-      const cellX = Math.floor((wx + 100) / CELL_SIZE);
-      const cellZ = Math.floor((wz + 100) / CELL_SIZE);
-      occupiedCells.add(`${cellX},${cellZ}`);
+      if (this.spawnPistolOnTerrain(wx, wz)) {
+        pistolsSpawned++;
+        const cellX = Math.floor((wx + 100) / CELL_SIZE);
+        const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+        occupiedCells.add(`${cellX},${cellZ}`);
+      }
     }
 
-    console.log(`Spawned ${PISTOL_COUNT} pistols across the level`);
+    console.log(`Spawned ${pistolsSpawned} pistols across the level (${PISTOL_COUNT - pistolsSpawned} rejected underwater)`);
 
     // Spawn SMGs scattered around the map
-    for (let i = 0; i < SMG_COUNT; i++) {
+    let smgsSpawned = 0;
+    const maxSMGAttempts = SMG_COUNT * 3;
+    for (let attempt = 0; attempt < maxSMGAttempts && smgsSpawned < SMG_COUNT; attempt++) {
       const wx = (rng() * 2 - 1) * HALF_EXTENT;
       const wz = (rng() * 2 - 1) * HALF_EXTENT;
-      this.spawnSMGOnTerrain(wx, wz);
       
-      // Mark cell as occupied
-      const cellX = Math.floor((wx + 100) / CELL_SIZE);
-      const cellZ = Math.floor((wz + 100) / CELL_SIZE);
-      occupiedCells.add(`${cellX},${cellZ}`);
+      if (this.spawnSMGOnTerrain(wx, wz)) {
+        smgsSpawned++;
+        const cellX = Math.floor((wx + 100) / CELL_SIZE);
+        const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+        occupiedCells.add(`${cellX},${cellZ}`);
+      }
     }
 
-    console.log(`Spawned ${SMG_COUNT} SMGs across the level`);
+    console.log(`Spawned ${smgsSpawned} SMGs across the level (${SMG_COUNT - smgsSpawned} rejected underwater)`);
 
     // Spawn LMGs scattered around the map
-    for (let i = 0; i < LMG_COUNT; i++) {
+    let lmgsSpawned = 0;
+    const maxLMGAttempts = LMG_COUNT * 3;
+    for (let attempt = 0; attempt < maxLMGAttempts && lmgsSpawned < LMG_COUNT; attempt++) {
       const wx = (rng() * 2 - 1) * HALF_EXTENT;
       const wz = (rng() * 2 - 1) * HALF_EXTENT;
-      this.spawnLMGOnTerrain(wx, wz);
       
-      // Mark cell as occupied
-      const cellX = Math.floor((wx + 100) / CELL_SIZE);
-      const cellZ = Math.floor((wz + 100) / CELL_SIZE);
-      occupiedCells.add(`${cellX},${cellZ}`);
+      if (this.spawnLMGOnTerrain(wx, wz)) {
+        lmgsSpawned++;
+        const cellX = Math.floor((wx + 100) / CELL_SIZE);
+        const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+        occupiedCells.add(`${cellX},${cellZ}`);
+      }
     }
 
-    console.log(`Spawned ${LMG_COUNT} LMGs across the level`);
+    console.log(`Spawned ${lmgsSpawned} LMGs across the level (${LMG_COUNT - lmgsSpawned} rejected underwater)`);
 
     // Spawn Shotguns scattered around the map
-    for (let i = 0; i < SHOTGUN_COUNT; i++) {
+    let shotgunsSpawned = 0;
+    const maxShotgunAttempts = SHOTGUN_COUNT * 3;
+    for (let attempt = 0; attempt < maxShotgunAttempts && shotgunsSpawned < SHOTGUN_COUNT; attempt++) {
       const wx = (rng() * 2 - 1) * HALF_EXTENT;
       const wz = (rng() * 2 - 1) * HALF_EXTENT;
-      this.spawnShotgunOnTerrain(wx, wz);
       
-      // Mark cell as occupied
+      if (this.spawnShotgunOnTerrain(wx, wz)) {
+        shotgunsSpawned++;
+        const cellX = Math.floor((wx + 100) / CELL_SIZE);
+        const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+        occupiedCells.add(`${cellX},${cellZ}`);
+      }
+    }
+
+    console.log(`Spawned ${shotgunsSpawned} Shotguns across the level (${SHOTGUN_COUNT - shotgunsSpawned} rejected underwater)`);
+
+    // Spawn Assault Rifles scattered around the map
+    const ASSAULT_COUNT = 8;
+    let assaultsSpawned = 0;
+    const maxAssaultAttempts = ASSAULT_COUNT * 3;
+    for (let attempt = 0; attempt < maxAssaultAttempts && assaultsSpawned < ASSAULT_COUNT; attempt++) {
+      const wx = (rng() * 2 - 1) * HALF_EXTENT;
+      const wz = (rng() * 2 - 1) * HALF_EXTENT;
+      
+      if (this.spawnAssaultOnTerrain(wx, wz)) {
+        assaultsSpawned++;
+        const cellX = Math.floor((wx + 100) / CELL_SIZE);
+        const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+        occupiedCells.add(`${cellX},${cellZ}`);
+      }
+    }
+
+    console.log(`Spawned ${assaultsSpawned} Assault Rifles across the level (${ASSAULT_COUNT - assaultsSpawned} rejected underwater)`);
+
+    // Spawn Snipers scattered around the map
+    const SNIPER_COUNT = 4;
+    let snipersSpawned = 0;
+    const maxSniperAttempts = SNIPER_COUNT * 3;
+    for (let attempt = 0; attempt < maxSniperAttempts && snipersSpawned < SNIPER_COUNT; attempt++) {
+      const wx = (rng() * 2 - 1) * HALF_EXTENT;
+      const wz = (rng() * 2 - 1) * HALF_EXTENT;
+      
+      if (this.spawnSniperOnTerrain(wx, wz)) {
+        snipersSpawned++;
+        const cellX = Math.floor((wx + 100) / CELL_SIZE);
+        const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+        occupiedCells.add(`${cellX},${cellZ}`);
+      }
+    }
+
+    console.log(`Spawned ${snipersSpawned} Snipers across the level (${SNIPER_COUNT - snipersSpawned} rejected underwater)`);
+
+    // Spawn Rocket Launchers scattered around the map
+    const ROCKET_COUNT = 3;
+    let rocketsSpawned = 0;
+    const maxRocketAttempts = ROCKET_COUNT * 3;
+    for (let attempt = 0; attempt < maxRocketAttempts && rocketsSpawned < ROCKET_COUNT; attempt++) {
+      const wx = (rng() * 2 - 1) * HALF_EXTENT;
+      const wz = (rng() * 2 - 1) * HALF_EXTENT;
+      
+      if (this.spawnRocketOnTerrain(wx, wz)) {
+        rocketsSpawned++;
+        const cellX = Math.floor((wx + 100) / CELL_SIZE);
+        const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+        occupiedCells.add(`${cellX},${cellZ}`);
+      }
+    }
+
+    console.log(`Spawned ${rocketsSpawned} Rocket Launchers across the level (${ROCKET_COUNT - rocketsSpawned} rejected underwater)`);
+
+    // Spawn Medic Packs scattered around the map
+    const MEDIC_PACK_COUNT = 15;
+    for (let i = 0; i < MEDIC_PACK_COUNT; i++) {
+      const wx = (rng() * 2 - 1) * HALF_EXTENT;
+      const wz = (rng() * 2 - 1) * HALF_EXTENT;
+      this.spawnMedicPackOnTerrain(wx, wz);
+      
       const cellX = Math.floor((wx + 100) / CELL_SIZE);
       const cellZ = Math.floor((wz + 100) / CELL_SIZE);
       occupiedCells.add(`${cellX},${cellZ}`);
     }
 
-    console.log(`Spawned ${SHOTGUN_COUNT} Shotguns across the level`);
+    console.log(`Spawned ${MEDIC_PACK_COUNT} Medic Packs across the level`);
 
-    // Spawn Hammers (5 across the level for building)
-    const HAMMER_COUNT = 5;
-    for (let i = 0; i < HAMMER_COUNT; i++) {
+    // Spawn Large Medic Packs scattered around the map
+    const LARGE_MEDIC_PACK_COUNT = 8;
+    for (let i = 0; i < LARGE_MEDIC_PACK_COUNT; i++) {
       const wx = (rng() * 2 - 1) * HALF_EXTENT;
       const wz = (rng() * 2 - 1) * HALF_EXTENT;
-      this.spawnHammerOnTerrain(wx, wz);
+      this.spawnLargeMedicPackOnTerrain(wx, wz);
       
-      // Mark cell as occupied
       const cellX = Math.floor((wx + 100) / CELL_SIZE);
       const cellZ = Math.floor((wz + 100) / CELL_SIZE);
       occupiedCells.add(`${cellX},${cellZ}`);
     }
 
-    console.log(`Spawned ${HAMMER_COUNT} Hammers across the level`);
+    console.log(`Spawned ${LARGE_MEDIC_PACK_COUNT} Large Medic Packs across the level`);
+
+    // Spawn Apples scattered around the map
+    const APPLE_COUNT = 20;
+    for (let i = 0; i < APPLE_COUNT; i++) {
+      const wx = (rng() * 2 - 1) * HALF_EXTENT;
+      const wz = (rng() * 2 - 1) * HALF_EXTENT;
+      this.spawnAppleOnTerrain(wx, wz);
+      
+      const cellX = Math.floor((wx + 100) / CELL_SIZE);
+      const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+      occupiedCells.add(`${cellX},${cellZ}`);
+    }
+
+    console.log(`Spawned ${APPLE_COUNT} Apples across the level`);
+
+    // Spawn Pill Bottles scattered around the map
+    const PILL_BOTTLE_COUNT = 5;
+    for (let i = 0; i < PILL_BOTTLE_COUNT; i++) {
+      const wx = (rng() * 2 - 1) * HALF_EXTENT;
+      const wz = (rng() * 2 - 1) * HALF_EXTENT;
+      this.spawnPillBottleOnTerrain(wx, wz);
+      
+      const cellX = Math.floor((wx + 100) / CELL_SIZE);
+      const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+      occupiedCells.add(`${cellX},${cellZ}`);
+    }
+
+    console.log(`Spawned ${PILL_BOTTLE_COUNT} Pill Bottles across the level`);
+
+    // Spawn Kevlar scattered around the map
+    const KEVLAR_COUNT = 10;
+    let kevlarsSpawned = 0;
+    const maxKevlarAttempts = KEVLAR_COUNT * 3;
+    for (let attempt = 0; attempt < maxKevlarAttempts && kevlarsSpawned < KEVLAR_COUNT; attempt++) {
+      const wx = (rng() * 2 - 1) * HALF_EXTENT;
+      const wz = (rng() * 2 - 1) * HALF_EXTENT;
+      
+      if (this.spawnKevlarOnTerrain(wx, wz)) {
+        kevlarsSpawned++;
+        const cellX = Math.floor((wx + 100) / CELL_SIZE);
+        const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+        occupiedCells.add(`${cellX},${cellZ}`);
+      }
+    }
+
+    console.log(`Spawned ${kevlarsSpawned} Kevlar across the level (${KEVLAR_COUNT - kevlarsSpawned} rejected underwater)`);
+
+    // Spawn Helmets scattered around the map
+    const HELMET_COUNT = 10;
+    let helmetsSpawned = 0;
+    const maxHelmetAttempts = HELMET_COUNT * 3;
+    for (let attempt = 0; attempt < maxHelmetAttempts && helmetsSpawned < HELMET_COUNT; attempt++) {
+      const wx = (rng() * 2 - 1) * HALF_EXTENT;
+      const wz = (rng() * 2 - 1) * HALF_EXTENT;
+      
+      if (this.spawnHelmetOnTerrain(wx, wz)) {
+        helmetsSpawned++;
+        const cellX = Math.floor((wx + 100) / CELL_SIZE);
+        const cellZ = Math.floor((wz + 100) / CELL_SIZE);
+        occupiedCells.add(`${cellX},${cellZ}`);
+      }
+    }
+
+    console.log(`Spawned ${helmetsSpawned} Helmets across the level (${HELMET_COUNT - helmetsSpawned} rejected underwater)`);
   }
 
   /**
@@ -1114,13 +1280,24 @@ export class Room {
     
     // Place tree instances across the level (120 trees)
     const targetCount = 120;
-    this.treeInstances = placeTreeInstances(
+    const allTreeInstances = placeTreeInstances(
       seed,
       variations.length,
       targetCount,
       (worldX: number, worldZ: number) => this.voxelGrid!.getWorldSurfaceY(worldX, worldZ),
       occupiedCells
     );
+
+    // Filter out underwater trees
+    this.treeInstances = allTreeInstances.filter(instance => {
+      if (!this.waterLevelProvider) return true;
+      return this.waterLevelProvider.isValidSpawnPosition(instance.worldX, instance.worldY, instance.worldZ);
+    });
+
+    const underwaterTreesFiltered = allTreeInstances.length - this.treeInstances.length;
+    if (underwaterTreesFiltered > 0) {
+      console.log(`Filtered out ${underwaterTreesFiltered} underwater trees`);
+    }
 
     // Create collision meshes for all trees
     // Trees use 50x80x50 voxel grid scaled 0.4x = ~16 units tall
@@ -1162,13 +1339,24 @@ export class Room {
     
     // Place bush instances across the level (200 bushes)
     const targetCount = 200;
-    this.bushInstances = placeBushInstances(
+    const allBushInstances = placeBushInstances(
       seed,
       variations.length,
       targetCount,
       (worldX: number, worldZ: number) => this.voxelGrid!.getWorldSurfaceY(worldX, worldZ),
       occupiedCells
     );
+
+    // Filter out underwater bushes
+    this.bushInstances = allBushInstances.filter(instance => {
+      if (!this.waterLevelProvider) return true;
+      return this.waterLevelProvider.isValidSpawnPosition(instance.worldX, instance.worldY, instance.worldZ);
+    });
+
+    const underwaterBushesFiltered = allBushInstances.length - this.bushInstances.length;
+    if (underwaterBushesFiltered > 0) {
+      console.log(`[Room] Filtered out ${underwaterBushesFiltered} underwater bushes`);
+    }
 
     console.log(`[Room] ✓ Placed ${this.bushInstances.length} bush instances (transforms only, no physics)`);
     
@@ -1179,11 +1367,73 @@ export class Room {
     }
   }
 
+  /**
+   * Build octree for broad-phase collision culling.
+   * Called after all static objects (trees, rocks, bushes) are placed.
+   */
+  private buildOctree(): void {
+    console.log('[Room] Building octree for collision culling...');
+    
+    // Create octree covering the play area: center (0, 10, 0), halfSize 110
+    // Covers -100 to +100 in X/Z with margin, 0-20 in Y
+    this.octree = new Octree(0, 10, 0, 110, 6, 8);
+    
+    let nextId = 0;
+    
+    // Insert tree colliders
+    for (let i = 0; i < this.treeColliderMeshes.length; i++) {
+      const treeData = this.treeColliderMeshes[i];
+      const instance = this.treeInstances[i];
+      
+      // Compute AABB (rough estimate: ±5 units from position)
+      const entry: OctreeEntry = {
+        id: nextId++,
+        type: 'tree',
+        data: treeData,
+        minX: instance.worldX - 5,
+        minY: instance.worldY - 1,
+        minZ: instance.worldZ - 5,
+        maxX: instance.worldX + 5,
+        maxY: instance.worldY + 20,
+        maxZ: instance.worldZ + 5
+      };
+      
+      this.octree.insert(entry);
+    }
+    
+    // Insert rock colliders
+    for (let i = 0; i < this.rockColliderMeshes.length; i++) {
+      const rockData = this.rockColliderMeshes[i];
+      const instance = this.rockInstances[i];
+      
+      // Compute AABB (rough estimate: ±3 units scaled)
+      const radius = 3 * instance.scale;
+      const entry: OctreeEntry = {
+        id: nextId++,
+        type: 'rock',
+        data: rockData,
+        minX: instance.worldX - radius,
+        minY: instance.worldY - radius,
+        minZ: instance.worldZ - radius,
+        maxX: instance.worldX + radius,
+        maxY: instance.worldY + radius,
+        maxZ: instance.worldZ + radius
+      };
+      
+      this.octree.insert(entry);
+    }
+    
+    console.log(`[Room] Octree built with ${this.treeColliderMeshes.length + this.rockColliderMeshes.length} colliders`);
+  }
+
   removePlayer(connectionId: string): Player | undefined {
     const player = this.players.get(connectionId);
     if (player) {
       // Remove player's score
       this.roundState.scores.delete(player.entityId);
+      
+      // Clean up broadcast cache
+      this.lastBroadcastCache.delete(player.entityId);
       
       this.world.destroyEntity(player.entityId);
       this.players.delete(connectionId);
@@ -1222,18 +1472,39 @@ export class Room {
     const comp = entity.get<PlayerComponent>(COMP_PLAYER);
     if (!comp || input.sequence <= comp.lastProcessedInput) return;
 
-    comp.lastProcessedInput = input.sequence;
-    comp.input.forward = input.forward;
-    comp.input.right = input.right;
-    comp.input.cameraYaw = input.cameraYaw;
-    comp.input.cameraPitch = input.cameraPitch;
-    comp.input.jump = input.jump;
-    comp.input.sprint = input.sprint || false;
+    // Queue the input for processing during the next physics tick(s).
+    // This ensures each received input maps to exactly one physics step,
+    // keeping client and server simulation in lockstep.
+    const queue = comp.inputQueue!;
+    queue.push({
+      sequence: input.sequence,
+      forward: input.forward,
+      right: input.right,
+      cameraYaw: input.cameraYaw,
+      cameraPitch: input.cameraPitch,
+      jump: input.jump,
+      sprint: input.sprint || false
+    });
+
+    // Cap queue to prevent memory growth from clock drift or flooding
+    if (queue.length > 8) {
+      queue.splice(0, queue.length - 8);
+    }
+
+    // Update visual-only headPitch immediately (used for broadcast, not physics)
     comp.headPitch = input.cameraPitch || 0;
   }
 
-  /** Spawn a projectile using client-provided aim direction. */
-  spawnProjectile(connectionId: string, aimDirX: number, aimDirY: number, aimDirZ: number): ProjectileSpawnData | ProjectileSpawnData[] | null {
+  /** Spawn a projectile using client-provided aim direction and spawn position. */
+  spawnProjectile(
+    connectionId: string, 
+    aimDirX: number, 
+    aimDirY: number, 
+    aimDirZ: number,
+    clientSpawnX: number,
+    clientSpawnY: number,
+    clientSpawnZ: number
+  ): ProjectileSpawnData | ProjectileSpawnData[] | null {
     const player = this.players.get(connectionId);
     if (!player) {
       console.log('[Shoot] No player found for connection');
@@ -1259,6 +1530,11 @@ export class Room {
       return null; // No weapon, can't shoot
     }
 
+    // Get weapon type from player entity (weapon components are on the player when equipped)
+    const weaponTypeComp = playerEntity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
+    const weaponType = weaponTypeComp?.type || 'unknown';
+    console.log(`[spawnProjectile] Player has weapon type: ${weaponType}`);
+
     // Get weapon components from player
     const shootable = playerEntity.get<ShootableComponent>(COMP_SHOOTABLE);
     const ammo = playerEntity.get<AmmoComponent>(COMP_AMMO);
@@ -1281,6 +1557,19 @@ export class Room {
       const now = Date.now() * 0.001;
       ammo.isReloading = true;
       ammo.reloadStartTime = now;
+
+      // Broadcast auto-reload for remote audio
+      const collected = playerEntity.get<CollectedComponent>(COMP_COLLECTED);
+      if (collected && collected.items.length > 0) {
+        const weaponEntity = this.world.getEntity(collected.items[0]);
+        const weaponTypeComp = weaponEntity?.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
+        const reloadMsg: ReloadStartedMessage = {
+          entityId: player.entityId,
+          weaponType: weaponTypeComp?.type || 'pistol',
+          excludeSender: true, // Sender plays local reload sound
+        };
+        this.broadcastLow(Opcode.ReloadStarted, reloadMsg);
+      }
       return null;
     }
 
@@ -1292,9 +1581,10 @@ export class Room {
     }
     shootable.lastFireTime = now;
 
-    // Consume ammo
+    // Consume ammo (double barrel uses 2 per shot)
     if (!ammo.infinite) {
-      ammo.current--;
+      const ammoPerShot = weaponType === 'doublebarrel' ? 2 : 1;
+      ammo.current -= ammoPerShot;
     }
 
     // Normalize the client-provided direction (never trust client magnitudes)
@@ -1304,10 +1594,11 @@ export class Room {
     const baseDirY = aimDirY / len;
     const baseDirZ = aimDirZ / len;
 
-    // Spawn position: from player position, offset forward
-    const posX = pc.state.posX + baseDirX * PROJECTILE_SPAWN_OFFSET;
-    const posY = pc.state.posY + PLAYER_HITBOX_CENTER_Y;
-    const posZ = pc.state.posZ + baseDirZ * PROJECTILE_SPAWN_OFFSET;
+    // Use client-provided spawn position directly
+    // Client calculates barrel tip position using hold transform
+    const posX = clientSpawnX;
+    const posY = clientSpawnY;
+    const posZ = clientSpawnZ;
 
     // Spawn multiple projectiles for shotguns (pelletsPerShot)
     const spawnDataArray: ProjectileSpawnData[] = [];
@@ -1390,6 +1681,7 @@ export class Room {
       
       const projComp: ProjectileComponent = {
         ownerId: player.entityId,
+        weaponType: weaponType,
         dirX, dirY, dirZ,
         speed: shootable.projectileSpeed,
         damage: shootable.damage,
@@ -1453,6 +1745,19 @@ export class Room {
     const now = Date.now() * 0.001;
     ammo.isReloading = true;
     ammo.reloadStartTime = now;
+
+    // Broadcast reload started for remote audio
+    const collected = playerEntity.get<CollectedComponent>(COMP_COLLECTED);
+    if (collected && collected.items.length > 0) {
+      const weaponEntity = this.world.getEntity(collected.items[0]);
+      const weaponTypeComp = weaponEntity?.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
+      const reloadMsg: ReloadStartedMessage = {
+        entityId: player.entityId,
+        weaponType: weaponTypeComp?.type || 'pistol',
+        excludeSender: true, // Sender plays local reload sound
+      };
+      this.broadcastLow(Opcode.ReloadStarted, reloadMsg);
+    }
   }
 
   /** Handle item drop request from player (Q key). */
@@ -1542,6 +1847,7 @@ export class Room {
       onGround: true // Already settled at drop location
     };
     itemEntity.add(COMP_PHYSICS, physics);
+    this.upsertPickupGrid(itemEntity.id, landX, landZ);
 
     // Get weapon type from item entity
     const weaponType = itemEntity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
@@ -1555,6 +1861,19 @@ export class Room {
       posZ: landZ
     };
     this.broadcastLow(Opcode.ItemSpawn, spawnMsg);
+
+    // Broadcast drop sound for spatial audio
+    const playerPhysics = playerEntity.get<PhysicsComponent>(COMP_PHYSICS);
+    if (playerPhysics) {
+      const dropSoundMsg: ItemDropSoundMessage = {
+        entityId: player.entityId,
+        posX: playerPhysics.posX,
+        posY: playerPhysics.posY,
+        posZ: playerPhysics.posZ,
+        excludeSender: true, // Sender plays local drop sound
+      };
+      this.broadcastLow(Opcode.ItemDropSound, dropSoundMsg);
+    }
 
     console.log(`Player ${player.entityId} dropped weapon at (${landX.toFixed(1)}, ${landY.toFixed(1)}, ${landZ.toFixed(1)})`);
   }
@@ -1618,6 +1937,7 @@ export class Room {
       onGround: true // Already settled at drop location
     };
     itemEntity.add(COMP_PHYSICS, physics);
+    this.upsertPickupGrid(itemEntity.id, posX, posZ);
 
     // Get weapon type from item entity
     const itemWeaponType2 = itemEntity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
@@ -1669,9 +1989,9 @@ export class Room {
       const health = targetEntity.get<HealthComponent>(COMP_HEALTH);
       if (!pc || !health) continue;
 
-      // Calculate distance from impact point to target
+      // Calculate distance from impact point to target (posY is already center)
       const dx = pc.state.posX - impactX;
-      const dy = (pc.state.posY + PLAYER_HITBOX_CENTER_Y) - impactY;
+      const dy = pc.state.posY - impactY;
       const dz = pc.state.posZ - impactZ;
       const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
@@ -1701,14 +2021,15 @@ export class Room {
       
       // Check rock collision (if not already blocked)
       if (!losBlocked) {
-        const ROCK_CHECK_DISTANCE = 30;
-        for (const rockData of this.rockColliderMeshes) {
-          const distToRockX = impactX - rockData.transform.posX;
-          const distToRockZ = impactZ - rockData.transform.posZ;
-          const distToRockSq = distToRockX * distToRockX + distToRockZ * distToRockZ;
-          
-          if (distToRockSq > ROCK_CHECK_DISTANCE * ROCK_CHECK_DISTANCE) continue;
-          
+        // Query octree for rocks along explosion ray (broad-phase culling)
+        let rocksToCheck = this.rockColliderMeshes;
+        
+        if (this.octree) {
+          const nearbyEntries = this.octree.queryRay(impactX, impactY, impactZ, rayDirX, rayDirY, rayDirZ, distance);
+          rocksToCheck = nearbyEntries.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
+        }
+        
+        for (const rockData of rocksToCheck) {
           const rockHit = rayVsTriangleMesh(
             [impactX, impactY, impactZ],
             [rayDirX, rayDirY, rayDirZ],
@@ -1731,13 +2052,13 @@ export class Room {
           const blockingPc = blockingEntity.get<PlayerComponent>(COMP_PLAYER);
           if (!blockingPc) continue;
           
-          // Check if ray intersects blocking entity's hitbox
+          // Check if ray intersects blocking entity's hitbox (posY is already center)
           const blockingResult = rayVsAABB(
             impactX, impactY, impactZ,
             rayDirX, rayDirY, rayDirZ,
             distance,
             blockingPc.state.posX,
-            blockingPc.state.posY + PLAYER_HITBOX_CENTER_Y,
+            blockingPc.state.posY,
             blockingPc.state.posZ,
             PLAYER_HITBOX_HALF
           );
@@ -1805,17 +2126,38 @@ export class Room {
 
         // Update round scores if active
         if (this.roundState.phase === 'active') {
-          this.handleKill(attackerId, targetEntity.id);
+          // Get weapon type from attacker for kill feed
+          let weaponType: string | null = null;
+          const attackerEntity = this.world.getEntity(attackerId);
+          if (attackerEntity) {
+            const attackerCollected = attackerEntity.get<CollectedComponent>(COMP_COLLECTED);
+            if (attackerCollected && attackerCollected.items.length > 0) {
+              const weaponEntity = this.world.getEntity(attackerCollected.items[0]);
+              if (weaponEntity) {
+                const weaponTypeComp = weaponEntity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
+                if (weaponTypeComp) {
+                  weaponType = weaponTypeComp.type;
+                }
+              }
+            }
+          }
+          this.handleKill(attackerId, targetEntity.id, weaponType, false);
           this.checkWinCondition();
         }
 
         // Respawn
-        pc.state.posX = 0;
-        pc.state.posY = 0;
-        pc.state.posZ = 0;
+        const spawnPos = this.findValidSpawnPosition();
+        pc.state.posX = spawnPos.x;
+        pc.state.posY = spawnPos.y;
+        pc.state.posZ = spawnPos.z;
         pc.state.velX = 0;
         pc.state.velY = 0;
         pc.state.velZ = 0;
+        pc.state.isInWater = false;
+        pc.state.isHeadUnderwater = false;
+        pc.state.breathRemaining = 10.0;
+        pc.state.waterDepth = 0;
+        pc.inputQueue!.length = 0; // Clear stale inputs on death
         health.current = health.max;
       }
     }
@@ -1883,6 +2225,7 @@ export class Room {
     };
     buildingEntity.add(COMP_BUILDING, buildingComp);
     this.buildingEntities.set(buildingEntityId, buildingEntity);
+    this.blockColliderCache.set(buildingEntityId, new Map());
 
     // Broadcast to all clients
     const createdMsg: BuildingCreatedMessage = {
@@ -1966,6 +2309,7 @@ export class Room {
 
     // Create physics collider (using Havok physics from the scene)
     this.createBlockPhysics(data.buildingEntityId, building, gridX, gridY, gridZ);
+    this.upsertBlockCollider(data.buildingEntityId, building, gridX, gridY, gridZ);
 
     // Broadcast to all clients
     const msg: BlockPlacedMessage = { 
@@ -2037,6 +2381,7 @@ export class Room {
 
     // Remove physics collider
     this.removeBlockPhysics(data.buildingEntityId, gridX, gridY, gridZ);
+    this.removeBlockCollider(data.buildingEntityId, gridX, gridY, gridZ);
 
     // Broadcast to all clients
     const msg: BlockRemovedMessage = { 
@@ -2098,6 +2443,159 @@ export class Room {
     }
   }
 
+  private getBlockColliderKey(gridX: number, gridY: number, gridZ: number): string {
+    return `${gridX}_${gridY}_${gridZ}`;
+  }
+
+  private buildBlockColliderEntry(building: BuildingComponent, gridX: number, gridY: number, gridZ: number): BlockColliderEntry {
+    const cellSize = 0.5;
+    const halfCell = cellSize * 0.5;
+    const halfSize = (building.gridSize * cellSize) * 0.5;
+
+    const localX = (gridX * cellSize) - halfSize + halfCell;
+    const localY = (gridY * cellSize) - halfSize + halfCell;
+    const localZ = (gridZ * cellSize) - halfSize + halfCell;
+
+    const cosY = Math.cos(building.gridRotationY);
+    const sinY = Math.sin(building.gridRotationY);
+    const worldX = building.gridPositionX + (localX * cosY + localZ * sinY);
+    const worldY = building.gridPositionY + localY;
+    const worldZ = building.gridPositionZ + (-localX * sinY + localZ * cosY);
+
+    return {
+      gridX,
+      gridY,
+      gridZ,
+      minX: worldX - halfCell,
+      minY: worldY - halfCell,
+      minZ: worldZ - halfCell,
+      maxX: worldX + halfCell,
+      maxY: worldY + halfCell,
+      maxZ: worldZ + halfCell
+    };
+  }
+
+  private upsertBlockCollider(buildingEntityId: number, building: BuildingComponent, gridX: number, gridY: number, gridZ: number): void {
+    const cache = this.blockColliderCache.get(buildingEntityId);
+    if (!cache) return;
+
+    const key = this.getBlockColliderKey(gridX, gridY, gridZ);
+    const entry = this.buildBlockColliderEntry(building, gridX, gridY, gridZ);
+    cache.set(key, entry);
+  }
+
+  private removeBlockCollider(buildingEntityId: number, gridX: number, gridY: number, gridZ: number): void {
+    const cache = this.blockColliderCache.get(buildingEntityId);
+    if (!cache) return;
+
+    const key = this.getBlockColliderKey(gridX, gridY, gridZ);
+    cache.delete(key);
+  }
+
+  private rebuildBlockCollidersForBuilding(buildingEntityId: number, building: BuildingComponent): void {
+    const cache = this.blockColliderCache.get(buildingEntityId);
+    if (!cache || cache.size === 0) return;
+
+    for (const entry of cache.values()) {
+      const updated = this.buildBlockColliderEntry(building, entry.gridX, entry.gridY, entry.gridZ);
+      entry.minX = updated.minX;
+      entry.minY = updated.minY;
+      entry.minZ = updated.minZ;
+      entry.maxX = updated.maxX;
+      entry.maxY = updated.maxY;
+      entry.maxZ = updated.maxZ;
+    }
+  }
+
+  private collectBlockColliders(): Array<{ minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }> | undefined {
+    if (this.blockColliderCache.size === 0) return undefined;
+
+    const colliders: Array<{ minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }> = [];
+    for (const cache of this.blockColliderCache.values()) {
+      for (const entry of cache.values()) {
+        colliders.push({
+          minX: entry.minX,
+          minY: entry.minY,
+          minZ: entry.minZ,
+          maxX: entry.maxX,
+          maxY: entry.maxY,
+          maxZ: entry.maxZ
+        });
+      }
+    }
+
+    return colliders.length > 0 ? colliders : undefined;
+  }
+
+  private getPickupCellKey(worldX: number, worldZ: number): string {
+    const cellX = Math.floor(worldX / this.pickupGridCellSize);
+    const cellZ = Math.floor(worldZ / this.pickupGridCellSize);
+    return `${cellX},${cellZ}`;
+  }
+
+  private upsertPickupGrid(itemId: number, worldX: number, worldZ: number): void {
+    const key = this.getPickupCellKey(worldX, worldZ);
+    const previousKey = this.pickupGridCells.get(itemId);
+    if (previousKey === key) return;
+
+    if (previousKey) {
+      const previousSet = this.pickupGrid.get(previousKey);
+      if (previousSet) {
+        previousSet.delete(itemId);
+        if (previousSet.size === 0) {
+          this.pickupGrid.delete(previousKey);
+        }
+      }
+    }
+
+    let cellSet = this.pickupGrid.get(key);
+    if (!cellSet) {
+      cellSet = new Set<number>();
+      this.pickupGrid.set(key, cellSet);
+    }
+    cellSet.add(itemId);
+    this.pickupGridCells.set(itemId, key);
+  }
+
+  private removePickupFromGrid(itemId: number): void {
+    const key = this.pickupGridCells.get(itemId);
+    if (!key) return;
+
+    const cellSet = this.pickupGrid.get(key);
+    if (cellSet) {
+      cellSet.delete(itemId);
+      if (cellSet.size === 0) {
+        this.pickupGrid.delete(key);
+      }
+    }
+
+    this.pickupGridCells.delete(itemId);
+  }
+
+  private queryPickupGrid(worldX: number, worldZ: number, range: number): number[] {
+    const cellRadius = Math.ceil(range / this.pickupGridCellSize);
+    const centerCellX = Math.floor(worldX / this.pickupGridCellSize);
+    const centerCellZ = Math.floor(worldZ / this.pickupGridCellSize);
+    const results: number[] = [];
+    const seen = new Set<number>();
+
+    for (let dx = -cellRadius; dx <= cellRadius; dx++) {
+      for (let dz = -cellRadius; dz <= cellRadius; dz++) {
+        const key = `${centerCellX + dx},${centerCellZ + dz}`;
+        const cellSet = this.pickupGrid.get(key);
+        if (!cellSet) continue;
+
+        for (const id of cellSet) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          results.push(id);
+        }
+      }
+    }
+
+    return results;
+  }
+
   handleBuildingTransform(playerEntityId: number, data: BuildingTransformMessage): void {
     const buildingEntity = this.buildingEntities.get(data.buildingEntityId);
     if (!buildingEntity) {
@@ -2151,6 +2649,8 @@ export class Room {
         }
       }
     }
+
+    this.rebuildBlockCollidersForBuilding(data.buildingEntityId, building);
 
     // Broadcast to all clients
     const msg: BuildingTransformedMessage = {
@@ -2223,6 +2723,7 @@ export class Room {
     // Remove building entity
     this.world.destroyEntity(buildingEntity);
     this.buildingEntities.delete(data.buildingEntityId);
+    this.blockColliderCache.delete(data.buildingEntityId);
 
     // Broadcast to all clients
     const msg: BuildingDestroyedMessage = {
@@ -2329,7 +2830,7 @@ export class Room {
     return this.lobbyConfig;
   }
 
-  setLobbyConfig(config: { seed?: string; pistolCount?: number }): void {
+  setLobbyConfig(config: { seed?: string; pistolCount?: number; headshotDmg?: number; normalDmg?: number }): void {
     this.lobbyConfig = config;
   }
 
@@ -2416,6 +2917,9 @@ export class Room {
       this.spawnLevelTrees(finalSeed, occupiedCells);
       this.spawnLevelBushes(finalSeed, occupiedCells);
       console.log(`[Room] Level generated: ${this.treeInstances.length} trees, ${this.rockInstances.length} rocks, ${this.bushInstances.length} bushes`);
+      
+      // Build octree for broad-phase collision culling
+      this.buildOctree();
     }
 
     // Broadcast game loading message to all clients
@@ -2425,7 +2929,9 @@ export class Room {
         seed: finalSeed,
         config: {
           seed: finalSeed,
-          pistolCount: config.pistolCount
+          pistolCount: config.pistolCount,
+          headshotDmg: config.headshotDmg,
+          normalDmg: config.normalDmg
         }
       });
     });
@@ -2600,22 +3106,33 @@ export class Room {
       // Check if player has infinite stamina buff
       const hasInfiniteStamina = buffs?.buffs.some(b => b.type === 'infinite_stamina') || false;
 
-      // Check if player is moving and sprinting
+      // Check player movement and water state
       const isMoving = pc.input.forward !== 0 || pc.input.right !== 0;
       const isTryingToSprint = pc.input.sprint && isMoving && pc.state.isGrounded;
       const didJump = pc.input.jump && pc.state.isGrounded && !pc.state.hasJumped;
+      
+      // Water stamina mechanics
+      const DEEP_WATER_THRESHOLD = 0.5;
+      const isSwimming = pc.state.waterDepth > DEEP_WATER_THRESHOLD && !pc.state.isGrounded;
+      const isWading = pc.state.isInWater && pc.state.isGrounded; // Walking on bottom
 
       // Handle exhaustion recovery
       if (stamina.isExhausted) {
         const exhaustedDuration = now - stamina.exhaustedAt;
-        // After being exhausted, regenerate faster (25/sec) until fully recovered
-        const regenRate = 25; // Per second
-        stamina.current = Math.min(stamina.max, stamina.current + regenRate * FIXED_TIMESTEP);
         
-        // Exit exhaustion only when stamina is fully recovered (100%)
-        if (stamina.current >= stamina.max) {
-          stamina.isExhausted = false;
-          stamina.exhaustedAt = 0;
+        // Can only recover if grounded (land or underwater walking)
+        if (pc.state.isGrounded) {
+          // After being exhausted, regenerate faster until fully recovered
+          stamina.current = Math.min(stamina.max, stamina.current + STAMINA.EXHAUSTED_REGEN_RATE * FIXED_TIMESTEP);
+          
+          // Exit exhaustion only when stamina is fully recovered (100%)
+          if (stamina.current >= stamina.max) {
+            stamina.isExhausted = false;
+            stamina.exhaustedAt = 0;
+          }
+        } else if (isSwimming) {
+          // Swimming while exhausted: SINK! (disable buoyancy, add downward force)
+          // This is handled in stepCharacter via isExhausted flag
         }
         
         // Prevent sprinting and jumping while exhausted
@@ -2626,9 +3143,32 @@ export class Room {
         if (hasInfiniteStamina) {
           // Infinite stamina buff - keep at max
           stamina.current = stamina.max;
+        } else if (isSwimming) {
+          // Swimming drains stamina like sprinting
+          let swimmingDrain = WATER.SWIM_STAMINA_DRAIN; // Base swimming drain (same as land sprint)
+          
+          if (pc.input.sprint && isMoving) {
+            // Sprint while swimming = DOUBLE drain
+            swimmingDrain = WATER.SWIM_SPRINT_STAMINA_DRAIN;
+          } else if (!isMoving) {
+            // Not moving while swimming = no drain
+            swimmingDrain = 0;
+          }
+          
+          if (swimmingDrain > 0) {
+            stamina.current = Math.max(0, stamina.current - swimmingDrain * FIXED_TIMESTEP);
+            
+            if (stamina.current <= 0) {
+              stamina.isExhausted = true;
+              stamina.exhaustedAt = now;
+              pc.input.sprint = false; // Stop sprinting immediately
+            }
+          }
+          
+          // NO regeneration while swimming
         } else if (isTryingToSprint) {
-          // Consume 15 stamina per second while sprinting
-          stamina.current = Math.max(0, stamina.current - 15 * FIXED_TIMESTEP);
+          // Land sprinting: Consume stamina per second
+          stamina.current = Math.max(0, stamina.current - STAMINA.SPRINT_DRAIN * FIXED_TIMESTEP);
           
           if (stamina.current <= 0) {
             stamina.isExhausted = true;
@@ -2636,68 +3176,24 @@ export class Room {
             pc.input.sprint = false; // Stop sprinting immediately
           }
         } else if (didJump) {
-          // Jumping costs 10 stamina instantly
-          stamina.current = Math.max(0, stamina.current - 10);
+          // Jumping costs stamina instantly (significant investment)
+          stamina.current = Math.max(0, stamina.current - STAMINA.JUMP_COST);
           
           if (stamina.current <= 0) {
             stamina.isExhausted = true;
             stamina.exhaustedAt = now;
             pc.input.jump = false; // Cancel jump
           }
-        } else {
-          // Regenerate 10 stamina per second when not sprinting
-          stamina.current = Math.min(stamina.max, stamina.current + 10 * FIXED_TIMESTEP);
+        } else if (pc.state.isGrounded) {
+          // Regenerate stamina per second when grounded (land OR underwater walking)
+          stamina.current = Math.min(stamina.max, stamina.current + STAMINA.REGEN_RATE * FIXED_TIMESTEP);
         }
+        // Note: No regen when in air (jumping) or swimming (not grounded)
       }
     }
 
     // 2. Build unified CollisionWorld (once per physics tick, reused for all entities)
-    let blockColliders: Array<{ minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }> | undefined;
-    if (this.buildingEntities.size > 0) {
-      blockColliders = [];
-      const cellSize = 0.5;
-      const halfCell = cellSize * 0.5;
-
-      // Iterate through all building entities
-      for (const [buildingEntityId, buildingEntity] of this.buildingEntities) {
-        const building = buildingEntity.get(COMP_BUILDING);
-        if (!building) continue;
-
-        const halfSize = (building.gridSize * cellSize) * 0.5;
-
-        // Iterate through voxel data to find placed blocks
-        for (let x = 0; x < building.gridSize; x++) {
-          for (let y = 0; y < building.gridSize; y++) {
-            for (let z = 0; z < building.gridSize; z++) {
-              const index = x + y * building.gridSize + z * building.gridSize * building.gridSize;
-              if (building.voxelData[index] !== 0) {
-                // Calculate local position
-                const localX = (x * cellSize) - halfSize + halfCell;
-                const localY = (y * cellSize) - halfSize + halfCell;
-                const localZ = (z * cellSize) - halfSize + halfCell;
-
-                // Transform to world space (Babylon uses left-handed coordinate system)
-                const cosY = Math.cos(building.gridRotationY);
-                const sinY = Math.sin(building.gridRotationY);
-                const worldX = building.gridPositionX + (localX * cosY + localZ * sinY);
-                const worldY = building.gridPositionY + localY;
-                const worldZ = building.gridPositionZ + (-localX * sinY + localZ * cosY);
-
-                // Create AABB for this block
-                blockColliders.push({
-                  minX: worldX - halfCell,
-                  minY: worldY - halfCell,
-                  minZ: worldZ - halfCell,
-                  maxX: worldX + halfCell,
-                  maxY: worldY + halfCell,
-                  maxZ: worldZ + halfCell
-                });
-              }
-            }
-          }
-        }
-      }
-    }
+    const blockColliders = this.collectBlockColliders();
 
     // Build unified collision world (optional - for future optimization)
     // For now, we still pass individual parameters to stepCharacter for compatibility
@@ -2709,23 +3205,101 @@ export class Room {
     // });
 
     // 3. Tick all player character controllers
+    // Each player processes exactly one queued input per tick, maintaining
+    // 1:1 correspondence with client physics steps for prediction accuracy.
     for (const entity of playerEntities) {
       const pc = entity.get<PlayerComponent>(COMP_PLAYER)!;
       const stamina = entity.get<StaminaComponent>(COMP_STAMINA);
+      const queue = pc.inputQueue!;
+
+      // Pop the next input from the queue (one per tick)
+      if (queue.length > 0) {
+        const nextInput = queue.shift()!;
+        pc.input.forward = nextInput.forward;
+        pc.input.right = nextInput.right;
+        pc.input.cameraYaw = nextInput.cameraYaw;
+        pc.input.cameraPitch = nextInput.cameraPitch;
+        pc.input.jump = nextInput.jump;
+        pc.input.sprint = nextInput.sprint;
+        pc.headPitch = nextInput.cameraPitch || 0;
+        pc.lastProcessedInput = nextInput.sequence;
+      }
+      // If queue is empty, reuse last input (player continues same movement).
+      // lastProcessedInput stays unchanged so the client doesn't over-prune.
+      
+      // Sync exhaustion state to physics state (needed for sinking mechanic)
+      if (stamina) {
+        pc.state.isExhausted = stamina.isExhausted;
+      }
       
       // Apply speed modifier if exhausted (half speed)
-      // We need to modify the input's effect, not the velocity directly
       if (stamina && stamina.isExhausted) {
-        // Disable sprint while exhausted
         pc.input.sprint = false;
       }
       
-      stepCharacter(pc.state, pc.input, FIXED_TIMESTEP, this.voxelGrid, this.treeColliderMeshes, this.rockColliderMeshes, blockColliders);
+      // Query octree for nearby colliders (broad-phase culling)
+      let filteredTrees = this.treeColliderMeshes;
+      let filteredRocks = this.rockColliderMeshes;
+      
+      if (this.octree) {
+        const nearby = this.octree.queryPoint(pc.state.posX, pc.state.posY, pc.state.posZ, 8);
+        filteredTrees = nearby.filter((e: any) => e.type === 'tree').map((e: any) => e.data);
+        filteredRocks = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
+      }
+      
+      stepCharacter(pc.state, pc.input, FIXED_TIMESTEP, this.voxelGrid, filteredTrees, filteredRocks, blockColliders, this.waterLevelProvider);
       
       // If exhausted, apply speed reduction after physics step
       if (stamina && stamina.isExhausted) {
         pc.state.velX *= 0.5;
         pc.state.velZ *= 0.5;
+      }
+
+      // Apply drowning damage if breath is depleted
+      const health = entity.get<HealthComponent>(COMP_HEALTH);
+      if (health && pc.state.breathRemaining <= 0 && pc.state.isHeadUnderwater) {
+        const drowningDamage = WATER.DROWNING_DAMAGE * FIXED_TIMESTEP;
+        const oldHealth = health.current;
+        health.current = Math.max(0, health.current - drowningDamage);
+
+        // Broadcast damage event
+        const damageMsg: EntityDamageMessage = {
+          entityId: entity.id,
+          damage: drowningDamage,
+          newHealth: health.current,
+          attackerId: 0 // No attacker for drowning
+        };
+        this.broadcastLow(Opcode.EntityDamage, damageMsg);
+
+        // Check death from drowning
+        if (health.current <= 0 && oldHealth > 0) {
+          const deathMsg: EntityDeathMessage = {
+            entityId: entity.id,
+            killerId: 0 // No killer for drowning (suicide)
+          };
+          this.broadcastLow(Opcode.EntityDeath, deathMsg);
+
+          // Update round scores if active (drowning counts as suicide)
+          if (this.roundState.phase === 'active') {
+            this.handleKill(0, entity.id);
+            this.checkWinCondition();
+          }
+
+          // Respawn
+          const spawnPos = this.findValidSpawnPosition();
+          pc.state.posX = spawnPos.x;
+          pc.state.posY = spawnPos.y;
+          pc.state.posZ = spawnPos.z;
+          pc.state.velX = 0;
+          pc.state.velY = 0;
+          pc.state.velZ = 0;
+          pc.state.isInWater = false;
+          pc.state.isHeadUnderwater = false;
+          pc.state.breathRemaining = 10.0;
+          pc.state.waterDepth = 0;
+          pc.inputQueue!.length = 0;
+          health.current = health.max;
+        }
       }
     }
 
@@ -2926,19 +3500,15 @@ export class Room {
       // ARMA-style optimization: Skip tree collision (bullets pass through)
       // Trees are decorative - checking collision is expensive and not worth it
 
-      // Check rock collision (ray vs triangle mesh) - only if projectile is near rocks
-      // Spatial optimization: Only check rocks within 30 units of projectile
-      const ROCK_CHECK_DISTANCE = 30;
-      for (const rockData of this.rockColliderMeshes) {
-        // Quick distance check before expensive raycast
-        const distX = proj.posX - rockData.transform.posX;
-        const distZ = proj.posZ - rockData.transform.posZ;
-        const distSq = distX * distX + distZ * distZ;
-        
-        if (distSq > ROCK_CHECK_DISTANCE * ROCK_CHECK_DISTANCE) {
-          continue; // Rock is too far, skip collision check
-        }
-        
+      // Check rock collision using octree ray query (broad-phase culling)
+      let rocksToCheck = this.rockColliderMeshes;
+      
+      if (this.octree) {
+        const nearbyEntries = this.octree.queryRay(stepStartX, stepStartY, stepStartZ, rayDirNormX, rayDirNormY, rayDirNormZ, rayLength);
+        rocksToCheck = nearbyEntries.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
+      }
+      
+      for (const rockData of rocksToCheck) {
         const rockHit = rayVsTriangleMesh(
           [stepStartX, stepStartY, stepStartZ],
           [rayDirNormX, rayDirNormY, rayDirNormZ],
@@ -2988,11 +3558,11 @@ export class Room {
 
         // Player body hitbox center
         const bx = pc.state.posX;
-        const by = pc.state.posY + PLAYER_HITBOX_CENTER_Y;
+        const by = pc.state.posY; // posY is already the hitbox center
         const bz = pc.state.posZ;
 
         // Check HEAD hitbox first (priority for headshots)
-        const headY = by + 0.8; // Head positioned above body center
+        const headY = by + 0.8; // Head positioned above body center (matches client at +0.8)
         const headHalfSize = 0.3; // Head is 0.6x0.6x0.6 cube
         const headResult = rayVsAABB(
           stepStartX, stepStartY, stepStartZ,
@@ -3003,7 +3573,8 @@ export class Room {
         );
 
         if (headResult.hit) {
-          // HEADSHOT! Apply 2x damage with distance falloff
+          // HEADSHOT! Apply configurable damage multiplier with distance falloff
+          const headshotMultiplier = this.lobbyConfig.headshotDmg ?? 2.0;
           const health = targetEntity.get<HealthComponent>(COMP_HEALTH);
           if (health) {
             // Damage falloff: 100% at 0-20m, 75% at 40m, 50% at 60m, 30% at 80m+
@@ -3013,12 +3584,12 @@ export class Room {
             }
             const finalDamage = proj.baseDamage * damageMult;
             
-            // Check if player has helmet - helmet negates 2x multiplier and absorbs up to 20 HP
+            // Check if player has helmet - helmet negates headshot multiplier and absorbs up to 20 HP
             const helmet = targetEntity.get<HelmetComponent>(COMP_HELMET);
             let actualDamage: number;
             
             if (helmet && helmet.hasHelmet && helmet.helmetHealth > 0) {
-              // Helmet negates the 2x multiplier, so treat as normal damage
+              // Helmet negates the headshot multiplier, so treat as normal damage
               const damageAfterNegation = finalDamage;
               
               // Helmet absorbs damage up to its remaining health
@@ -3034,8 +3605,8 @@ export class Room {
                 console.log(`[Helmet] Entity ${targetEntity.id} helmet absorbed ${helmetAbsorbed.toFixed(1)} damage (${helmet.helmetHealth}/${helmet.maxHelmetHealth} remaining)`);
               }
             } else {
-              // No helmet - apply 2x headshot multiplier
-              actualDamage = finalDamage * 2;
+              // No helmet - apply headshot multiplier
+              actualDamage = finalDamage * headshotMultiplier;
             }
             
             // Headshots bypass armor and go straight to health
@@ -3070,17 +3641,23 @@ export class Room {
               
               // Update round scores if active
               if (this.roundState.phase === 'active') {
-                this.handleKill(proj.ownerId, targetEntity.id);
+                this.handleKill(proj.ownerId, targetEntity.id, proj.weaponType, true); // isHeadshot = true
                 this.checkWinCondition();
               }
 
               // Respawn
-              pc.state.posX = 0;
-              pc.state.posY = 0;
-              pc.state.posZ = 0;
+              const spawnPos = this.findValidSpawnPosition();
+              pc.state.posX = spawnPos.x;
+              pc.state.posY = spawnPos.y;
+              pc.state.posZ = spawnPos.z;
               pc.state.velX = 0;
               pc.state.velY = 0;
               pc.state.velZ = 0;
+              pc.state.isInWater = false;
+              pc.state.isHeadUnderwater = false;
+              pc.state.breathRemaining = 10.0;
+              pc.state.waterDepth = 0;
+              pc.inputQueue!.length = 0;
               health.current = health.max;
             }
           }
@@ -3103,7 +3680,7 @@ export class Room {
           break; // Stop checking other targets
         }
 
-        // Check BODY hitbox (normal damage)
+        // Check BODY hitbox (1.0 tall cube centered at posY)
         const bodyResult = rayVsAABB(
           stepStartX, stepStartY, stepStartZ,
           rayDirNormX, rayDirNormY, rayDirNormZ,
@@ -3113,7 +3690,8 @@ export class Room {
         );
 
         if (bodyResult.hit) {
-          // Body hit! Apply normal damage with distance falloff
+          // Body hit! Apply configurable damage multiplier with distance falloff
+          const normalMultiplier = this.lobbyConfig.normalDmg ?? 1.0;
           const health = targetEntity.get<HealthComponent>(COMP_HEALTH);
           if (health) {
             // Damage falloff: 100% at 0-20m, 75% at 40m, 50% at 60m, 30% at 80m+
@@ -3121,7 +3699,7 @@ export class Room {
             if (proj.distanceTraveled > 20) {
               damageMult = Math.max(0.3, 1.0 - (proj.distanceTraveled - 20) * 0.0125);
             }
-            const finalDamage = proj.baseDamage * damageMult;
+            const finalDamage = proj.baseDamage * damageMult * normalMultiplier;
             
             // Apply damage (armor absorbs first)
             this.applyDamageToEntity(targetEntity, finalDamage);
@@ -3152,18 +3730,24 @@ export class Room {
 
               // Update round scores if active
               if (this.roundState.phase === 'active') {
-                this.handleKill(proj.ownerId, targetEntity.id);
+                this.handleKill(proj.ownerId, targetEntity.id, proj.weaponType, false); // isHeadshot = false
                 this.checkWinCondition();
               }
 
               // Respawn: reset health and position
               health.current = health.max;
-              pc.state.posX = 0;
-              pc.state.posY = 0;
-              pc.state.posZ = 0;
+              const spawnPos = this.findValidSpawnPosition();
+              pc.state.posX = spawnPos.x;
+              pc.state.posY = spawnPos.y;
+              pc.state.posZ = spawnPos.z;
               pc.state.velX = 0;
               pc.state.velY = 0;
               pc.state.velZ = 0;
+              pc.state.isInWater = false;
+              pc.state.isHeadUnderwater = false;
+              pc.state.breathRemaining = 10.0;
+              pc.state.waterDepth = 0;
+              pc.inputQueue!.length = 0;
             }
           }
           
@@ -3210,6 +3794,7 @@ export class Room {
     for (const entity of collectableEntities) {
       const physics = entity.get<PhysicsComponent>(COMP_PHYSICS)!;
       const justSettled = stepCollectable(physics, FIXED_TIMESTEP, this.voxelGrid, this.treeColliderMeshes, this.rockColliderMeshes, blockColliders);
+      this.upsertPickupGrid(entity.id, physics.posX, physics.posZ);
 
       // Broadcast position update (low-freq JSON)
       if (!physics.onGround || justSettled) {
@@ -3222,16 +3807,27 @@ export class Room {
         };
         this.broadcastLow(Opcode.ItemUpdate, update);
       }
+    }
 
-      // Check pickup proximity against all players
-      const PICKUP_RANGE = 1.5;
-      for (const playerEntity of playerEntities) {
-        const pc = playerEntity.get<PlayerComponent>(COMP_PLAYER);
-        if (!pc) continue;
+    // Check pickup proximity using spatial grid
+    const PICKUP_RANGE = 1.5;
+    const scheduledItems = new Set<number>();
+    for (const playerEntity of playerEntities) {
+      const pc = playerEntity.get<PlayerComponent>(COMP_PLAYER);
+      if (!pc) continue;
 
-        // Skip players who already have a weapon
-        const collected = playerEntity.get<CollectedComponent>(COMP_COLLECTED);
-        if (collected && collected.items.length > 0) continue;
+      // Skip players who already have a weapon
+      const collected = playerEntity.get<CollectedComponent>(COMP_COLLECTED);
+      if (collected && collected.items.length > 0) continue;
+
+      const nearbyItems = this.queryPickupGrid(pc.state.posX, pc.state.posZ, PICKUP_RANGE);
+      for (const itemId of nearbyItems) {
+        if (scheduledItems.has(itemId)) continue;
+        const itemEntity = this.world.getEntity(itemId);
+        if (!itemEntity) continue;
+
+        const physics = itemEntity.get<PhysicsComponent>(COMP_PHYSICS);
+        if (!physics) continue;
 
         const dx = pc.state.posX - physics.posX;
         const dy = pc.state.posY - physics.posY;
@@ -3240,11 +3836,11 @@ export class Room {
 
         if (distSq <= PICKUP_RANGE * PICKUP_RANGE) {
           itemsToPickup.push({
-            itemId: entity.id,
+            itemId: itemEntity.id,
             playerId: playerEntity.id,
             connectionId: pc.connectionId
           });
-          break; // One player picks up per item per tick
+          scheduledItems.add(itemId);
         }
       }
     }
@@ -3353,6 +3949,7 @@ export class Room {
         this.broadcastLow(Opcode.ItemPickup, pickupMsg);
         
         // Remove the pickup entity from the world
+        this.removePickupFromGrid(pickup.itemId);
         this.world.destroyEntity(pickup.itemId);
         
         console.log(`Player entity ${pickup.playerId} picked up consumable ${pickup.itemId}`);
@@ -3404,6 +4001,7 @@ export class Room {
         this.broadcastLow(Opcode.ItemPickup, pickupMsg);
 
         // Remove the item entity from the world
+        this.removePickupFromGrid(pickup.itemId);
         this.world.destroyEntity(pickup.itemId);
 
         console.log(`Player entity ${pickup.playerId} picked up weapon ${pickup.itemId}`);
@@ -3430,15 +4028,28 @@ export class Room {
         rotation: { x: 0, y: Math.sin(halfYaw), z: 0, w: Math.cos(halfYaw) },
         velocity: { x: pc.state.velX, y: pc.state.velY, z: pc.state.velZ },
         headPitch: pc.headPitch,
-        lastProcessedInput: pc.lastProcessedInput
+        lastProcessedInput: pc.lastProcessedInput,
+        isInWater: pc.state.isInWater,
+        isHeadUnderwater: pc.state.isHeadUnderwater,
+        breathRemaining: pc.state.breathRemaining,
+        waterDepth: pc.state.waterDepth
       };
 
       const buffer = encodeTransform(Opcode.TransformUpdate, transformData);
       this.connectionHandler.broadcast(connections, buffer);
       
-      // Broadcast stamina for this player
+      // Get or create cache entry for this entity
+      let cache = this.lastBroadcastCache.get(entity.id);
+      if (!cache) {
+        cache = {};
+        this.lastBroadcastCache.set(entity.id, cache);
+      }
+      
+      // Broadcast stamina for this player (only if changed)
       const stamina = entity.get<StaminaComponent>(COMP_STAMINA);
-      if (stamina) {
+      if (stamina && (cache.stamina !== stamina.current || cache.isExhausted !== stamina.isExhausted)) {
+        cache.stamina = stamina.current;
+        cache.isExhausted = stamina.isExhausted;
         const staminaMsg: StaminaUpdateMessage = {
           entityId: entity.id,
           stamina: stamina.current,
@@ -3447,9 +4058,10 @@ export class Room {
         this.broadcastLow(Opcode.StaminaUpdate, staminaMsg);
       }
 
-      // Broadcast armor for this player
+      // Broadcast armor for this player (only if changed)
       const armor = entity.get<ArmorComponent>(COMP_ARMOR);
-      if (armor) {
+      if (armor && cache.armor !== armor.current) {
+        cache.armor = armor.current;
         const armorMsg: ArmorUpdateMessage = {
           entityId: entity.id,
           armor: armor.current
@@ -3457,9 +4069,11 @@ export class Room {
         this.broadcastLow(Opcode.ArmorUpdate, armorMsg);
       }
 
-      // Broadcast helmet for this player
+      // Broadcast helmet for this player (only if changed)
       const helmet = entity.get<HelmetComponent>(COMP_HELMET);
-      if (helmet) {
+      if (helmet && (cache.hasHelmet !== helmet.equipped || cache.helmetHealth !== helmet.health)) {
+        cache.hasHelmet = helmet.equipped;
+        cache.helmetHealth = helmet.health;
         const helmetMsg: HelmetUpdateMessage = {
           entityId: entity.id,
           hasHelmet: helmet.equipped,
@@ -3533,7 +4147,7 @@ export class Room {
     console.log(`[Round] Round started with ${this.roundState.scores.size} players`);
   }
 
-  private handleKill(killerId: number, victimId: number): void {
+  private handleKill(killerId: number, victimId: number, weaponType: string | null = null, isHeadshot: boolean = false): void {
     const killerEntity = this.world.getEntity(killerId);
     const victimEntity = this.world.getEntity(victimId);
     
@@ -3549,15 +4163,16 @@ export class Room {
         victimStats.deaths++;
       }
       
-      // Get weapon type from killer
-      let weaponType: string | null = null;
-      const killerCollected = killerEntity.get<CollectedComponent>(COMP_COLLECTED);
-      if (killerCollected && killerCollected.items.length > 0) {
-        const weaponEntity = this.world.getEntity(killerCollected.items[0]);
-        if (weaponEntity) {
-          const weaponTypeComp = weaponEntity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
-          if (weaponTypeComp) {
-            weaponType = weaponTypeComp.type;
+      // If weapon type not provided, try to get it from killer's current weapon
+      if (!weaponType) {
+        const killerCollected = killerEntity.get<CollectedComponent>(COMP_COLLECTED);
+        if (killerCollected && killerCollected.items.length > 0) {
+          const weaponEntity = this.world.getEntity(killerCollected.items[0]);
+          if (weaponEntity) {
+            const weaponTypeComp = weaponEntity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
+            if (weaponTypeComp) {
+              weaponType = weaponTypeComp.type;
+            }
           }
         }
       }
@@ -3574,8 +4189,10 @@ export class Room {
           victimEntityId: victimId,
           victimColor: victimPlayer.color,
           weaponType: weaponType,
+          isHeadshot: isHeadshot,
           timestamp: Date.now()
         };
+        console.log(`[KillFeed] Broadcasting kill: Player#${killerId} → Player#${victimId}, Weapon: ${weaponType}, Headshot: ${isHeadshot}`);
         this.broadcastLow(Opcode.KillFeed, killFeedMsg);
       }
     }
@@ -3701,10 +4318,26 @@ export class Room {
   // End Round System Methods
   // ══════════════════════════════════════════════════════════════
 
+  /**
+   * Broadcast a low-frequency message to all connected clients.
+   */
   private broadcastLow(opcode: Opcode, payload: any) {
     const connections = this.getAllConnections();
     for (const conn of connections) {
       this.connectionHandler.sendLow(conn, opcode, payload);
+    }
+  }
+
+  /**
+   * Broadcast a low-frequency message to all clients except one.
+   * Useful for spatial audio where the sender plays a local version.
+   */
+  private broadcastLowExcept(opcode: Opcode, payload: any, excludeConnectionId: string) {
+    const connections = this.getAllConnections();
+    for (const conn of connections) {
+      if (conn.id !== excludeConnectionId) {
+        this.connectionHandler.sendLow(conn, opcode, payload);
+      }
     }
   }
 

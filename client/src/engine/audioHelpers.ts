@@ -6,14 +6,21 @@ import { AudioManager } from './AudioManager';
 
 /**
  * Play a 2D sound effect.
+ * Returns the sound instance ID or null if failed.
  */
-export function playSFX(soundName: string, volume?: number): boolean {
-  const audio = AudioManager.getInstance();
-  return audio.play(soundName, { volume });
+export function playSFX(soundName: string, volume?: number): string | null {
+  try {
+    const audio = AudioManager.getInstance();
+    return audio.play(soundName, { volume });
+  } catch (error) {
+    console.warn('[audioHelpers] Failed to play SFX:', soundName, error);
+    return null;
+  }
 }
 
 /**
  * Play a 3D spatial sound at a world position.
+ * Returns the sound instance ID or null if failed.
  */
 export function playSFX3D(
   soundName: string,
@@ -21,12 +28,17 @@ export function playSFX3D(
   y: number,
   z: number,
   volume?: number
-): boolean {
-  const audio = AudioManager.getInstance();
-  return audio.play(soundName, {
-    position: { x, y, z },
-    volume,
-  });
+): string | null {
+  try {
+    const audio = AudioManager.getInstance();
+    return audio.play(soundName, {
+      position: { x, y, z },
+      volume,
+    });
+  } catch (error) {
+    console.warn('[audioHelpers] Failed to play SFX3D:', soundName, error);
+    return null;
+  }
 }
 
 /**

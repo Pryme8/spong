@@ -37,15 +37,15 @@ export const MAX_ACCUMULATED_TIME = 0.25;
 // ═══════════════════════════════════════════════════════════
 
 /**
- * Character-specific constants
+ * Character-specific constants (LAND movement)
  */
 export const CHARACTER = {
-  /** Movement acceleration (units/s²) */
+  /** Movement acceleration (units/s²) - Tighter, more responsive */
   ACCELERATION: 35.0,
   /** Maximum movement speed (units/s) */
   MAX_SPEED: 8.0,
-  /** Friction/deceleration when no input (units/s²) */
-  FRICTION: 15.0,
+  /** Friction/deceleration when no input (units/s²) - INCREASED for tighter control */
+  FRICTION: 28.0,
   /** Air control multiplier (0.0 = no control, 1.0 = full control) */
   AIR_CONTROL: 0.3,
   /** Jump initial velocity (units/s) */
@@ -56,6 +56,51 @@ export const CHARACTER = {
   HITBOX_HALF: 0.3,
   /** Player capsule radius for player-vs-player collision (units) */
   CAPSULE_RADIUS: 0.5,
+} as const;
+
+/**
+ * Water/swimming-specific constants
+ * These preserve the "frictionless" feel that land movement used to have.
+ */
+export const WATER = {
+  /** Swimming acceleration (units/s²) - Lower than land for floaty feel */
+  ACCELERATION: 20.0,
+  /** Maximum swim speed (units/s) - 2/3 of sprint speed (8.0 * 1.5 * 2/3 = 8.0) */
+  MAX_SPEED: 8.0,
+  /** Maximum sprint-swim speed (units/s) - 4/3 of sprint speed (8.0 * 1.5 * 4/3 = 16.0) */
+  MAX_SPEED_SPRINT: 16.0,
+  /** Water friction/drag when no input (units/s²) - Low for smooth gliding */
+  FRICTION: 12.0,
+  /** Water control (3D movement, so higher than air control) */
+  CONTROL: 0.85,
+  /** Buoyancy force (upward, opposes gravity) (units/s²) - Very subtle for neutral swimming */
+  BUOYANCY: 3.0,
+  /** Maximum breath duration when head underwater (seconds) */
+  MAX_BREATH: 10.0,
+  /** Drowning damage per second when breath = 0 (HP/s) */
+  DROWNING_DAMAGE: 5.0,
+  /** Vertical movement speed when actively diving/surfacing (units/s) */
+  VERTICAL_SWIM_SPEED: 3.0,
+  /** Stamina drain when swimming (stamina/s) */
+  SWIM_STAMINA_DRAIN: 15.0,
+  /** Stamina drain when sprint-swimming (stamina/s) - double normal swimming */
+  SWIM_SPRINT_STAMINA_DRAIN: 30.0,
+} as const;
+
+/**
+ * Stamina system constants
+ */
+export const STAMINA = {
+  /** Maximum stamina */
+  MAX: 100,
+  /** Sprint drain rate on land (stamina/s) */
+  SPRINT_DRAIN: 15.0,
+  /** Jump cost (instant stamina deduction) */
+  JUMP_COST: 12,
+  /** Regeneration rate when grounded (stamina/s) */
+  REGEN_RATE: 10.0,
+  /** Exhaustion recovery rate (stamina/s) - faster recovery when exhausted */
+  EXHAUSTED_REGEN_RATE: 25.0,
 } as const;
 
 /**

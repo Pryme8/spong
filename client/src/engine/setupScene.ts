@@ -67,9 +67,13 @@ export function createGameScene(engine: Engine, sunConfig?: SunConfig): { scene:
   hemiLight.diffuse = hasSun
     ? new Color3(sunConfig.hemiR, sunConfig.hemiG, sunConfig.hemiB)
     : new Color3(0.5, 0.5, 0.7);
-  hemiLight.groundColor = hasSun
-    ? new Color3(sunConfig.groundR, sunConfig.groundG, sunConfig.groundB)
-    : new Color3(0.1, 0.08, 0.15);
+  // Ground color base starts at white and is scaled by sun angle/intensity.
+  const hemiBaseGroundColor = new Color3(1, 1, 1);
+  hemiLight.groundColor = hemiBaseGroundColor.clone();
+  hemiLight.metadata = {
+    ...hemiLight.metadata,
+    baseGroundColor: hemiBaseGroundColor.clone()
+  };
 
   // Directional light for shadows (main light source)
   const dirDirection = hasSun
@@ -82,14 +86,77 @@ export function createGameScene(engine: Engine, sunConfig?: SunConfig): { scene:
     : new Color3(1, 0.95, 0.85);
   
   // Scene ambient
-  scene.ambientColor = hasSun
+  const baseAmbientDay = hasSun
     ? new Color3(sunConfig.ambientR, sunConfig.ambientG, sunConfig.ambientB)
-    : new Color3(0.05, 0.05, 0.08);
+    : new Color3(0.18, 0.18, 0.2);
+  const baseAmbientNight = new Color3(0.02, 0.03, 0.05);
+  scene.ambientColor = baseAmbientDay.clone();
+  scene.metadata = {
+    ...scene.metadata,
+    ambientParams: {
+      tintStrength: 0.46,
+      minIntensity: 0.06,
+      maxIntensity: 0.85
+    }
+  };
   
   // Configure shadow frustum for better quality
   dirLight.shadowOrthoScale = 0.2;
   dirLight.autoUpdateExtends = true;
   dirLight.autoCalcShadowZBounds = true;
+
+  const lastAmbient = new Color3(scene.ambientColor.r, scene.ambientColor.g, scene.ambientColor.b);
+
+  // Scale hemi ground color by sun angle and main light intensity.
+  scene.onBeforeRenderObservable.add(() => {
+    const dir = dirLight.direction;
+    const len = dir.length();
+    const normY = len > 0.0001 ? dir.y / len : dir.y;
+    const sunUp = Math.max(0, -normY);
+    const factor = Math.min(1, Math.max(0, sunUp * dirLight.intensity * 1.45));
+    const baseColor = (hemiLight.metadata as { baseGroundColor?: Color3 } | undefined)?.baseGroundColor ?? new Color3(1, 1, 1);
+
+    hemiLight.groundColor.r = baseColor.r * factor;
+    hemiLight.groundColor.g = baseColor.g * factor;
+    hemiLight.groundColor.b = baseColor.b * factor;
+
+    // Ambient color follows sun elevation and light color.
+    const sunFactor = Math.min(1, Math.max(0, Math.pow(sunUp, 1.2)));
+    const ambientBaseR = baseAmbientNight.r * (1 - sunFactor) + baseAmbientDay.r * sunFactor;
+    const ambientBaseG = baseAmbientNight.g * (1 - sunFactor) + baseAmbientDay.g * sunFactor;
+    const ambientBaseB = baseAmbientNight.b * (1 - sunFactor) + baseAmbientDay.b * sunFactor;
+    const ambientParams = (scene.metadata as { ambientParams?: { tintStrength: number; minIntensity: number; maxIntensity: number } } | undefined)?.ambientParams;
+    const tintFactor = (ambientParams?.tintStrength ?? 0.35) * sunFactor;
+    const tintedR = ambientBaseR * (1 - tintFactor) + dirLight.diffuse.r * tintFactor;
+    const tintedG = ambientBaseG * (1 - tintFactor) + dirLight.diffuse.g * tintFactor;
+    const tintedB = ambientBaseB * (1 - tintFactor) + dirLight.diffuse.b * tintFactor;
+    const minIntensity = ambientParams?.minIntensity ?? 0.25;
+    const maxIntensity = ambientParams?.maxIntensity ?? 1.0;
+    const ambientIntensity = minIntensity + (maxIntensity - minIntensity) * sunFactor;
+
+    scene.ambientColor.r = tintedR * ambientIntensity;
+    scene.ambientColor.g = tintedG * ambientIntensity;
+    scene.ambientColor.b = tintedB * ambientIntensity;
+
+    const delta = Math.abs(scene.ambientColor.r - lastAmbient.r)
+      + Math.abs(scene.ambientColor.g - lastAmbient.g)
+      + Math.abs(scene.ambientColor.b - lastAmbient.b);
+
+    if (delta > 0.0005) {
+      lastAmbient.r = scene.ambientColor.r;
+      lastAmbient.g = scene.ambientColor.g;
+      lastAmbient.b = scene.ambientColor.b;
+
+      for (const material of scene.materials) {
+        const mat = material as { ambientColor?: Color3 };
+        if (mat.ambientColor) {
+          mat.ambientColor.r = lastAmbient.r;
+          mat.ambientColor.g = lastAmbient.g;
+          mat.ambientColor.b = lastAmbient.b;
+        }
+      }
+    }
+  });
 
   // Initialize shadow manager singleton
   const shadowManager = ShadowManager.initialize(dirLight);

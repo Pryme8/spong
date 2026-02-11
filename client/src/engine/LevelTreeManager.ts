@@ -32,6 +32,9 @@ export class LevelTreeManager {
   
   /** Invisible trigger meshes for each tree instance */
   private leafTriggerMeshes: Array<{ mesh: Mesh; treeIndex: number }> = [];
+  
+  /** Debug visualization meshes for wood collision (optional) */
+  private woodCollisionDebugMeshes: Mesh[] = [];
 
   constructor(scene: Scene, levelSeed: string) {
     this.scene = scene;
@@ -388,12 +391,76 @@ export class LevelTreeManager {
   }
 
   /**
+   * Toggle leaf collision mesh debug visualization.
+   * Shows/hides wireframes of the leaf trigger volumes.
+   * Call this from browser console: window.toggleLeafDebug()
+   */
+  toggleLeafCollisionDebug(visible: boolean): void {
+    for (const { mesh } of this.leafTriggerMeshes) {
+      mesh.isVisible = visible;
+      
+      if (visible) {
+        // Show as green wireframe
+        const mat = new StandardMaterial(`leaf_debug_${mesh.name}`, this.scene);
+        mat.wireframe = true;
+        mat.emissiveColor = new Color3(0, 1, 0); // Bright green
+        mesh.material = mat;
+      } else {
+        mesh.material = null;
+      }
+    }
+    
+    console.log(`[LevelTreeManager] Leaf collision debug: ${visible ? 'ENABLED' : 'DISABLED'} - ${this.leafTriggerMeshes.length} trigger meshes`);
+  }
+
+  /**
+   * Toggle wood collision mesh debug visualization.
+   * Shows the actual collision meshes that block player movement (trunk).
+   * Call from console: window.toggleWoodDebug()
+   */
+  toggleWoodCollisionDebug(visible: boolean): void {
+    if (visible && this.woodCollisionDebugMeshes.length === 0) {
+      // Create debug meshes from collision data
+      for (let i = 0; i < this.colliderMeshes.length; i++) {
+        const colliderData = this.colliderMeshes[i];
+        const mesh = new Mesh(`tree_wood_collision_debug_${i}`, this.scene);
+        const vd = new VertexData();
+        
+        vd.positions = Array.from(colliderData.mesh.vertices);
+        vd.indices = Array.from(colliderData.mesh.indices);
+        vd.applyToMesh(mesh);
+        
+        // Apply same transform as collision
+        mesh.position.set(colliderData.transform.posX, colliderData.transform.posY, colliderData.transform.posZ);
+        mesh.rotation.y = colliderData.transform.rotY;
+        mesh.scaling.setAll(colliderData.transform.scale);
+        
+        // Red wireframe
+        const mat = new StandardMaterial(`wood_collision_debug_mat_${i}`, this.scene);
+        mat.wireframe = true;
+        mat.emissiveColor = new Color3(1, 0, 0); // Bright red
+        mesh.material = mat;
+        
+        this.woodCollisionDebugMeshes.push(mesh);
+      }
+      console.log(`[LevelTreeManager] Wood collision debug: ENABLED - Created ${this.woodCollisionDebugMeshes.length} debug meshes`);
+    } else if (!visible) {
+      // Dispose debug meshes
+      for (const mesh of this.woodCollisionDebugMeshes) {
+        mesh.dispose();
+      }
+      this.woodCollisionDebugMeshes = [];
+      console.log(`[LevelTreeManager] Wood collision debug: DISABLED`);
+    }
+  }
+
+  /**
    * Check if camera position is inside any tree's leaf trigger volume.
    * Returns the tree index if inside, -1 if outside all trees.
    * Optimized with early distance check before AABB test.
    */
   checkCameraInLeaves(cameraX: number, cameraY: number, cameraZ: number): number {
-    const triggerMargin = 0.5;
+    const triggerMargin = -0.1;
     const maxCheckDistance = 20; // Only check trees within 20 units
     const maxCheckDistanceSq = maxCheckDistance * maxCheckDistance;
 

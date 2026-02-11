@@ -90,6 +90,26 @@
                     </v-btn>
                   </v-card-text>
                 </v-card>
+
+                <!-- Custom Settings Display -->
+                <v-card variant="outlined" class="mt-4" v-if="customSettings.length > 0">
+                  <v-card-title class="text-h6">Custom Settings</v-card-title>
+                  <v-divider></v-divider>
+                  <v-card-text>
+                    <v-list density="compact">
+                      <v-list-item
+                        v-for="setting in customSettings"
+                        :key="setting.name"
+                      >
+                        <template v-slot:prepend>
+                          <v-icon :icon="setting.icon" size="small" color="primary"></v-icon>
+                        </template>
+                        <v-list-item-title>{{ setting.label }}</v-list-item-title>
+                        <v-list-item-subtitle>{{ setting.value }}</v-list-item-subtitle>
+                      </v-list-item>
+                    </v-list>
+                  </v-card-text>
+                </v-card>
               </v-col>
             </v-row>
           </v-card-text>
@@ -221,6 +241,10 @@
             <v-icon start>mdi-earth</v-icon>
             World
           </v-tab>
+          <v-tab value="damage">
+            <v-icon start>mdi-crosshairs</v-icon>
+            Damage
+          </v-tab>
           <v-tab value="weapons">
             <v-icon start>mdi-pistol</v-icon>
             Weapons
@@ -248,6 +272,67 @@
                   clearable
                   @input="onConfigChange"
                 ></v-text-field>
+              </div>
+            </v-window-item>
+
+            <!-- Damage Settings Tab -->
+            <v-window-item value="damage">
+              <div class="pa-4">
+                <div class="mb-6">
+                  <div class="text-subtitle-1 font-weight-bold mb-2">Headshot Damage Multiplier</div>
+                  <v-slider
+                    v-model="configHeadshotDmg"
+                    min="1"
+                    max="5"
+                    step="0.1"
+                    thumb-label
+                    color="error"
+                    @update:modelValue="onConfigChange"
+                  >
+                    <template v-slot:append>
+                      <v-text-field
+                        v-model.number="configHeadshotDmg"
+                        type="number"
+                        style="width: 80px"
+                        density="compact"
+                        variant="outlined"
+                        hide-details
+                        @input="onConfigChange"
+                      ></v-text-field>
+                    </template>
+                  </v-slider>
+                  <div class="text-caption text-medium-emphasis mt-1">
+                    Default: 2.0x (double damage)
+                  </div>
+                </div>
+
+                <div class="mb-6">
+                  <div class="text-subtitle-1 font-weight-bold mb-2">Body Shot Damage Multiplier</div>
+                  <v-slider
+                    v-model="configNormalDmg"
+                    min="0.1"
+                    max="3"
+                    step="0.1"
+                    thumb-label
+                    color="primary"
+                    @update:modelValue="onConfigChange"
+                  >
+                    <template v-slot:append>
+                      <v-text-field
+                        v-model.number="configNormalDmg"
+                        type="number"
+                        style="width: 80px"
+                        density="compact"
+                        variant="outlined"
+                        hide-details
+                        @input="onConfigChange"
+                      ></v-text-field>
+                    </template>
+                  </v-slider>
+                  <div class="text-caption text-medium-emphasis mt-1">
+                    Default: 1.0x (normal damage)
+                  </div>
+                </div>
               </div>
             </v-window-item>
 
@@ -325,6 +410,8 @@ const chatInput = ref('');
 const chatContainer = ref<HTMLElement | null>(null);
 const configSeed = ref('');
 const configPistolCount = ref(30);
+const configHeadshotDmg = ref(2.0);
+const configNormalDmg = ref(1.0);
 const showConfigDialog = ref(false);
 const configTab = ref('world');
 const showStartCountdown = ref(false);
@@ -359,6 +446,53 @@ const isOwner = computed(() => {
   return myPlayer?.id === ownerId.value;
 });
 
+// Track custom settings (non-default values)
+const customSettings = computed(() => {
+  const settings: Array<{ name: string; label: string; value: string; icon: string }> = [];
+  
+  // Check seed (custom if set)
+  if (configSeed.value && configSeed.value.trim()) {
+    settings.push({
+      name: 'seed',
+      label: 'Custom Seed',
+      value: configSeed.value,
+      icon: 'mdi-earth'
+    });
+  }
+  
+  // Check pistol count (default: 30)
+  if (configPistolCount.value !== 30) {
+    settings.push({
+      name: 'pistolCount',
+      label: 'Pistol Count',
+      value: `${configPistolCount.value}`,
+      icon: 'mdi-pistol'
+    });
+  }
+  
+  // Check headshot damage (default: 2.0)
+  if (configHeadshotDmg.value !== 2.0) {
+    settings.push({
+      name: 'headshotDmg',
+      label: 'Headshot Damage',
+      value: `${configHeadshotDmg.value}x`,
+      icon: 'mdi-crosshairs'
+    });
+  }
+  
+  // Check normal damage (default: 1.0)
+  if (configNormalDmg.value !== 1.0) {
+    settings.push({
+      name: 'normalDmg',
+      label: 'Body Shot Damage',
+      value: `${configNormalDmg.value}x`,
+      icon: 'mdi-bullseye'
+    });
+  }
+  
+  return settings;
+});
+
 function sendChatMessage() {
   if (!chatInput.value.trim()) return;
   session.sendChat(chatInput.value);
@@ -369,7 +503,9 @@ function onConfigChange() {
   if (!isOwner.value) return;
   session.updateConfig({ 
     seed: configSeed.value || undefined,
-    pistolCount: configPistolCount.value
+    pistolCount: configPistolCount.value,
+    headshotDmg: configHeadshotDmg.value,
+    normalDmg: configNormalDmg.value
   });
 }
 
@@ -411,6 +547,12 @@ watch(lobbyConfig, (config) => {
   }
   if (config.pistolCount !== undefined && config.pistolCount !== configPistolCount.value) {
     configPistolCount.value = config.pistolCount;
+  }
+  if (config.headshotDmg !== undefined && config.headshotDmg !== configHeadshotDmg.value) {
+    configHeadshotDmg.value = config.headshotDmg;
+  }
+  if (config.normalDmg !== undefined && config.normalDmg !== configNormalDmg.value) {
+    configNormalDmg.value = config.normalDmg;
   }
 });
 
