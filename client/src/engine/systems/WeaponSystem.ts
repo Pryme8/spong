@@ -206,6 +206,7 @@ export class WeaponSystem {
       (mesh) => {
         if (mesh.name.startsWith('proj_')) return false;
         if (mesh.name === `cube_${myTransform.entityId}`) return false;
+        if (mesh.name === `body_${myTransform.entityId}`) return false;
         if (mesh.name === `head_${myTransform.entityId}`) return false;
         if (mesh.name.startsWith('item_')) return false;
         if (mesh.name === 'basePlayerCube') return false;
@@ -214,8 +215,14 @@ export class WeaponSystem {
     );
 
     if (!pick || !pick.hit || !pick.pickedPoint) {
+      console.log('[WeaponSystem] screen center ray: no hit');
       return false;
     }
+    console.log('[WeaponSystem] screen center ray hit:', {
+      mesh: pick.pickedMesh?.name,
+      point: pick.pickedPoint.asArray(),
+      distance: pick.distance
+    });
 
     // Get projectile spawn position (barrel tip if available, otherwise player center)
     const state = playerState;

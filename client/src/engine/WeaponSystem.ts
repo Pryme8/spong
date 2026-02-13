@@ -196,6 +196,7 @@ export class WeaponSystem {
         if (mesh.name.startsWith('proj_')) return false;
         // Skip our own player cube
         if (mesh.name === `cube_${myTransform.entityId}`) return false;
+        if (mesh.name === `body_${myTransform.entityId}`) return false;
         // Skip our player's head mesh
         if (mesh.name === `head_${myTransform.entityId}`) return false;
         // Skip item meshes
