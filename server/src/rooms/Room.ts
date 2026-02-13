@@ -410,6 +410,21 @@ export class Room {
     this.itemSystem.handleItemTossLand(playerEntity, landX, landY, landZ);
   }
 
+  /** Relay footstep from client to all others for spatial audio. */
+  handleFootstepEvent(connectionId: string, data: { variant: number; posX: number; posY: number; posZ: number; volume: number }): void {
+    const player = this.players.get(connectionId);
+    if (!player) return;
+    this.broadcastLow(Opcode.FootstepSound, {
+      entityId: player.entityId,
+      variant: data.variant,
+      posX: data.posX,
+      posY: data.posY,
+      posZ: data.posZ,
+      volume: data.volume,
+      excludeSender: true,
+    });
+  }
+
   getPlayer(connectionId: string): Player | undefined {
     return this.players.get(connectionId);
   }

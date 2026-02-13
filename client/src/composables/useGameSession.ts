@@ -509,19 +509,20 @@ export function useGameSession() {
         latency.value = sum / latencySamples.length;
       }
       
-      // Update footsteps for remote players ONLY (never for local player)
-      if (data.entityId !== myEntityId.value && myEntityId.value !== null && footstepManager) {
-        footstepManager.updatePlayer(
-          data.entityId,
-          data.position.x, data.position.y, data.position.z,
-          data.velocity.x, data.velocity.y, data.velocity.z,
-          true, // isGrounded - TODO: sync this from server if needed
-          data.isInWater || false,
-          false // isLocalPlayer - this is always a remote player
-        );
+    });
+
+    networkClient.onLowFrequency(Opcode.FootstepSound, (payload: any) => {
+      const shouldPlay = !payload.excludeSender || payload.entityId !== myEntityId.value;
+      if (shouldPlay && payload.entityId !== myEntityId.value) {
+        const soundName = FootstepManager.getVariantName(payload.variant);
+        playSFX3D(soundName, payload.posX, payload.posY, payload.posZ, payload.volume);
       }
     });
-    
+
+    footstepManager?.setOnStep((variant, posX, posY, posZ, volume) => {
+      if (networkClient) networkClient.sendLow(Opcode.FootstepEvent, { variant, posX, posY, posZ, volume });
+    });
+
     // Handle server projectile events
     networkClient.onProjectileSpawn((data) => {
       projectileManager?.spawnFromServer(data);
@@ -1334,22 +1335,21 @@ export function useGameSession() {
               playerBreathRemaining.value = state.breathRemaining;
               playerIsUnderwater.value = state.isHeadUnderwater;
               playerIsInWater.value = state.isInWater;
-              
-              // Update local player footsteps
-              if (footstepManager && myEntityId.value !== null) {
-                footstepManager.updatePlayer(
-                  myEntityId.value,
-                  state.posX, state.posY, state.posZ,
-                  state.velX, state.velY, state.velZ,
-                  state.isGrounded,
-                  state.isInWater,
-                  true // isLocalPlayer
-                );
-              }
             }
           },
           // Per-frame updates (timers, UI, etc.)
           onVariableTick: (deltaTime) => {
+            if (footstepManager && myEntityId.value !== null && myTransform.value) {
+              const state = myTransform.value.getState();
+              footstepManager.updateLocal(
+                myEntityId.value,
+                state.posX, state.posY, state.posZ,
+                state.velX, state.velY, state.velZ,
+                state.isGrounded,
+                state.isInWater,
+                deltaTime
+              );
+            }
             damagePopupSystem?.update(deltaTime);
             // Update blood splatter timer
             if (bloodSplatterTimer.value > 0) {

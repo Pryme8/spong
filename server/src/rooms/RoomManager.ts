@@ -52,6 +52,10 @@ export class RoomManager {
     this.connectionHandler.registerMessageHandler(Opcode.ItemTossLand, (conn, data) => {
       this.handleItemTossLand(conn, data);
     });
+
+    this.connectionHandler.registerMessageHandler(Opcode.FootstepEvent, (conn, data) => {
+      this.handleFootstepEvent(conn, data);
+    });
     
     // Register binary handlers
     this.connectionHandler.registerBinaryHandler(Opcode.PlayerInput, (conn, buffer) => {
@@ -264,6 +268,15 @@ export class RoomManager {
     if (!room) return;
 
     room.handleItemTossLand(conn.id, data.posX, data.posY, data.posZ);
+  }
+
+  private handleFootstepEvent(conn: ConnectionState, data: any) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleFootstepEvent(conn.id, data);
   }
 
   private handleBlockPlace(conn: ConnectionState, data: BlockPlaceMessage) {

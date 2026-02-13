@@ -133,6 +133,8 @@ export function useLobbySession() {
       Opcode.ItemUpdate,
       Opcode.ItemPickup,
       Opcode.ItemDropSound,
+      Opcode.FootstepEvent,
+      Opcode.FootstepSound,
       Opcode.ReloadRequest,
       Opcode.ExplosionSpawn,
       Opcode.StaminaUpdate,

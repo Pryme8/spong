@@ -30,6 +30,7 @@ export enum Opcode {
   ItemTossLand = 0x34,
   ReloadRequest = 0x35,
   ReloadStarted = 0x3E,
+  FootstepEvent = 0x3F,
   ItemDropSound = 0x3D,
   ExplosionSpawn = 0x36,
   StaminaUpdate = 0x37,
@@ -41,6 +42,7 @@ export enum Opcode {
   TreeSpawn = 0x40,
   RockSpawn = 0x41,
   BushSpawn = 0x42,
+  FootstepSound = 0x43,
   DummySpawn = 0x80,
   BlockPlace = 0x50,
   BlockRemove = 0x51,
@@ -264,6 +266,26 @@ export interface ItemDropSoundMessage {
   posY: number;      // drop position Y
   posZ: number;      // drop position Z
   excludeSender?: boolean; // If true, sender should not play spatial version (they play local)
+}
+
+/** Client -> Server: local player played a footstep (relay to others for spatial audio). */
+export interface FootstepEventMessage {
+  variant: number;   // 0-3 for footstep_a .. footstep_d
+  posX: number;
+  posY: number;
+  posZ: number;
+  volume: number;    // 0-1
+}
+
+/** Server -> Clients: a player stepped (for remote spatial audio). */
+export interface FootstepSoundMessage {
+  entityId: number;
+  variant: number;
+  posX: number;
+  posY: number;
+  posZ: number;
+  volume: number;
+  excludeSender?: boolean;
 }
 
 /** Server -> Clients: all trees in the level (sent once on join). */
