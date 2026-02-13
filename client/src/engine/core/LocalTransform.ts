@@ -193,6 +193,7 @@ export class LocalTransform {
   /** Called when player cube instance is attached. Hides default body only; keeps head visible and repositions it to sit on the cube (cube top at 0.5, head center at 0.8). */
   registerPlayerCube(cube: Mesh): void {
     this.bodyNode.setEnabled(false);
+    this.bodyNode.position.y = -1000000; // Keep out of raycast range
     this.headNode.position.y = 0.8; // Cube is 1.0 tall, top at 0.5; head 0.6 tall → center at 0.5 + 0.3
     if (this.hasShadows) {
       const sm = ShadowManager.getInstance();

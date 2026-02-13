@@ -233,9 +233,10 @@ function createBasePlayerCube(scene: Scene): Mesh {
   // Enable shadow receiving
   box.receiveShadows = true;
   
-  // Hide the base cube (it's just a template)
+  // Hide the base cube (it's just a template); move far away so raycasts don't hit it
   box.isVisible = false;
-  
+  box.position.y = -1000000;
+
   return box;
 }
 

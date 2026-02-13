@@ -339,6 +339,23 @@ export class ProjectileSystem {
             bx, headCenterY, bz,
             headHalfSize
           );
+          const bodyResult = rayVsAABB(
+            stepStartX, stepStartY, stepStartZ,
+            rayDirNormX, rayDirNormY, rayDirNormZ,
+            rayLength,
+            bx, bodyCenterY, bz,
+            PLAYER_HITBOX_HALF
+          );
+          console.log('[raycast]', {
+            targetEntityId: targetEntity.id,
+            rayOrigin: [stepStartX, stepStartY, stepStartZ],
+            rayDir: [rayDirNormX, rayDirNormY, rayDirNormZ],
+            rayLength,
+            headCenter: [bx, headCenterY, bz],
+            bodyCenter: [bx, bodyCenterY, bz],
+            head: { hit: headResult.hit, distance: headResult.distance },
+            body: { hit: bodyResult.hit, distance: bodyResult.distance }
+          });
           if (headResult.hit) {
             hits.push({
               kind: 'entity',
@@ -352,13 +369,6 @@ export class ProjectileSystem {
             break;
           }
 
-          const bodyResult = rayVsAABB(
-            stepStartX, stepStartY, stepStartZ,
-            rayDirNormX, rayDirNormY, rayDirNormZ,
-            rayLength,
-            bx, bodyCenterY, bz,
-            PLAYER_HITBOX_HALF
-          );
           if (bodyResult.hit) {
             hits.push({
               kind: 'entity',

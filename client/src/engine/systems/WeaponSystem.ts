@@ -214,6 +214,15 @@ export class WeaponSystem {
       }
     );
 
+    console.log('[raycast] center-of-screen', {
+      rayOrigin: ray.origin ? [ray.origin.x, ray.origin.y, ray.origin.z] : null,
+      rayDirection: ray.direction ? [ray.direction.x, ray.direction.y, ray.direction.z] : null,
+      hit: pick?.hit ?? false,
+      pickedPoint: pick?.pickedPoint ? [pick.pickedPoint.x, pick.pickedPoint.y, pick.pickedPoint.z] : null,
+      pickedMesh: pick?.pickedMesh?.name ?? null,
+      distance: pick?.distance ?? null
+    });
+
     if (!pick || !pick.hit || !pick.pickedPoint) {
       return false;
     }

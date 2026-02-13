@@ -51,6 +51,7 @@ export class ProjectileManager {
     }, scene);
     this.baseMesh.material = this.material;
     this.baseMesh.isVisible = false; // Hide the base mesh
+    this.baseMesh.position.y = -1000000; // Keep out of raycast range
   }
 
   /** Set transform sync for collision checks. */

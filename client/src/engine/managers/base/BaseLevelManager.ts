@@ -33,6 +33,7 @@ export abstract class BaseLevelManager<TVariation, TInstance> {
       
       const mesh = this.createMeshFromVariation(this.variations[i]);
       mesh.setEnabled(false); // Base mesh is not visible
+      mesh.position.y = -1000000; // Keep out of raycast range
       this.variationMeshes.push(mesh);
     }
   }

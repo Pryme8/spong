@@ -79,6 +79,7 @@ export class LevelBushManager {
       bushMesh.material = this.bushMaterial;
       bushMesh.receiveShadows = true;
       bushMesh.setEnabled(false); // Base mesh is hidden, only instances are visible
+      bushMesh.position.y = -1000000; // Keep out of raycast range
       this.variationMeshes.push(bushMesh);
       
       // Pre-compute the local-space AABB for this variation's collider

@@ -41,9 +41,10 @@ export class MeshPrimitives {
     boxMaterial.specularColor = new Color3(0.5, 0.5, 0.5); // Default shine
     this.masterCube.material = boxMaterial;
     
-    // Make master invisible (only instances are visible)
+    // Make master invisible (only instances are visible); move off raycast range
     this.masterCube.isVisible = false;
-    
+    this.masterCube.position.y = -1000000;
+
     // Enable instancing for color
     this.masterCube.registerInstancedBuffer('color', 4); // RGBA diffuse color
     
@@ -59,9 +60,10 @@ export class MeshPrimitives {
     sphereMaterial.specularColor = new Color3(0.5, 0.5, 0.5); // Default shine
     this.masterSphere.material = sphereMaterial;
     
-    // Make master invisible
+    // Make master invisible; move off raycast range
     this.masterSphere.isVisible = false;
-    
+    this.masterSphere.position.y = -1000000;
+
     // Enable instancing for color
     this.masterSphere.registerInstancedBuffer('color', 4); // RGBA diffuse color
     
@@ -78,9 +80,10 @@ export class MeshPrimitives {
     cylinderMaterial.specularColor = new Color3(0.5, 0.5, 0.5); // Default shine
     this.masterCylinder.material = cylinderMaterial;
     
-    // Make master invisible
+    // Make master invisible; move off raycast range
     this.masterCylinder.isVisible = false;
-    
+    this.masterCylinder.position.y = -1000000;
+
     // Enable instancing for color
     this.masterCylinder.registerInstancedBuffer('color', 4); // RGBA diffuse color
   }

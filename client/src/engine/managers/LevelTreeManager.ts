@@ -102,11 +102,13 @@ export class LevelTreeManager {
       
       woodMesh.name = `tree_wood_${variation.id}`;
       woodMesh.setEnabled(false); // Base mesh is hidden, only instances are visible
+      woodMesh.position.y = -1000000; // Keep out of raycast range
       this.variationWoodMeshes.push(woodMesh);
-      
+
       if (leafMesh) {
         leafMesh.name = `tree_leaf_${variation.id}`;
         leafMesh.setEnabled(false);
+        leafMesh.position.y = -1000000;
         this.variationLeafMeshes.push(leafMesh);
       } else {
         this.variationLeafMeshes.push(null as any); // Placeholder for trees with no leaves

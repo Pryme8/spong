@@ -130,6 +130,7 @@ export class BuildSystem {
     this.raycastLine.color = new Color3(0, 1, 1); // Cyan for lines mesh
     this.raycastLine.isPickable = false;
     this.raycastLine.isVisible = false; // Hidden by default
+    this.raycastLine.position.y = -1000000; // Keep out of raycast range
   }
 
   /**
@@ -143,6 +144,7 @@ export class BuildSystem {
       points,
       instance: this.raycastLine
     }, this.scene);
+    this.raycastLine.position.set(0, 0, 0);
     this.raycastLine.isVisible = true;
   }
 
@@ -152,6 +154,7 @@ export class BuildSystem {
   private hideRaycastLine(): void {
     if (this.raycastLine) {
       this.raycastLine.isVisible = false;
+      this.raycastLine.position.y = -1000000;
     }
   }
 
@@ -177,6 +180,7 @@ export class BuildSystem {
     this.previewGridPlane.isPickable = false;
     this.previewGridPlane.parent = this.previewGridRoot;
     this.previewGridPlane.isVisible = false;
+    this.previewGridPlane.position.y = -1000000; // Keep out of raycast range
   }
 
   /**
@@ -196,6 +200,7 @@ export class BuildSystem {
     }
 
     if (this.previewGridPlane) {
+      this.previewGridPlane.position.y = 0;
       this.previewGridPlane.isVisible = true;
     }
   }
@@ -206,6 +211,7 @@ export class BuildSystem {
   private hidePreviewGrid(): void {
     if (this.previewGridPlane) {
       this.previewGridPlane.isVisible = false;
+      this.previewGridPlane.position.y = -1000000;
     }
   }
 

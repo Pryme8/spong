@@ -341,12 +341,16 @@ export class BuildGrid {
     // Skip greedy meshing for now - just keep the block instances
     // TODO: Add greedy meshing back later for performance optimization
     
-    // 1. Hide boundary, grid planes, and preview
+    // 1. Hide boundary, grid planes, and preview; move off raycast range
     this.boundaryCube.isVisible = false;
+    this.boundaryCube.position.y = -1000000;
     this.gridPlane.isVisible = false;
+    this.gridPlane.position.y = -1000000;
     this.gridRaycastPlane.isPickable = false; // Disable raycasting on grid after finalization
+    this.gridRaycastPlane.position.y = -1000000;
     if (this.previewBlock) {
       this.previewBlock.isVisible = false;
+      this.previewBlock.position.y = -1000000;
     }
 
     // 2. Mark as finalized
@@ -575,8 +579,13 @@ export class BuildGrid {
    * Show the selection cube with a specific color.
    */
   showSelectionCube(state: 'hover' | 'demolish'): void {
+    this.boundaryCube.position.y = 0;
+    this.selectionCube.position.y = 0;
+    this.gridRaycastPlane.position.y = 0;
+    this.gridPlane.position.y = 0;
+    if (this.previewBlock) this.previewBlock.position.y = 0;
     this.selectionCube.isVisible = true;
-    
+
     if (state === 'hover') {
       // Semi-transparent yellow for hover
       this.selectionCubeMaterial.emissiveColor = new Color3(1, 1, 0); // Yellow
@@ -593,6 +602,11 @@ export class BuildGrid {
    */
   hideSelectionCube(): void {
     this.selectionCube.isVisible = false;
+    this.boundaryCube.position.y = -1000000;
+    this.selectionCube.position.y = -1000000;
+    this.gridRaycastPlane.position.y = -1000000;
+    this.gridPlane.position.y = -1000000;
+    if (this.previewBlock) this.previewBlock.position.y = -1000000;
   }
 
   /**

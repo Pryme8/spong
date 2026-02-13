@@ -51,6 +51,7 @@ export class LevelRockManager {
 
       mesh.name = `rock_${variation.id}`;
       mesh.setEnabled(false);
+      mesh.position.y = -1000000; // Keep out of raycast range
       this.variationMeshes.push(mesh);
 
       const bounds = variation.fullMesh.bounds;
