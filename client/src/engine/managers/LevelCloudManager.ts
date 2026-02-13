@@ -45,8 +45,6 @@ export class LevelCloudManager {
   }
 
   async initialize(): Promise<void> {
-    console.log(`[CloudManager] Generating ${CLOUD_COUNT} cloud variations...`);
-
     for (let i = 0; i < CLOUD_COUNT; i++) {
       if (i > 0) await new Promise(r => setTimeout(r, 0));
 
@@ -56,8 +54,6 @@ export class LevelCloudManager {
       const baseMesh = this.buildMesh(quads, `cloud_base_${i}`);
       this.baseMeshes.push(baseMesh);
     }
-
-    console.log(`[CloudManager] Created ${this.baseMeshes.length} variations, placing thin instances...`);
     this.placeInstances();
   }
 
@@ -118,8 +114,6 @@ export class LevelCloudManager {
       // Register the base mesh with the post-process (thin instances render with it)
       this.postProcess.addCloudMesh(base);
     }
-
-    console.log(`[CloudManager] Placed ${totalInstances} thin instances across ${this.baseMeshes.length} meshes`);
   }
 
   private buildMesh(quads: CloudQuad[], name: string): Mesh {
@@ -193,6 +187,5 @@ export class LevelCloudManager {
     this.cloudMaterial.dispose();
 
     this.baseMeshes = [];
-    console.log('[CloudManager] Disposed');
   }
 }

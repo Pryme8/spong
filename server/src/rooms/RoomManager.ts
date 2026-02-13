@@ -112,7 +112,7 @@ export class RoomManager {
     this.connectionHandler.registerMessageHandler(Opcode.ClientReady, (conn, data) => {
       this.handleClientReady(conn, data);
     });
-    
+
     // Register disconnect handler
     this.connectionHandler.registerDisconnectHandler((conn) => {
       this.handleDisconnect(conn);
@@ -158,8 +158,6 @@ export class RoomManager {
         this.connectionHandler.sendLow(c, Opcode.PlayerJoined, joinedMsg);
       });
     }
-
-    console.log(`Connection ${conn.id} joined room ${roomId}`);
   }
 
   private handleRoomLeave(conn: ConnectionState, data: RoomLeaveMessage) {
@@ -190,11 +188,9 @@ export class RoomManager {
       // During loading phase, the lobby connection disconnects and GameView reconnects
       if (room.getPlayerCount() === 0) {
         if (room.isGameActive()) {
-          console.log(`Room ${roomId} kept alive (game active, waiting for GameView reconnect)`);
         } else {
           room.dispose();
           this.rooms.delete(roomId);
-          console.log(`Room ${roomId} removed (empty)`);
         }
       }
     }
@@ -271,16 +267,12 @@ export class RoomManager {
   }
 
   private handleBlockPlace(conn: ConnectionState, data: BlockPlaceMessage) {
-    console.log(`[RoomManager] handleBlockPlace - conn: ${conn.id}, roomId: ${conn.roomId}, entityId: ${conn.entityId}, data:`, data);
-    
     if (!conn.roomId || conn.entityId === undefined) {
-      console.warn('[RoomManager] BlockPlace - no room or entity ID');
       return;
     }
 
     const room = this.rooms.get(conn.roomId);
     if (!room) {
-      console.warn('[RoomManager] BlockPlace - room not found:', conn.roomId);
       return;
     }
 
@@ -298,13 +290,11 @@ export class RoomManager {
 
   private handleBuildingCreate(conn: ConnectionState, data: BuildingCreateMessage) {
     if (!conn.roomId || conn.entityId === undefined) {
-      console.warn('[RoomManager] BuildingCreate - no room or entity ID');
       return;
     }
 
     const room = this.rooms.get(conn.roomId);
     if (!room) {
-      console.warn('[RoomManager] BuildingCreate - room not found:', conn.roomId);
       return;
     }
 
@@ -342,18 +332,13 @@ export class RoomManager {
           room.getAllConnections().forEach(c => {
             this.connectionHandler.sendLow(c, Opcode.PlayerLeft, leftMsg);
           });
-
-          console.log(`Player ${conn.id} disconnected from room ${conn.roomId}`);
-
           // Remove room if empty, but NOT if the game is active (loading/playing)
           // During loading phase, the lobby connection disconnects and GameView reconnects
           if (room.getPlayerCount() === 0) {
             if (room.isGameActive()) {
-              console.log(`Room ${conn.roomId} kept alive (game active, waiting for GameView reconnect)`);
             } else {
               room.dispose();
               this.rooms.delete(conn.roomId);
-              console.log(`Room ${conn.roomId} removed (empty)`);
             }
           }
         }

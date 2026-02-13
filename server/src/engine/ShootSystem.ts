@@ -8,6 +8,7 @@ import {
   Opcode,
   getCurrentAccuracy,
   getBloomIncrement,
+  getBloomRange,
   type PlayerComponent,
   type CollectedComponent,
   type ShootableComponent,
@@ -54,25 +55,21 @@ export class ShootSystem {
   ): ProjectileSpawnData | ProjectileSpawnData[] | null {
     const player = this.getPlayer(connectionId);
     if (!player) {
-      console.log('[Shoot] No player found for connection');
       return null;
     }
 
     const playerEntity = this.world.getEntity(player.entityId);
     if (!playerEntity) {
-      console.log('[Shoot] No player entity found');
       return null;
     }
 
     const pc = playerEntity.get<PlayerComponent>(COMP_PLAYER);
     if (!pc) {
-      console.log('[Shoot] No player component');
       return null;
     }
 
     const collected = playerEntity.get<CollectedComponent>(COMP_COLLECTED);
     if (!collected || collected.items.length === 0) {
-      console.log('[Shoot] No weapon in collection');
       return null;
     }
 
@@ -83,7 +80,6 @@ export class ShootSystem {
     const ammo = playerEntity.get<AmmoComponent>(COMP_AMMO);
 
     if (!shootable || !ammo) {
-      console.log('[Shoot] Missing shootable or ammo component');
       return null;
     }
 
@@ -143,7 +139,8 @@ export class ShootSystem {
     });
 
     const bloomIncrement = getBloomIncrement(weaponType as WeaponType);
-    shootable.currentBloom += bloomIncrement;
+    const maxBloom = getBloomRange(weaponType as WeaponType);
+    shootable.currentBloom = Math.min(maxBloom, shootable.currentBloom + bloomIncrement);
 
     const spawnDataArray = Array.isArray(result) ? result : [result];
     for (let i = 0; i < spawnDataArray.length; i++) {

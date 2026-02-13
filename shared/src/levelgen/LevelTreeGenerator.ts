@@ -71,9 +71,6 @@ export interface TreeInstance {
 export function generateTreeVariations(baseSeed: string, gridResolution: number = 32): TreeVariation[] {
   const variations: TreeVariation[] = [];
   const VARIATION_COUNT = 8;
-
-  console.log(`Generating ${VARIATION_COUNT} tree variations for level (collider resolution: ${gridResolution})...`);
-
   for (let i = 0; i < VARIATION_COUNT; i++) {
     const treeSeed = `${baseSeed}_tree_${i}`;
     const grid = new TreeVoxelGrid();
@@ -102,8 +99,6 @@ export function generateTreeVariations(baseSeed: string, gridResolution: number 
       fullMesh,
       colliderMesh
     });
-    
-    console.log(`  Tree variation ${i}: ${quads.length} quads, ${fullMesh.indices.length / 3} full tris, ${colliderMesh.triangleCount} collider tris`);
   }
 
   return variations;
@@ -137,9 +132,6 @@ export function placeTreeInstances(
   
   const MAX_ATTEMPTS = targetCount * 3; // Try up to 3x target to fill level
   let attempts = 0;
-  
-  console.log(`Placing up to ${targetCount} trees across level...`);
-  
   while (instances.length < targetCount && attempts < MAX_ATTEMPTS) {
     attempts++;
     
@@ -191,8 +183,5 @@ export function placeTreeInstances(
     // Mark cell as occupied
     occupiedCells.add(cellKey);
   }
-  
-  console.log(`Placed ${instances.length} trees after ${attempts} attempts`);
-  
   return instances;
 }

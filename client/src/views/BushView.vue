@@ -273,8 +273,6 @@ watch([isInRoom, () => {
 }], ([inRoom, newScene]) => {
   if (inRoom && newScene && !scene) {
     scene = newScene;
-    console.log('[BushView] Scene available and in room, initializing bush generation');
-    
     // Small delay to ensure scene is fully ready
     setTimeout(() => {
       // Initialize seed and generate bush
@@ -318,12 +316,8 @@ function updateBoundingBoxVisibility() {
  */
 function generateAndDisplayBush() {
   if (!scene) {
-    console.warn('[BushView] Scene not available, cannot generate bush');
     return;
   }
-
-  console.log('[BushView] Starting bush generation with seed:', seed.value);
-
   // Clear existing bush mesh
   if (bushMesh) {
     bushMesh.dispose();
@@ -363,9 +357,6 @@ function generateAndDisplayBush() {
   const t1 = performance.now();
   genTimeMs.value = Math.round(t1 - t0);
   meshTimeMs.value = Math.round(t1 - t0);
-
-  console.log(`[BushView] Generated ${quads.length} quads (${solidCount.value} solid voxels)`);
-
   // Build collider mesh
   const meshBuilder = new BushMeshBuilder();
   const fullMesh = meshBuilder.buildFromQuads(quads);
@@ -374,8 +365,6 @@ function generateAndDisplayBush() {
   const decimator = new BushMeshDecimator();
   colliderMesh = decimator.decimate(fullMesh, colliderResolution.value);
   colliderTriCount.value = colliderMesh.triangleCount;
-  console.log(`[BushView] Collider mesh: ${colliderMesh.triangleCount} triangles`);
-
   // Create Babylon.js mesh from quads
   bushMesh = createBushMesh(quads);
 
@@ -575,9 +564,6 @@ function regenerateCollider() {
     const decimator = new BushMeshDecimator();
     colliderMesh = decimator.decimate(fullMesh, colliderResolution.value);
     colliderTriCount.value = colliderMesh.triangleCount;
-    
-    console.log(`[BushView] Regenerated collider mesh: ${colliderMesh.triangleCount} triangles`);
-    
     if (showColliderMesh.value) {
       createColliderMeshVisualization();
     }
@@ -847,8 +833,6 @@ function checkCameraInBush() {
  * Called when camera enters bush trigger.
  */
 function onBushEnter() {
-  console.log('[BushView] Camera entered bush');
-  
   // Store entry position for parallax reference
   if (scene && scene.activeCamera) {
     const camPos = scene.activeCamera.position;
@@ -861,7 +845,6 @@ function onBushEnter() {
     const audioManager = AudioManager.getInstance();
     audioManager.play('rustle', { volume: 0.5, position: { x: bushEntryX, y: bushEntryY, z: bushEntryZ } });
   } catch (e) {
-    console.warn('[BushView] AudioManager not initialized yet');
   }
 }
 
@@ -869,8 +852,6 @@ function onBushEnter() {
  * Called when camera leaves bush trigger.
  */
 function onBushLeave() {
-  console.log('[BushView] Camera left bush');
-  
   // Pre-select next two random texture sets for next entry (no delay on entry)
   selectedTextureIndex1 = Math.floor(Math.random() * 3);
   selectedTextureIndex2 = Math.floor(Math.random() * 3);
@@ -879,14 +860,10 @@ function onBushLeave() {
   while (selectedTextureIndex2 === selectedTextureIndex1) {
     selectedTextureIndex2 = Math.floor(Math.random() * 3);
   }
-  
-  console.log(`[BushView] Next bush entry will use texture sets ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
-  
   try {
     const audioManager = AudioManager.getInstance();
     audioManager.play('rustle', { volume: 0.4, position: { x: bushEntryX, y: bushEntryY, z: bushEntryZ } });
   } catch (e) {
-    console.warn('[BushView] AudioManager not initialized yet');
   }
 }
 
@@ -895,27 +872,20 @@ function onBushLeave() {
  */
 async function initializeLeafEffect() {
   if (!scene) return;
-
-  console.log('[BushView] Initializing leaf effect...');
   leafEffect = new BushLeafEffect(scene);
   
   try {
     await leafEffect.generate();
     leafTexturesReady.value = true;
-    console.log('[BushView] Leaf textures generated successfully');
-    
     // Initialize random texture selection for first bush entry
     selectedTextureIndex1 = Math.floor(Math.random() * 3);
     selectedTextureIndex2 = Math.floor(Math.random() * 3);
     while (selectedTextureIndex2 === selectedTextureIndex1) {
       selectedTextureIndex2 = Math.floor(Math.random() * 3);
     }
-    console.log(`[BushView] Initial texture sets selected: ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
-    
     // Set up bush trigger detection after textures are ready
     setupBushTriggerDetection();
   } catch (error) {
-    console.error('[BushView] Failed to generate leaf textures:', error);
   }
 }
 

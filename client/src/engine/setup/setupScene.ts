@@ -29,14 +29,10 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<Engine> {
       });
       
       await engine.initAsync();
-      console.log('✓ Using WebGPU engine');
       return engine;
     } catch (error) {
-      console.error('WebGPU initialization failed:', error);
-      console.log('Falling back to WebGL...');
     }
   } else {
-    console.log('WebGPU not supported, using WebGL');
   }
   
   // WebGL fallback
@@ -44,7 +40,6 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<Engine> {
     preserveDrawingBuffer: true,
     stencil: true
   });
-  console.log('✓ Using WebGL engine');
   return engine;
 }
 
@@ -61,9 +56,10 @@ export function createGameScene(engine: Engine, sunConfig?: SunConfig): { scene:
   // ── Lighting from SunConfig or defaults ──
   const hasSun = !!sunConfig;
 
-  // Subtle hemispheric fill light to soften backfaces
+  // Subtle hemispheric fill light to soften backfaces (min 0.35)
+  const MIN_HEMI_INTENSITY = 0.35;
   const hemiLight = new HemisphericLight('hemiLight', new Vector3(0, 1, 0), scene);
-  hemiLight.intensity = hasSun ? sunConfig.hemiIntensity : 0.25;
+  hemiLight.intensity = Math.max(MIN_HEMI_INTENSITY, hasSun ? sunConfig.hemiIntensity : 0.25);
   hemiLight.diffuse = hasSun
     ? new Color3(sunConfig.hemiR, sunConfig.hemiG, sunConfig.hemiB)
     : new Color3(0.5, 0.5, 0.7);
@@ -182,7 +178,6 @@ export function createGameScene(engine: Engine, sunConfig?: SunConfig): { scene:
   skysphere.material = skyMat;
 
   if (hasSun) {
-    console.log(`[Scene] Sun config applied — elevation: ${sunConfig.elevation.toFixed(1)}°, azimuth: ${sunConfig.azimuth.toFixed(1)}°`);
   }
 
   // Create base player cube for instancing
@@ -278,8 +273,6 @@ export function createPlayerInstance(name: string, scene: Scene, color: Color3):
  * Use createPlayerInstance() instead for better performance.
  */
 export function createCube(name: string, scene: Scene) {
-  console.warn('createCube() is deprecated. Use createPlayerInstance() for better performance.');
-  
   const box = MeshBuilder.CreateBox(name, { size: 1 }, scene);
   box.position.y = 0.5;
   

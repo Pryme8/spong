@@ -164,23 +164,7 @@ export class TreeGenerator {
   generate(): void {
     // Step 1: Build L-system string
     const lString = this.buildLString();
-    
-    console.log('=== L-system String Analysis ===');
-    console.log(`String length: ${lString.length}`);
-    console.log(`F count (branches): ${(lString.match(/F/g) || []).length}`);
-    console.log(`+ count: ${(lString.match(/\+/g) || []).length}`);
-    console.log(`- count: ${(lString.match(/\-/g) || []).length}`);
-    console.log(`^ count: ${(lString.match(/\^/g) || []).length}`);
-    console.log(`v count: ${(lString.match(/v/g) || []).length}`);
-    console.log(`T count (trunk): ${(lString.match(/T/g) || []).length}`);
-    console.log(`[ count (branches): ${(lString.match(/\[/g) || []).length}`);
-    console.log(`] count: ${(lString.match(/\]/g) || []).length}`);
-    console.log(`! count (thickness reductions): ${(lString.match(/!/g) || []).length}`);
-    console.log(`G count (gravity): ${(lString.match(/G/g) || []).length}`);
-    console.log(`L count (leaf clusters): ${(lString.match(/L/g) || []).length}`);
-    console.log(`First 150 chars: ${lString.substring(0, 150)}`);
-    console.log('================================');
-    
+
     // Step 2: Interpret the string with a 3D turtle
     this.interpretLString(lString);
   }
@@ -422,12 +406,7 @@ export class TreeGenerator {
           // Yaw positive with deviation
           yawRotations++;
           const angle = this.params.yawAngle + this.rng.range(-this.params.yawDeviation, this.params.yawDeviation);
-          const oldDirX = turtle.dirX;
-          const oldDirZ = turtle.dirZ;
           turtle.rotateYaw(angle);
-          if (yawRotations <= 3) {
-            console.log(`Yaw +: angle=${angle.toFixed(3)}, dir before=(${oldDirX.toFixed(3)}, ${turtle.dirY.toFixed(3)}, ${oldDirZ.toFixed(3)}), after=(${turtle.dirX.toFixed(3)}, ${turtle.dirY.toFixed(3)}, ${turtle.dirZ.toFixed(3)})`);
-          }
           break;
         }
         
@@ -444,10 +423,9 @@ export class TreeGenerator {
           // Pitch up with deviation
           pitchRotations++;
           const angle = this.params.pitchAngle + this.rng.range(-this.params.pitchDeviation, this.params.pitchDeviation);
-          const oldDirY = turtle.dirY;
           turtle.rotatePitch(angle);
           if (pitchRotations <= 3) {
-            console.log(`Pitch ^: angle=${angle.toFixed(3)}, dir before=(${turtle.dirX.toFixed(3)}, ${oldDirY.toFixed(3)}, ${turtle.dirZ.toFixed(3)}), after=(${turtle.dirX.toFixed(3)}, ${turtle.dirY.toFixed(3)}, ${turtle.dirZ.toFixed(3)})`);
+
           }
           break;
         }
@@ -548,15 +526,7 @@ export class TreeGenerator {
     }
     
     // Log interpretation statistics
-    console.log('=== Tree Interpretation Stats ===');
-    console.log(`Branches created ([): ${branchCount}`);
-    console.log(`F segments drawn: ${fDrawn}`);
-    console.log(`F segments skipped (too thin): ${fSkipped}`);
-    console.log(`Yaw rotations (+/-): ${yawRotations}`);
-    console.log(`Pitch rotations (^/v): ${pitchRotations}`);
-    console.log(`Thickness range: ${minThicknessEncountered.toFixed(2)} - ${maxThicknessEncountered.toFixed(2)}`);
-    console.log(`Min thickness threshold: ${this.params.minThickness}`);
-    console.log('=================================');
+
   }
 
   /**
@@ -619,7 +589,7 @@ export function generateTree(seed: string, params?: Partial<TreeParams>, skipLea
   const leaflessChance = (seedHash % 100) < 10; // 10% probability
   
   if (leaflessChance && !skipLeaves) {
-    console.log(`[TreeGen] Seed "${seed}" generated leafless tree (${seedHash % 100}% < 10%)`);
+
     skipLeaves = true;
   }
   

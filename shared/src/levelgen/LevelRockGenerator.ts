@@ -70,9 +70,6 @@ export function generateRockVariations(
   gridResolution: number = 9
 ): RockVariation[] {
   const variations: RockVariation[] = [];
-
-  console.log(`Generating ${count} rock variations for level (grid resolution: ${gridResolution})...`);
-
   for (let i = 0; i < count; i++) {
     const rockSeed = `${baseSeed}_rock_${i}`;
     const params = randomRockParamsForSeed(rockSeed);
@@ -101,14 +98,6 @@ export function generateRockVariations(
       colliderMesh,
       colliders
     });
-    
-    const fullTriCount = fullMesh.indices.length / 3;
-    const reduction = ((1 - colliderMesh.triangleCount / fullTriCount) * 100).toFixed(1);
-    console.log(
-      `  Rock variation ${i}: ${quads.length} quads, ` +
-      `${fullTriCount} full tris → ${colliderMesh.triangleCount} collider tris (${reduction}% reduction), ` +
-      `${colliders.length} legacy AABBs`
-    );
   }
 
   return variations;
@@ -143,9 +132,6 @@ export function placeRockInstances(
   
   const MAX_ATTEMPTS = targetCount * 3; // Try up to 3x target to fill level
   let attempts = 0;
-  
-  console.log(`Placing up to ${targetCount} rocks across level...`);
-  
   while (instances.length < targetCount && attempts < MAX_ATTEMPTS) {
     attempts++;
     
@@ -183,8 +169,5 @@ export function placeRockInstances(
       scale
     });
   }
-  
-  console.log(`Placed ${instances.length} rocks after ${attempts} attempts`);
-  
   return instances;
 }

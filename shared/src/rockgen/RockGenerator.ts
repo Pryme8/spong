@@ -71,9 +71,6 @@ export function generateRock(seed: string, params?: RockParams): RockVoxelGrid {
   // ── Step 1: Place initial sphere ───────────────────────────
   const radius = rng.range(sizeConfig.minRadius, sizeConfig.maxRadius);
   fillSphere(grid, centerX, centerY, centerZ, radius);
-  
-  console.log(`[RockGen] Size=${sizeConfig.gridSize}x${sizeConfig.gridSize} Initial sphere: radius=${radius.toFixed(1)}`);
-
   // ── Step 2: Random plane clipping ──────────────────────────
   const clipPasses = rng.int(sizeConfig.minClipPasses, sizeConfig.maxClipPasses);
   
@@ -102,24 +99,12 @@ export function generateRock(seed: string, params?: RockParams): RockVoxelGrid {
     // Zero out density on the far side of the plane
     clipPlane(grid, centerX, centerY, centerZ, normalX, normalY, normalZ, clipOffset);
   }
-  
-  console.log(`[RockGen] Applied ${clipPasses} clip passes`);
-
   // ── Step 3: Noise distortion ───────────────────────────────
   applyNoiseDistortion(grid, seed, noiseAmplitude);
-  
-  console.log(`[RockGen] Applied noise distortion`);
-
   // ── Step 4: Threshold pass ─────────────────────────────────
   applyThreshold(grid, surfaceThreshold);
-  
-  console.log(`[RockGen] Applied threshold, solid count: ${grid.getSolidCount()}`);
-
   // ── Step 5: Remove isolated voxels (stray collider fix) ────
   removeIsolatedVoxels(grid);
-  
-  console.log(`[RockGen] Removed isolated voxels, final count: ${grid.getSolidCount()}`);
-
   return grid;
 }
 
@@ -365,6 +350,4 @@ function removeIsolatedVoxels(grid: RockVoxelGrid): void {
   for (const { x, y, z } of toRemove) {
     grid.setDensity(x, y, z, 0);
   }
-  
-  console.log(`[RockGen] Removed ${toRemove.length} isolated voxels`);
 }

@@ -13,7 +13,6 @@ export function playSFX(soundName: string, volume?: number): string | null {
     const audio = AudioManager.getInstance();
     return audio.play(soundName, { volume });
   } catch (error) {
-    console.warn('[audioHelpers] Failed to play SFX:', soundName, error);
     return null;
   }
 }
@@ -36,7 +35,6 @@ export function playSFX3D(
       volume,
     });
   } catch (error) {
-    console.warn('[audioHelpers] Failed to play SFX3D:', soundName, error);
     return null;
   }
 }

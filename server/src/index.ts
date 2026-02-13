@@ -29,7 +29,6 @@ async function killPort(port: number): Promise<void> {
     for (const pid of pids) {
       try {
         await execAsync(`taskkill /F /PID ${pid}`);
-        console.log(`Killed process ${pid} on port ${port}`);
       } catch {
         // Process might already be dead
       }
@@ -51,10 +50,7 @@ const fastify = Fastify({
 });
 
 // Initialize Havok physics
-console.log('Initializing Havok physics...');
 await initializeHavok();
-console.log('Havok physics initialized');
-
 // Register plugins
 await fastify.register(cors, config.cors);
 await fastify.register(websocket);
@@ -82,7 +78,6 @@ await fastify.ready();
 const roomManager = new RoomManager(fastify.connectionHandler, config.tickRate);
 
 // Clean up port before starting (helps with hot reload)
-console.log(`Checking port ${config.port}...`);
 await killPort(config.port);
 
 // Wait a bit longer to ensure port is fully released
@@ -90,19 +85,14 @@ await new Promise(resolve => setTimeout(resolve, 500));
 
 // Cleanup function for graceful shutdown
 async function cleanup(signal: string) {
-  console.log(`\nReceived ${signal}, shutting down server...`);
-  
   // Set a very short timeout for hot reload scenarios
   const forceExitTimeout = setTimeout(() => {
-    console.log('Force exiting for hot reload...');
     process.exit(0); // Exit 0 for hot reload, not an error
   }, 500); // Very short timeout for fast hot reload
   
   try {
     // Close Fastify server first (releases port immediately)
     await fastify.close();
-    console.log('Server closed');
-    
     // Dispose room manager quickly (don't wait for everything)
     setImmediate(() => {
       try {
@@ -115,7 +105,6 @@ async function cleanup(signal: string) {
     clearTimeout(forceExitTimeout);
     process.exit(0);
   } catch (err) {
-    console.error('Error during shutdown:', err);
     clearTimeout(forceExitTimeout);
     process.exit(0); // Still exit cleanly for hot reload
   }
@@ -145,12 +134,10 @@ process.on('SIGHUP', () => {
 
 // Handle uncaught errors
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err);
   cleanup('uncaughtException');
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled rejection at:', promise, 'reason:', reason);
   cleanup('unhandledRejection');
 });
 
@@ -159,11 +146,9 @@ async function startServer(maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       await fastify.listen({ port: config.port, host: config.host });
-      console.log(`Server listening on ${config.host}:${config.port}`);
       return;
     } catch (err: any) {
       if (err.code === 'EADDRINUSE' && attempt < maxRetries) {
-        console.log(`Port ${config.port} in use, killing processes and retrying (attempt ${attempt}/${maxRetries})...`);
         await killPort(config.port);
         await new Promise(resolve => setTimeout(resolve, 1000));
       } else {

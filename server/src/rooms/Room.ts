@@ -95,7 +95,6 @@ export class Room {
   constructor(id: string, connectionHandler: ConnectionHandler) {
     this.id = id;
     this.connectionHandler = connectionHandler;
-    console.log(`Room constructing: ${id}`);
   }
 
   // ============================================================================
@@ -110,7 +109,6 @@ export class Room {
     const { entity, spawnMsg } = createDummyEntity(this.world, worldX, worldY, worldZ, color);
     this.dummyEntities.push(spawnMsg);
     this.broadcastLow(Opcode.DummySpawn, spawnMsg);
-    console.log(`Spawned Dummy at (${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)}) entity ${entity.id}`);
   }
 
   private spawnDummyOnSurface(worldX: number, worldZ: number, color: string = '#ff6b3d'): void {
@@ -237,7 +235,6 @@ export class Room {
     roomInitializer.initialize();
 
     this.isInitialized = true;
-    console.log(`Room initialized: ${this.id}`);
   }
 
   addPlayer(conn: ConnectionState): Player {
@@ -266,20 +263,15 @@ export class Room {
     if (isFirstPlayer) {
       this.ownerId = conn.id;
     }
-
-    console.log(`Player ${conn.id} joined room ${this.id} with entity ${entity.id} (color: ${color}), phase: ${this.gameStartSystem.phase}`);
-
     if (isFirstPlayer) {
       this.startTicking();
     }
     
     // If room is already in loading phase, send current ready update and register as ready
     if (this.gameStartSystem.phase === 'loading') {
-      console.log(`[Room] Player ${conn.id} joined during loading phase, sending ready update`);
       setTimeout(() => this.gameStartSystem.broadcastReadyUpdate(), 200);
     }
     if (this.gameStartSystem.phase === 'playing') {
-      console.log(`[Room] Player ${conn.id} joined during playing phase, sending GameBegin immediately`);
       setTimeout(() => {
         this.connectionHandler.sendLow(conn, Opcode.GameBegin, {});
       }, 200);
@@ -327,13 +319,9 @@ export class Room {
       this.world.destroyEntity(player.entityId);
       this.players.delete(connectionId);
       this.connections.delete(connectionId);
-
-      console.log(`Player ${connectionId} left room ${this.id}`);
-
       // Check if round should end due to insufficient players
       const remainingPlayers = this.players.size;
       if (remainingPlayers < this.roundSystem.config.minPlayers && this.roundSystem.phase === 'active') {
-        console.log(`[Round] Not enough players (${remainingPlayers}), ending round`);
         this.roundSystem.cancelCountdown();
       }
 
@@ -519,10 +507,8 @@ export class Room {
     this.gameStartSystem.enterLoadingPhase(finalSeed);
 
     if (!this.voxelGrid) {
-      console.log(`[Room] Generating level terrain for loading phase with seed: ${finalSeed}`);
       this.voxelGrid = new VoxelGrid();
       this.voxelGrid.generateFromNoise(finalSeed);
-      console.log(`[Room] Generated ${this.voxelGrid.getSolidCount()} solid voxels`);
       this.waterLevelProvider = new ServerWaterLevelProvider(this.voxelGrid);
       const occupiedCells = new Set<string>();
       this.levelSystem.generateLevel({
@@ -532,7 +518,6 @@ export class Room {
         occupiedCells,
         lobbyConfig: config
       });
-      console.log(`[Room] Level generated: ${this.levelSystem.getTreeCount()} trees, ${this.levelSystem.getRockCount()} rocks, ${this.levelSystem.getBushCount()} bushes`);
     }
 
     const connections = this.getAllConnections();
@@ -573,8 +558,6 @@ export class Room {
     this.broadcastInterval = setInterval(() => {
       this.broadcastTransforms();
     }, 1000 / this.broadcastRate);
-
-    console.log(`Room ${this.id} started: physics ${this.physicsRate}Hz, broadcast ${this.broadcastRate}Hz`);
   }
 
   private stopTicking() {
@@ -586,7 +569,6 @@ export class Room {
       clearInterval(this.broadcastInterval);
       this.broadcastInterval = null;
     }
-    console.log(`Room ${this.id} tick stopped`);
   }
 
   private physicsTick() {
@@ -676,6 +658,5 @@ export class Room {
     this.engine.dispose();
     this.players.clear();
     this.connections.clear();
-    console.log(`Room ${this.id} disposed`);
   }
 }

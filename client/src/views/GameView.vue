@@ -96,6 +96,15 @@
       @close="showPostDebug = false"
     />
 
+    <!-- Camera Debug Panel (only if ?cameraDebug URL flag is present) -->
+    <CameraDebugPanel
+      v-if="showCameraDebug"
+      :visible="showCameraDebug"
+      :get-offset="session.getCameraDebugOffset"
+      :set-offset="session.setCameraDebugOffset"
+      @close="showCameraDebug = false"
+    />
+
     <!-- Weapon Debug Panel (toggle with U key) -->
     <WeaponDebugPanel
       v-if="showWeaponDebug"
@@ -196,6 +205,7 @@ import ShadowDebugPanel from '../components/ShadowDebugPanel.vue';
 import WaterDebugPanel from '../components/WaterDebugPanel.vue';
 import WorldDebugPanel from '../components/WorldDebugPanel.vue';
 import PostProcessDebugPanel from '../components/PostProcessDebugPanel.vue';
+import CameraDebugPanel from '../components/CameraDebugPanel.vue';
 import WeaponDebugPanel from '../components/WeaponDebugPanel.vue';
 import Scoreboard from '../components/Scoreboard.vue';
 import CountdownOverlay from '../components/CountdownOverlay.vue';
@@ -227,20 +237,11 @@ if (route.name === 'level') {
   // /level/ route: ALWAYS create a level_ room
   levelSeed = (route.query.seed as string) || 'test';
   targetRoom = `level_${levelSeed}`;
-  console.log('[GameView] Level route - forcing level room:', targetRoom);
 } else {
   // /game/ route or other: use props or query params
   levelSeed = props.levelSeed || (route.query.seed as string) || null;
   targetRoom = props.roomId || (route.query.room as string) || (levelSeed ? `level_${levelSeed}` : 'lobby');
-  console.log('[GameView] Game route - using provided room:', targetRoom);
 }
-
-console.log('[GameView] Final config:', {
-  routeName: route.name,
-  levelSeed,
-  targetRoom
-});
-
 // Parse config from props or URL params
 const levelConfig: any = props.levelConfig || {};
 if (!props.levelConfig && route.query.pistols) {
@@ -261,7 +262,6 @@ if (!props.levelConfig) {
 if (route.query.disable) {
   const disableFlags = (route.query.disable as string).split(',').map(s => s.trim());
   levelConfig.disableSpawns = disableFlags;
-  console.log('[GameView] Disabling spawns:', disableFlags);
 }
 
 // Check for debug URL flags
@@ -269,6 +269,7 @@ const showShadowDebug = ref(route.query.shadowDebug !== undefined);
 const showWaterDebug = ref(route.query.waterDebug !== undefined);
 const showWorldDebug = ref(route.query.debugWorld !== undefined);
 const showPostDebug = ref(route.query.debugPost !== undefined);
+const showCameraDebug = ref(route.query.cameraDebug !== undefined);
 const showWeaponDebug = ref(false); // Toggle with U key
 const weaponDebugPosition = ref({ x: 0, y: 0, z: 0 });
 const weaponDebugRotation = ref({ x: 0, y: 0, z: 0 });
@@ -454,8 +455,6 @@ onMounted(async () => {
   
   // If in loading phase, watch reactive loading state from session
   if (props.isLoadingPhase) {
-    console.log('[GameView] In loading phase - watching session loading state');
-    
     // Watch loading state reactively (handlers registered inside init, never missed)
     watch(() => session.loadingSecondsRemaining.value, (val) => {
       loadingSecondsRemaining.value = val;
@@ -466,7 +465,6 @@ onMounted(async () => {
     
     // Listen for GameBegin (safe even if it already fired)
     session.onGameBegin(() => {
-      console.log('[GameView] Game begin - hiding loading overlay');
       showLoadingOverlay.value = false;
       emit('loading-complete');
     });

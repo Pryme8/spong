@@ -30,8 +30,6 @@ export class ItemSystem {
    * Handle item spawn from server
    */
   handleSpawn(payload: ItemSpawnMessage, scene: Scene): void {
-    console.log(`[ItemSystem] Spawn: type=${payload.itemType} entity=${payload.entityId}`);
-
     // Remove existing node if re-spawned
     const existing = this.itemNodes.get(payload.entityId);
     if (existing) {
@@ -97,8 +95,6 @@ export class ItemSystem {
       node.rotation.y = time * 1.5; // Full rotation every ~4 seconds
     });
     node.metadata = { bobObserver, settled: false, settledY: baseY };
-
-    console.log(`[ItemSystem] Created ${payload.itemType} mesh for entity ${payload.entityId}`);
   }
 
   /**
@@ -132,8 +128,6 @@ export class ItemSystem {
     hasLadder?: { value: boolean },
     playerTransform?: any
   ): void {
-    console.log(`[ItemSystem] Pickup: entity=${payload.entityId} by player=${payload.playerId}`);
-
     // Remove the item mesh from the world
     const node = this.itemNodes.get(payload.entityId);
     if (node) {
@@ -149,28 +143,21 @@ export class ItemSystem {
     if (payload.playerId === myEntityId) {
       // Check if it's a pickup (health, ammo, etc.) or a weapon
       if (payload.itemType === 'medic_pack' || payload.itemType === 'large_medic_pack') {
-        console.log(`[ItemSystem] We picked up a ${payload.itemType}! Health restored.`);
         // Health is handled server-side, just log here
       } else if (payload.itemType === 'apple') {
-        console.log(`[ItemSystem] We picked up an apple! Stamina restored.`);
         // Stamina is handled server-side, just log here
       } else if (payload.itemType === 'pill_bottle') {
-        console.log(`[ItemSystem] We picked up a pill bottle! INFINITE STAMINA activated!`);
         // Buff is handled server-side, just log here
       } else if (payload.itemType === 'kevlar') {
-        console.log(`[ItemSystem] We picked up kevlar! +50 ARMOR!`);
         // Armor is handled server-side, just log here
       } else if (payload.itemType === 'helmet') {
-        console.log(`[ItemSystem] We picked up helmet! HEADSHOT PROTECTION!`);
         // Helmet is handled server-side, just log here
       } else if (payload.itemType === 'hammer') {
-        console.log(`[ItemSystem] We picked up a HAMMER! Building enabled!`);
         // Hammer enables building
         if (hasHammer) {
           hasHammer.value = true;
         }
       } else if (payload.itemType === 'ladder') {
-        console.log(`[ItemSystem] We picked up a LADDER! Placement enabled!`);
         // Ladder enables ladder placement
         if (hasLadder) {
           hasLadder.value = true;
@@ -182,7 +169,6 @@ export class ItemSystem {
           payload.ammoCurrent,
           payload.ammoCapacity
         );
-        console.log(`[ItemSystem] We picked up a ${payload.itemType}! Shooting enabled.`);
         // Also equip visual weapon on player transform
         if (playerTransform) {
           playerTransform.equipWeapon(payload.itemType as WeaponType);

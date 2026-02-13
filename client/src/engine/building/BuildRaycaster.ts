@@ -36,7 +36,6 @@ export class BuildRaycaster {
       
       // Debug logging
       if (mesh.name === 'gridRaycastPlane' && !mesh.metadata?.logged) {
-        console.log('[BuildRaycaster] gridRaycastPlane found - isPickable:', mesh.isPickable, 'isVisible:', mesh.isVisible);
         mesh.metadata = { logged: true };
       }
       
@@ -47,7 +46,6 @@ export class BuildRaycaster {
       const normal = pickInfo.getNormal();
       if (!normal) {
         // If no normal, default to up
-        console.warn('[BuildRaycaster] No normal found, using default up');
         return {
           position: pickInfo.pickedPoint,
           normal: new Vector3(0, 1, 0),

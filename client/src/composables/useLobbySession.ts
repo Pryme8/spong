@@ -45,31 +45,24 @@ export function useLobbySession() {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = import.meta.env.DEV 
       ? `${wsProtocol}//${window.location.host}/ws`
-      : `ws://${window.location.hostname}:3000/ws`;
-    console.log('[LobbySession] Initializing with URL:', wsUrl, 'target room:', targetRoomId);
-    
+      : `${wsProtocol}//${window.location.hostname}:3000/ws`;
     networkClient = new NetworkClient(wsUrl);
     room = useRoom(networkClient);
 
     // Sync room state to our local refs
     watch(() => room?.isInRoom.value, (val) => { 
-      console.log('[LobbySession] isInRoom changed:', val);
       isInRoom.value = val || false; 
     });
     watch(() => room?.roomId.value, (val) => { 
-      console.log('[LobbySession] roomId changed:', val);
       roomId.value = val; 
     });
     watch(() => room?.ownerId.value, (val) => { 
-      console.log('[LobbySession] ownerId changed:', val);
       ownerId.value = val; 
     });
     watch(() => room?.myEntityId.value, (val) => { 
-      console.log('[LobbySession] myEntityId changed:', val);
       myEntityId.value = val; 
     });
     watch(() => room?.players.value, (val) => { 
-      console.log('[LobbySession] players changed:', val?.size);
       players.value = val || new Map(); 
     }, { deep: true });
 
@@ -87,36 +80,29 @@ export function useLobbySession() {
     });
 
     networkClient.onLowFrequency(Opcode.LobbyStartCountdown, (payload: LobbyStartCountdownPayload) => {
-      console.log('[LobbySession] Start countdown:', payload.secondsRemaining);
       startCountdownSeconds.value = payload.secondsRemaining;
     });
 
     networkClient.onLowFrequency(Opcode.LobbyStartCancel, () => {
-      console.log('[LobbySession] Start cancelled');
       startCountdownSeconds.value = 0;
     });
 
     networkClient.onLowFrequency(Opcode.GameLoading, (payload: GameLoadingPayload) => {
-      console.log('[LobbySession] Game loading:', payload);
       isLoading.value = true;
       gameLoadingConfig.value = payload;
     });
 
     networkClient.onLowFrequency(Opcode.PlayersReadyUpdate, (payload: PlayersReadyUpdatePayload) => {
-      console.log('[LobbySession] Players ready update:', payload);
       loadingInfo.value = payload;
     });
 
     networkClient.onLowFrequency(Opcode.GameBegin, () => {
-      console.log('[LobbySession] Game beginning! Staying on game route.');
       isLoading.value = false;
       // Don't navigate - let the game route handle the transition from lobby to game
     });
 
     // Keep old LobbyStarting handler for backward compatibility with /level route
     networkClient.onLowFrequency(Opcode.LobbyStarting, (payload: LobbyStartingPayload) => {
-      console.log('[LobbySession] Game starting (old flow), navigating to level:', payload);
-      
       const query: Record<string, string> = {
         seed: payload.seed
       };
@@ -185,13 +171,10 @@ export function useLobbySession() {
     });
 
     try {
-      console.log('[LobbySession] Attempting to connect...');
       await networkClient.connect();
-      console.log('[LobbySession] Connected! Joining room:', targetRoomId);
       isConnected.value = true;
       room.joinRoom(targetRoomId);
     } catch (err) {
-      console.error('[LobbySession] Failed to connect:', err);
     }
   }
 

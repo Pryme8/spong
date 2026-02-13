@@ -1,9 +1,16 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import vuetify from 'vite-plugin-vuetify';
+import { createRequire } from 'node:module';
 import { fileURLToPath, URL } from 'node:url';
 
+const require = createRequire(import.meta.url);
+const clientPkg = require('./package.json');
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(clientPkg.version)
+  },
   css: {
     preprocessorOptions: {
       scss: {

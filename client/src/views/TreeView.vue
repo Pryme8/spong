@@ -690,8 +690,6 @@ watch([isInRoom, () => {
 }], ([inRoom, newScene]) => {
   if (inRoom && newScene && !scene) {
     scene = newScene;
-    console.log('[TreeView] Scene available and in room, initializing tree generation');
-    
     // Small delay to ensure scene is fully ready
     setTimeout(() => {
       // Initialize seed and generate tree
@@ -717,7 +715,6 @@ function updateGroundVisibility() {
  */
 function generateAndDisplayTree() {
   if (!scene) {
-    console.warn('[TreeView] Scene not available, cannot generate tree');
     return;
   }
 
@@ -725,9 +722,6 @@ function generateAndDisplayTree() {
   treeParams.value.skipTrunk = !showTrunk.value;
   treeParams.value.skipBranches = !showBranches.value;
   treeParams.value.skipRoots = !showRoots.value;
-
-  console.log('[TreeView] Starting tree generation with seed:', seed.value);
-
   // Clear existing tree meshes
   const existingTrunk = scene.getMeshByName('trunk');
   const existingLeaves = scene.getMeshByName('leaves');
@@ -762,10 +756,6 @@ function generateAndDisplayTree() {
   quadCount.value = quads.length;
 
   console.timeEnd('tree-mesh');
-
-  console.log(`Generated ${quads.length} quads (${counts.wood} wood, ${counts.leaf} leaf voxels)`);
-  console.log(`Debug segments: ${debugSegments.length}`);
-
   // Build collider mesh (wood only)
   const meshBuilder = new TreeMeshBuilder();
   const fullMesh = meshBuilder.buildFromQuads(quads);
@@ -774,8 +764,6 @@ function generateAndDisplayTree() {
   const decimator = new TreeMeshDecimator();
   colliderMesh = decimator.decimate(fullMesh, colliderResolution.value);
   colliderTriCount.value = colliderMesh.triangleCount;
-  console.log(`[TreeView] Collider mesh: ${colliderMesh.triangleCount} triangles`);
-
   // Build leaf collider mesh (leaves only, for trigger detection)
   const leafMeshBuilder = new TreeLeafMeshBuilder();
   const fullLeafMesh = leafMeshBuilder.buildFromQuads(quads);
@@ -784,8 +772,6 @@ function generateAndDisplayTree() {
   const leafDecimator = new TreeMeshDecimator();
   leafColliderMesh = leafDecimator.decimate(fullLeafMesh, leafColliderResolution.value);
   leafColliderTriCount.value = leafColliderMesh.triangleCount;
-  console.log(`[TreeView] Leaf collider mesh: ${leafColliderMesh.triangleCount} triangles`);
-
   // Create Babylon.js meshes
   // TreeMesh internally positions at (-halfGrid, 0, -halfGrid) and scales 2x
   // This centers the tree at origin. We just need to move it to TREE_X.
@@ -837,9 +823,6 @@ function regenerateCollider() {
     const decimator = new TreeMeshDecimator();
     colliderMesh = decimator.decimate(fullMesh, colliderResolution.value);
     colliderTriCount.value = colliderMesh.triangleCount;
-    
-    console.log(`[TreeView] Regenerated collider mesh: ${colliderMesh.triangleCount} triangles`);
-    
     if (showColliderMesh.value) {
       createColliderMeshVisualization();
     }
@@ -917,9 +900,6 @@ function regenerateLeafCollider() {
     const leafDecimator = new TreeMeshDecimator();
     leafColliderMesh = leafDecimator.decimate(fullLeafMesh, leafColliderResolution.value);
     leafColliderTriCount.value = leafColliderMesh.triangleCount;
-    
-    console.log(`[TreeView] Regenerated leaf collider mesh: ${leafColliderMesh.triangleCount} triangles`);
-    
     createLeafColliderTriggerMesh();
     
     if (showLeafColliderMesh.value) {
@@ -1036,8 +1016,6 @@ function checkCameraInLeaves() {
 }
 
 function onLeavesEnter() {
-  console.log('[TreeView] Camera entered leaves');
-  
   if (scene && scene.activeCamera) {
     const camPos = scene.activeCamera.position;
     leafEntryX = camPos.x;
@@ -1049,47 +1027,34 @@ function onLeavesEnter() {
     const audioManager = AudioManager.getInstance();
     audioManager.play('rustle', { volume: 0.5, position: { x: leafEntryX, y: leafEntryY, z: leafEntryZ } });
   } catch (e) {
-    console.warn('[TreeView] AudioManager not initialized yet');
   }
 }
 
 function onLeavesLeave() {
-  console.log('[TreeView] Camera left leaves');
-  
   selectedTextureIndex1 = Math.floor(Math.random() * 3);
   selectedTextureIndex2 = Math.floor(Math.random() * 3);
   
   while (selectedTextureIndex2 === selectedTextureIndex1) {
     selectedTextureIndex2 = Math.floor(Math.random() * 3);
   }
-  
-  console.log(`[TreeView] Next leaf entry will use texture sets ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
-  
   try {
     const audioManager = AudioManager.getInstance();
     audioManager.play('rustle', { volume: 0.4, position: { x: leafEntryX, y: leafEntryY, z: leafEntryZ } });
   } catch (e) {
-    console.warn('[TreeView] AudioManager not initialized yet');
   }
 }
 
 async function initializeLeafEffect() {
   if (!scene || leafEffect) return;
-
-  console.log('[TreeView] Initializing leaf effect...');
   leafEffect = new BushLeafEffect(scene);
   
   try {
     await leafEffect.generate();
-    console.log('[TreeView] Leaf textures generated successfully');
-    
     selectedTextureIndex1 = Math.floor(Math.random() * 3);
     selectedTextureIndex2 = Math.floor(Math.random() * 3);
     while (selectedTextureIndex2 === selectedTextureIndex1) {
       selectedTextureIndex2 = Math.floor(Math.random() * 3);
     }
-    console.log(`[TreeView] Initial texture sets selected: ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
-    
     // Initialize wasInLeavesLastFrame to current state before starting checks
     if (scene && scene.activeCamera && leafColliderTriggerMesh && leafColliderMesh) {
       const camPos = scene.activeCamera.position;
@@ -1117,7 +1082,6 @@ async function initializeLeafEffect() {
     // Mark textures as ready AFTER initialization
     leafTexturesReady.value = true;
   } catch (error) {
-    console.error('[TreeView] Failed to generate leaf textures:', error);
   }
 }
 
@@ -1239,8 +1203,6 @@ function setupLeafTriggerDetection() {
 
   // Add camera check to render loop
   scene.onBeforeRenderObservable.add(checkCameraInLeaves);
-  
-  console.log('[TreeView] Leaf trigger detection and post-process set up');
 }
 
 /**
@@ -1368,8 +1330,6 @@ function createDebugWireframe() {
   
   // Bright yellow wireframe for visibility
   wireframe.color = new Color3(1, 1, 0);
-  
-  console.log(`Debug wireframe: ${lines.length} segments, scaled to match tree (0.4x)`);
 }
 
 /**

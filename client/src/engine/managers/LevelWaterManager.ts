@@ -75,7 +75,6 @@ export class LevelWaterManager {
   setSamplingMode(mode: number): void {
     if (this.heightTexture) {
       this.heightTexture.updateSamplingMode(mode);
-      console.log(`[WaterManager] Sampling mode set to ${mode}`);
     }
   }
 
@@ -100,8 +99,6 @@ export class LevelWaterManager {
 
     // Create mirror reflection
     this.createMirrorReflection();
-
-    console.log('[WaterManager] Initialized water plane at Y =', WATER_LEVEL_Y);
   }
 
   /** Return true if mesh (or its root ancestor) is an item pickup - exclude from reflection. */
@@ -155,9 +152,6 @@ export class LevelWaterManager {
     // Set reflection level (lower = less strong) and bind to material
     this.mirrorTexture.level = 0.15;
     this.waterMaterial.reflectionTexture = this.mirrorTexture;
-
-    console.log(`[WaterManager] Mirror reflection created with ${this.mirrorTexture.renderList.length} meshes`);
-    
     // Update render list after a frame to catch late-loaded meshes
     setTimeout(() => {
       this.refreshMirrorRenderList();
@@ -649,8 +643,6 @@ export class LevelWaterManager {
 
     flowContext.putImageData(flowImageData, 0, 0);
     this.flowTexture!.update();
-
-    console.log(`[WaterManager] Generated ${texW}x${texD} water mask + flow vectors: cross-blur ${blurRadius}, aggressive ${aggressiveRadius}, gaussian ${gaussRadius}`);
   }
 
   /**
@@ -759,6 +751,5 @@ export class LevelWaterManager {
     }
 
     LevelWaterManager.instance = null;
-    console.log('[WaterManager] Disposed');
   }
 }

@@ -92,7 +92,6 @@ export class CombatSystem {
           return { x, y, z };
         }
       }
-      console.warn('[CombatSystem] Could not find valid spawn position after 100 attempts, using origin');
     }
     return { x: 0, y: 0, z: 0 };
   }
@@ -114,8 +113,6 @@ export class CombatSystem {
       radius
     };
     this.broadcast(Opcode.ExplosionSpawn, explosionMsg);
-    console.log(`[Explosion] Broadcasting explosion at (${impactX.toFixed(2)}, ${impactY.toFixed(2)}, ${impactZ.toFixed(2)}) with radius ${radius}`);
-
     let damageMult = 1.0;
     if (projectileDistance > 20) {
       damageMult = Math.max(0.3, 1.0 - (projectileDistance - 20) * 0.0125);
@@ -197,8 +194,6 @@ export class CombatSystem {
 
       const proximityMult = Math.max(0, 1.0 - (distance / radius));
       const finalDamage = effectiveDamage * proximityMult;
-      console.log(`[Explosion] Entity ${targetEntity.id} hit! distance=${distance.toFixed(2)}, proximityMult=${proximityMult.toFixed(2)}, finalDamage=${finalDamage.toFixed(1)}`);
-
       this.applyDamageToEntity(targetEntity, finalDamage);
       const isDummy = targetEntity.hasTag(TAG_DUMMY);
       if (isDummy) health.current = health.max;
@@ -330,7 +325,6 @@ export class CombatSystem {
       const damageAbsorbed = Math.min(armor.current, damage);
       armor.current = Math.max(0, armor.current - damage);
       damageToHealth = Math.max(0, damage - damageAbsorbed);
-      console.log(`[Armor] Entity ${entity.id} absorbed ${damageAbsorbed.toFixed(1)} damage (armor: ${armor.current.toFixed(1)}/${armor.max})`);
     }
     health.current = Math.max(0, health.current - damageToHealth);
     return damageToHealth;

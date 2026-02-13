@@ -41,7 +41,6 @@ export class GameLoop {
    */
   start(engine: Engine, scene: Scene, deps: GameLoopDependencies): void {
     if (this.stopHandle) {
-      console.warn('[GameLoop] Already running');
       return;
     }
 
@@ -134,8 +133,6 @@ export class GameLoop {
     this.stopHandle = () => {
       engine.stopRenderLoop();
     };
-
-    console.log('[GameLoop] Started');
   }
 
   /**
@@ -145,7 +142,6 @@ export class GameLoop {
     if (this.stopHandle) {
       this.stopHandle();
       this.stopHandle = null;
-      console.log('[GameLoop] Stopped');
     }
   }
 }

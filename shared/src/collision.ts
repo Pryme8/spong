@@ -1,5 +1,6 @@
 import { inverseTransformPoint, inverseTransformDirection } from './rockgen/RockMeshTransform.js';
 import type { RockBounds } from './rockgen/RockMesh.js';
+import type { TreeTransform } from './treegen/TreeMeshTransform.js';
 
 /**
  * Capsule vs Capsule collision test (simplified as cylinders in XZ plane).
@@ -665,6 +666,127 @@ function closestPointOnTriangle(
  * @param transform Rock transform (position, rotation, scale)
  * @returns Collision result with push-out vector
  */
+/**
+ * Capsule vs tree mesh collision (tree-specific coordinate system).
+ * Trees use voxel grid coordinates (0-50 range) with specific centering offsets.
+ */
+export function capsuleVsTreeMesh(
+  capsuleX: number,
+  capsuleY: number,
+  capsuleZ: number,
+  capsuleRadius: number,
+  _capsuleHeight: number,
+  mesh: { vertices: Float32Array; indices: Uint32Array },
+  transform: TreeTransform
+): { colliding: boolean; pushX: number; pushY: number; pushZ: number } {
+  // Tree coordinate system constants (must match visual rendering)
+  const TREE_GRID_SIZE = 50;
+  const TREE_VOXEL_SIZE = 0.5;
+  const halfGrid = TREE_GRID_SIZE * TREE_VOXEL_SIZE * 0.5; // 12.5
+  const yOffset = 2 * TREE_VOXEL_SIZE; // 1.0
+  
+  // Transform capsule to tree local space
+  // Inverse of: worldPos = (localPos - offset) * scale + transform.pos
+  const { posX, posY, posZ, rotY, scale } = transform;
+  
+  // Inverse translate
+  let tx = capsuleX - posX;
+  let ty = capsuleY - posY;
+  let tz = capsuleZ - posZ;
+  
+  // Inverse rotate
+  const cosY = Math.cos(-rotY);
+  const sinY = Math.sin(-rotY);
+  const rx = tx * cosY - tz * sinY;
+  const rz = tx * sinY + tz * cosY;
+  
+  // Inverse scale and add centering offset to get voxel grid coordinates
+  const localX = (rx / scale) + halfGrid;
+  const localY = (ty / scale) + yOffset;
+  const localZ = (rz / scale) + halfGrid;
+  
+  const localRadius = capsuleRadius / scale;
+  const localCenter: [number, number, number] = [localX, localY, localZ];
+  
+  let totalPushX = 0;
+  let totalPushY = 0;
+  let totalPushZ = 0;
+  let collisionCount = 0;
+  
+  const triangleCount = mesh.indices.length / 3;
+  
+  // Test all triangles
+  for (let t = 0; t < triangleCount; t++) {
+    const i0 = mesh.indices[t * 3 + 0];
+    const i1 = mesh.indices[t * 3 + 1];
+    const i2 = mesh.indices[t * 3 + 2];
+    
+    const v0: [number, number, number] = [
+      mesh.vertices[i0 * 3 + 0],
+      mesh.vertices[i0 * 3 + 1],
+      mesh.vertices[i0 * 3 + 2]
+    ];
+    
+    const v1: [number, number, number] = [
+      mesh.vertices[i1 * 3 + 0],
+      mesh.vertices[i1 * 3 + 1],
+      mesh.vertices[i1 * 3 + 2]
+    ];
+    
+    const v2: [number, number, number] = [
+      mesh.vertices[i2 * 3 + 0],
+      mesh.vertices[i2 * 3 + 1],
+      mesh.vertices[i2 * 3 + 2]
+    ];
+    
+    const closest = closestPointOnTriangle(localCenter, v0, v1, v2);
+    
+    const dx = localCenter[0] - closest[0];
+    const dy = localCenter[1] - closest[1];
+    const dz = localCenter[2] - closest[2];
+    const distSq = dx * dx + dy * dy + dz * dz;
+    
+    if (distSq < localRadius * localRadius && distSq > 1e-8) {
+      const dist = Math.sqrt(distSq);
+      const penetration = localRadius - dist;
+      
+      const pushX = (dx / dist) * penetration;
+      const pushY = (dy / dist) * penetration;
+      const pushZ = (dz / dist) * penetration;
+      
+      totalPushX += pushX;
+      totalPushY += pushY;
+      totalPushZ += pushZ;
+      collisionCount++;
+    }
+  }
+  
+  if (collisionCount > 0) {
+    const avgPushX = totalPushX / collisionCount;
+    const avgPushY = totalPushY / collisionCount;
+    const avgPushZ = totalPushZ / collisionCount;
+    
+    // Transform push back to world space (forward rotation, not inverse)
+    const scaledX = avgPushX * scale;
+    const scaledY = avgPushY * scale;
+    const scaledZ = avgPushZ * scale;
+    
+    const fwdCosY = Math.cos(rotY);
+    const fwdSinY = Math.sin(rotY);
+    const worldPushX = scaledX * fwdCosY - scaledZ * fwdSinY;
+    const worldPushZ = scaledX * fwdSinY + scaledZ * fwdCosY;
+    
+    return {
+      colliding: true,
+      pushX: worldPushX,
+      pushY: scaledY,
+      pushZ: worldPushZ
+    };
+  }
+  
+  return { colliding: false, pushX: 0, pushY: 0, pushZ: 0 };
+}
+
 export function capsuleVsTriangleMesh(
   capsuleX: number,
   capsuleY: number,
@@ -674,7 +796,7 @@ export function capsuleVsTriangleMesh(
   mesh: { vertices: Float32Array; indices: Uint32Array; bounds: RockBounds },
   transform: { posX: number; posY: number; posZ: number; rotY: number; scale: number }
 ): { colliding: boolean; pushX: number; pushY: number; pushZ: number } {
-  // Transform capsule center to local space
+  // Transform capsule center to local space (rock-specific, bounds-centered)
   const localCenter = inverseTransformPoint(capsuleX, capsuleY, capsuleZ, transform, mesh.bounds);
   
   // Scale radius to local space

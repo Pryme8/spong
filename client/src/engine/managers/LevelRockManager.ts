@@ -38,8 +38,6 @@ export class LevelRockManager {
    * Call this once during level load.
    */
   async initialize(): Promise<void> {
-    console.log(`Initializing rock meshes for level ${this.levelSeed}...`);
-
     this.variations = generateRockVariations(this.levelSeed, 5, 9);
 
     for (let i = 0; i < this.variations.length; i++) {
@@ -61,8 +59,6 @@ export class LevelRockManager {
       const centerZ = (bounds.minZ + bounds.maxZ) * 0.5;
       this.variationCenters.push(new Vector3(centerX, centerY, centerZ));
     }
-
-    console.log(`Created ${this.variationMeshes.length} rock variation meshes`);
   }
 
   /**
@@ -70,8 +66,6 @@ export class LevelRockManager {
    * Call this when RockSpawn message is received from server.
    */
   spawnRockInstances(instances: RockInstance[]): void {
-    console.log(`Spawning ${instances.length} rock instances...`);
-
     // Build collision data matching server (Room.ts spawnLevelRocks)
     this.colliderMeshes = instances.map(instance => {
       const variation = this.variations[instance.variationId];
@@ -86,13 +80,10 @@ export class LevelRockManager {
         }
       };
     });
-    console.log(`Built ${this.colliderMeshes.length} rock collider meshes for client prediction`);
-
     for (const instance of instances) {
       const mesh = this.variationMeshes[instance.variationId];
       
       if (!mesh) {
-        console.warn(`Missing mesh for rock variation ${instance.variationId}`);
         continue;
       }
 
@@ -123,8 +114,6 @@ export class LevelRockManager {
         if (sm) sm.addShadowCaster(rockInstance, true);
       }
     }
-
-    console.log(`Spawned ${instances.length} rock instances`);
   }
 
   /**

@@ -1,7 +1,7 @@
 import { GRAVITY, GROUND_HEIGHT, CHARACTER, WATER } from './physicsConstants.js';
 import { PLAYER_HITBOX_HALF, PLAYER_CAPSULE_RADIUS } from './types.js';
 import type { VoxelGrid } from './levelgen/VoxelGrid.js';
-import { aabbVsVoxelGrid, capsuleVsTriangleMesh } from './collision.js';
+import { aabbVsVoxelGrid, capsuleVsTriangleMesh, capsuleVsTreeMesh } from './collision.js';
 import type { RockColliderMesh, RockTransform } from './rockgen/index.js';
 import type { TreeColliderMesh } from './treegen/TreeMesh.js';
 import type { TreeTransform } from './treegen/TreeMeshTransform.js';
@@ -417,9 +417,10 @@ export function stepCharacter(
   }
 
   // ── Tree collision (triangle mesh obstacles) ────────────────
+  // Trees use voxel grid coordinates with specific offsets (matching visual rendering)
   if (treeColliderMeshes && treeColliderMeshes.length > 0) {
     for (const treeData of treeColliderMeshes) {
-      const result = capsuleVsTriangleMesh(
+      const result = capsuleVsTreeMesh(
         state.posX,
         state.posY,
         state.posZ,

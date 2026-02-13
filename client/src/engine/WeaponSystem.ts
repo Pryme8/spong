@@ -82,8 +82,6 @@ export class WeaponSystem {
     this.isReloading.value = false;
     this.weaponIsReloading = false;
     this.reloadProgress.value = 0;
-
-    console.log(`[WeaponSystem] Equipped ${type}: ${this.weaponAmmo}/${this.weaponCapacity} ammo, ${this.weaponFireRateCooldown}ms cooldown, zoom: ${this.weaponZoomFactor}x`);
   }
 
   /**
@@ -210,7 +208,6 @@ export class WeaponSystem {
 
     // Sky pick sphere ensures we always hit something
     if (!pick || !pick.hit || !pick.pickedPoint) {
-      console.warn('[WeaponSystem] Pick failed despite sky pick sphere');
       return false;
     }
 

@@ -2,11 +2,32 @@
  * Level tree manager - handles tree mesh generation and instancing for levels.
  */
 
-import { Scene, Mesh, StandardMaterial, Color3, VertexData, TransformNode } from '@babylonjs/core';
-import { generateTreeVariations, type TreeVariation, type TreeInstance, type TreeQuad, TreeLeafMeshBuilder, TreeMeshDecimator } from '@spong/shared';
+import { Scene, Mesh, StandardMaterial, Color3, VertexData, TransformNode, MeshBuilder } from '@babylonjs/core';
+import { generateTreeVariations, type TreeVariation, type TreeInstance, type TreeQuad } from '@spong/shared';
 import type { TreeColliderMesh } from '@spong/shared/dist/src/treegen/TreeMesh';
 import type { TreeTransform } from '@spong/shared/dist/src/treegen/TreeMeshTransform';
 import { ShadowManager } from '../systems/ShadowManager';
+
+/** Leaf collider data: pre-transformed local-space AABB + world transform */
+export interface LeafColliderData {
+  /** Local-space axis-aligned bounding box (before world transform) */
+  localMinX: number;
+  localMinY: number;
+  localMinZ: number;
+  localMaxX: number;
+  localMaxY: number;
+  localMaxZ: number;
+  /** World transform */
+  posX: number;
+  posY: number;
+  posZ: number;
+  rotY: number;
+  /** Precomputed sin/cos for inverse rotation */
+  sinRotY: number;
+  cosRotY: number;
+  /** Index into the tree instances array */
+  treeIndex: number;
+}
 
 /**
  * Manages tree mesh variations and instances for a level.
@@ -30,11 +51,24 @@ export class LevelTreeManager {
   /** Leaf collider meshes for trigger detection (one per variation) */
   private leafColliderMeshes: TreeColliderMesh[] = [];
   
-  /** Invisible trigger meshes for each tree instance */
-  private leafTriggerMeshes: Array<{ mesh: Mesh; treeIndex: number }> = [];
+  /** Pre-computed local-space AABBs for each leaf variation */
+  private leafLocalBounds: Array<{ minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }> = [];
+  
+  /** Leaf collider data for all tree instances (for octree + point-in-local-AABB checks) */
+  private leafColliders: LeafColliderData[] = [];
+  
+  /** Babylon meshes used only for debug visualization */
+  private leafDebugMeshes: Mesh[] = [];
   
   /** Debug visualization meshes for wood collision (optional) */
   private woodCollisionDebugMeshes: Mesh[] = [];
+
+  // Tree mesh transform constants
+  private static readonly GRID_SIZE = 50;
+  private static readonly VOXEL_SIZE = 0.5;
+  private static readonly TREE_SCALE = 0.4;
+  private static readonly HALF_GRID = LevelTreeManager.GRID_SIZE * LevelTreeManager.VOXEL_SIZE * 0.5;
+  private static readonly Y_OFFSET = 2 * LevelTreeManager.VOXEL_SIZE;
 
   constructor(scene: Scene, levelSeed: string) {
     this.scene = scene;
@@ -51,8 +85,6 @@ export class LevelTreeManager {
    * Generates meshes progressively to avoid blocking the main thread.
    */
   async initialize(): Promise<void> {
-    console.log(`Initializing tree meshes for level ${this.levelSeed}...`);
-
     // Generate tree variations
     this.variations = generateTreeVariations(this.levelSeed);
 
@@ -80,15 +112,42 @@ export class LevelTreeManager {
         this.variationLeafMeshes.push(null as any); // Placeholder for trees with no leaves
       }
       
-      // Build leaf collider mesh for trigger detection
-      const leafMeshBuilder = new TreeLeafMeshBuilder();
-      const fullLeafMesh = leafMeshBuilder.buildFromQuads(variation.quads);
-      const leafDecimator = new TreeMeshDecimator();
-      const leafColliderMesh = leafDecimator.decimate(fullLeafMesh, 12);
-      this.leafColliderMeshes.push(leafColliderMesh);
+      // Leaf collider generation disabled for now
+      // const leafMeshBuilder = new TreeLeafMeshBuilder();
+      // const fullLeafMesh = leafMeshBuilder.buildFromQuads(variation.quads);
+      // const leafDecimator = new TreeMeshDecimator();
+      // const leafColliderMesh = leafDecimator.decimate(fullLeafMesh, 12);
+      // this.leafColliderMeshes.push(leafColliderMesh);
+      // const localBounds = this.computeLeafLocalBounds(leafColliderMesh);
+      // this.leafLocalBounds.push(localBounds);
     }
+  }
 
-    console.log(`Created ${this.variationWoodMeshes.length} tree variation meshes with leaf colliders`);
+  /**
+   * Compute the local-space AABB of a leaf collider mesh after centering/scaling.
+   * This is the AABB in the mesh's own coordinate space (before world position/rotation).
+   */
+  private computeLeafLocalBounds(leafColliderMesh: TreeColliderMesh): { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number } {
+    const { HALF_GRID, TREE_SCALE, Y_OFFSET } = LevelTreeManager;
+    const raw = leafColliderMesh.vertices;
+    
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    
+    for (let i = 0; i < raw.length; i += 3) {
+      const lx = (raw[i] - HALF_GRID) * TREE_SCALE;
+      const ly = (raw[i + 1] - Y_OFFSET) * TREE_SCALE;
+      const lz = (raw[i + 2] - HALF_GRID) * TREE_SCALE;
+      
+      if (lx < minX) minX = lx;
+      if (ly < minY) minY = ly;
+      if (lz < minZ) minZ = lz;
+      if (lx > maxX) maxX = lx;
+      if (ly > maxY) maxY = ly;
+      if (lz > maxZ) maxZ = lz;
+    }
+    
+    return { minX, minY, minZ, maxX, maxY, maxZ };
   }
 
   /**
@@ -96,8 +155,6 @@ export class LevelTreeManager {
    * Call this when TreeSpawn message is received from server.
    */
   spawnTreeInstances(instances: TreeInstance[]): void {
-    console.log(`Spawning ${instances.length} tree instances...`);
-
     // Build collision data matching server (Room.ts spawnLevelTrees)
     const TREE_SCALE = 0.4;
     this.colliderMeshes = instances.map(instance => {
@@ -113,15 +170,16 @@ export class LevelTreeManager {
         }
       };
     });
-    console.log(`Built ${this.colliderMeshes.length} tree collider meshes for client prediction`);
-
+    
+    // Build leaf collider data for each instance
+    this.leafColliders = [];
+    
     for (let i = 0; i < instances.length; i++) {
       const instance = instances[i];
       const woodMesh = this.variationWoodMeshes[instance.variationId];
       const leafMesh = this.variationLeafMeshes[instance.variationId];
       
       if (!woodMesh) {
-        console.warn(`Missing wood mesh for variation ${instance.variationId}`);
         continue;
       }
 
@@ -150,16 +208,13 @@ export class LevelTreeManager {
           if (sm) sm.addShadowCaster(leafInstance, true);
         }
         
-        // Create invisible trigger mesh for leaf detection
-        const leafColliderMesh = this.leafColliderMeshes[instance.variationId];
-        if (leafColliderMesh) {
-          const triggerMesh = this.createLeafTriggerMesh(leafColliderMesh, instance, i);
-          this.leafTriggerMeshes.push({ mesh: triggerMesh, treeIndex: i });
-        }
+        // Leaf collider data disabled for now
+        // const localBounds = this.leafLocalBounds[instance.variationId];
+        // if (localBounds) {
+        //   this.leafColliders.push({ ... });
+        // }
       }
     }
-
-    console.log(`Spawned ${instances.length} tree instances (${this.instanceRoots.length} total mesh instances, ${this.leafTriggerMeshes.length} leaf triggers)`);
   }
 
   /**
@@ -340,6 +395,7 @@ export class LevelTreeManager {
     mat.diffuseColor = new Color3(0.15, 0.35, 0.12); // Darker forest green
     mat.emissiveColor = new Color3(0, 0, 0); // No glow
     mat.specularColor = new Color3(0.03, 0.03, 0.03);
+    mat.backFaceCulling = false;
     return mat;
   }
 
@@ -348,69 +404,112 @@ export class LevelTreeManager {
     return this.colliderMeshes;
   }
 
+  /** Get leaf collider data for octree insertion and point-in-volume tests. */
+  getLeafColliders(): LeafColliderData[] {
+    return this.leafColliders;
+  }
+
   /**
-   * Create an invisible trigger mesh for leaf detection.
-   * Transforms vertices the same way as visible tree mesh.
+   * Check if a world-space point is inside a specific leaf collider.
+   * Transforms the point into the collider's local space and tests against the local AABB.
+   * This correctly handles rotation.
    */
-  private createLeafTriggerMesh(leafColliderMesh: TreeColliderMesh, instance: TreeInstance, treeIndex: number): Mesh {
-    const mesh = new Mesh(`tree_leaf_trigger_${treeIndex}`, this.scene);
-    const vd = new VertexData();
+  static PointInLeafCollider(px: number, py: number, pz: number, collider: LeafColliderData): boolean {
+    // Translate point relative to collider world position
+    const relX = px - collider.posX;
+    const relY = py - collider.posY;
+    const relZ = pz - collider.posZ;
     
-    // Collider vertices are in raw world space (TREE_VOXEL_SIZE units)
-    // Apply same centering and scaling as visible tree mesh
-    const GRID_SIZE = 50;
-    const VOXEL_SIZE = 0.5;
-    const TREE_SCALE = 0.4;
-    const halfGrid = GRID_SIZE * VOXEL_SIZE * 0.5;
-    const yOffset = 2 * VOXEL_SIZE;
+    // Inverse-rotate by -rotY to get into collider local space
+    // Uses same formula as inverseTransformPoint in TreeMeshTransform.ts:
+    //   cos(-rotY) = cosRotY,  sin(-rotY) = -sinRotY
+    //   localX = cosRotY * relX - (-sinRotY) * relZ = cosRotY * relX + sinRotY * relZ
+    //   localZ = (-sinRotY) * relX + cosRotY * relZ  = -sinRotY * relX + cosRotY * relZ
+    const localX =  collider.cosRotY * relX + collider.sinRotY * relZ;
+    const localY =  relY; // No Y rotation
+    const localZ = -collider.sinRotY * relX + collider.cosRotY * relZ;
     
-    const rawVertices = leafColliderMesh.vertices;
-    const transformedPositions: number[] = [];
-    
-    for (let i = 0; i < rawVertices.length; i += 3) {
-      transformedPositions.push(
-        (rawVertices[i] - halfGrid) * TREE_SCALE,
-        (rawVertices[i + 1] - yOffset) * TREE_SCALE,
-        (rawVertices[i + 2] - halfGrid) * TREE_SCALE
-      );
+    // Test against local AABB
+    return localX >= collider.localMinX && localX <= collider.localMaxX &&
+           localY >= collider.localMinY && localY <= collider.localMaxY &&
+           localZ >= collider.localMinZ && localZ <= collider.localMaxZ;
+  }
+
+  /**
+   * Check if camera position is inside any tree's leaf volume.
+   * Uses the leaf collider data with proper inverse-rotation for accurate detection.
+   * Returns the tree index if inside, -1 if outside all trees.
+   */
+  checkCameraInLeaves(cameraX: number, cameraY: number, cameraZ: number): number {
+    const maxCheckDistanceSq = 20 * 20;
+
+    for (const collider of this.leafColliders) {
+      // Fast distance check first
+      const dx = cameraX - collider.posX;
+      const dy = cameraY - collider.posY;
+      const dz = cameraZ - collider.posZ;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      
+      if (distSq > maxCheckDistanceSq) {
+        continue;
+      }
+
+      if (LevelTreeManager.PointInLeafCollider(cameraX, cameraY, cameraZ, collider)) {
+        return collider.treeIndex;
+      }
     }
-    
-    vd.positions = transformedPositions;
-    vd.indices = Array.from(leafColliderMesh.indices);
-    
-    vd.applyToMesh(mesh);
 
-    // Position at world location with proper offset
-    mesh.position.set(instance.worldX, instance.worldY + 0.4, instance.worldZ);
-    mesh.rotation.y = instance.rotationY;
-
-    mesh.isVisible = false;
-    mesh.isPickable = true;
-
-    return mesh;
+    return -1;
   }
 
   /**
    * Toggle leaf collision mesh debug visualization.
-   * Shows/hides wireframes of the leaf trigger volumes.
-   * Call this from browser console: window.toggleLeafDebug()
+   * Creates Babylon meshes on demand to show the leaf trigger volumes.
    */
   toggleLeafCollisionDebug(visible: boolean): void {
-    for (const { mesh } of this.leafTriggerMeshes) {
-      mesh.isVisible = visible;
-      
-      if (visible) {
-        // Show as green wireframe
-        const mat = new StandardMaterial(`leaf_debug_${mesh.name}`, this.scene);
+    if (visible && this.leafDebugMeshes.length === 0) {
+      // Build a debug mesh for each leaf collider instance
+      for (let i = 0; i < this.leafColliders.length; i++) {
+        const collider = this.leafColliders[i];
+        
+        // Find which variation this tree uses (search instances for the treeIndex)
+        // We need the actual triangle mesh for visualization - use the collider AABB as a box
+        const mesh = MeshBuilder.CreateBox(`leaf_debug_${i}`, {
+          width: collider.localMaxX - collider.localMinX,
+          height: collider.localMaxY - collider.localMinY,
+          depth: collider.localMaxZ - collider.localMinZ
+        }, this.scene);
+        
+        // Position the box center in local space, then apply world transform
+        const localCenterX = (collider.localMinX + collider.localMaxX) * 0.5;
+        const localCenterY = (collider.localMinY + collider.localMaxY) * 0.5;
+        const localCenterZ = (collider.localMinZ + collider.localMaxZ) * 0.5;
+        
+        // Forward-rotate local center to world space (opposite of inverse transform)
+        // Forward rotation: x' = cos(θ)*x - sin(θ)*z, z' = sin(θ)*x + cos(θ)*z
+        const worldCenterX = collider.cosRotY * localCenterX - collider.sinRotY * localCenterZ;
+        const worldCenterZ = collider.sinRotY * localCenterX + collider.cosRotY * localCenterZ;
+        
+        mesh.position.set(
+          collider.posX + worldCenterX,
+          collider.posY + localCenterY,
+          collider.posZ + worldCenterZ
+        );
+        mesh.rotation.y = collider.rotY;
+        
+        const mat = new StandardMaterial(`leaf_debug_mat_${i}`, this.scene);
         mat.wireframe = true;
-        mat.emissiveColor = new Color3(0, 1, 0); // Bright green
+        mat.emissiveColor = new Color3(0, 1, 0);
         mesh.material = mat;
-      } else {
-        mesh.material = null;
+        
+        this.leafDebugMeshes.push(mesh);
       }
+    } else if (!visible) {
+      for (const mesh of this.leafDebugMeshes) {
+        mesh.dispose();
+      }
+      this.leafDebugMeshes = [];
     }
-    
-    console.log(`[LevelTreeManager] Leaf collision debug: ${visible ? 'ENABLED' : 'DISABLED'} - ${this.leafTriggerMeshes.length} trigger meshes`);
   }
 
   /**
@@ -420,79 +519,56 @@ export class LevelTreeManager {
    */
   toggleWoodCollisionDebug(visible: boolean): void {
     if (visible && this.woodCollisionDebugMeshes.length === 0) {
-      // Create debug meshes from collision data
+      // Same centering constants as visual tree mesh and leaf triggers
+      const GRID_SIZE = 50;
+      const VOXEL_SIZE = 0.5;
+      const TREE_SCALE = 0.4;
+      const halfGrid = GRID_SIZE * VOXEL_SIZE * 0.5;
+      const yOffset = 2 * VOXEL_SIZE;
+
       for (let i = 0; i < this.colliderMeshes.length; i++) {
         const colliderData = this.colliderMeshes[i];
+        const rawVertices = colliderData.mesh.vertices;
+
+        // Transform vertices from voxel grid space to local centered space
+        // (same transform as createLeafTriggerMesh and visual tree mesh)
+        const transformedPositions: number[] = [];
+        for (let v = 0; v < rawVertices.length; v += 3) {
+          transformedPositions.push(
+            (rawVertices[v] - halfGrid) * TREE_SCALE,
+            (rawVertices[v + 1] - yOffset) * TREE_SCALE,
+            (rawVertices[v + 2] - halfGrid) * TREE_SCALE
+          );
+        }
+
         const mesh = new Mesh(`tree_wood_collision_debug_${i}`, this.scene);
         const vd = new VertexData();
-        
-        vd.positions = Array.from(colliderData.mesh.vertices);
+        vd.positions = transformedPositions;
         vd.indices = Array.from(colliderData.mesh.indices);
         vd.applyToMesh(mesh);
-        
-        // Apply same transform as collision
-        mesh.position.set(colliderData.transform.posX, colliderData.transform.posY, colliderData.transform.posZ);
+
+        // Position at world location (same as visual tree instances)
+        mesh.position.set(
+          colliderData.transform.posX,
+          colliderData.transform.posY,
+          colliderData.transform.posZ
+        );
         mesh.rotation.y = colliderData.transform.rotY;
-        mesh.scaling.setAll(colliderData.transform.scale);
-        
+
         // Red wireframe
         const mat = new StandardMaterial(`wood_collision_debug_mat_${i}`, this.scene);
         mat.wireframe = true;
-        mat.emissiveColor = new Color3(1, 0, 0); // Bright red
+        mat.emissiveColor = new Color3(1, 0, 0);
         mesh.material = mat;
-        
+
         this.woodCollisionDebugMeshes.push(mesh);
       }
-      console.log(`[LevelTreeManager] Wood collision debug: ENABLED - Created ${this.woodCollisionDebugMeshes.length} debug meshes`);
     } else if (!visible) {
-      // Dispose debug meshes
       for (const mesh of this.woodCollisionDebugMeshes) {
         mesh.dispose();
       }
       this.woodCollisionDebugMeshes = [];
-      console.log(`[LevelTreeManager] Wood collision debug: DISABLED`);
     }
-  }
-
-  /**
-   * Check if camera position is inside any tree's leaf trigger volume.
-   * Returns the tree index if inside, -1 if outside all trees.
-   * Optimized with early distance check before AABB test.
-   */
-  checkCameraInLeaves(cameraX: number, cameraY: number, cameraZ: number): number {
-    const triggerMargin = -0.1;
-    const maxCheckDistance = 20; // Only check trees within 20 units
-    const maxCheckDistanceSq = maxCheckDistance * maxCheckDistance;
-
-    for (const { mesh, treeIndex } of this.leafTriggerMeshes) {
-      const meshPos = mesh.position;
-      
-      // Fast distance check first (approximate sphere check)
-      const dx = cameraX - meshPos.x;
-      const dy = cameraY - meshPos.y;
-      const dz = cameraZ - meshPos.z;
-      const distSq = dx * dx + dy * dy + dz * dz;
-      
-      if (distSq > maxCheckDistanceSq) {
-        continue; // Skip this tree, it's too far away
-      }
-
-      // Only do AABB check for nearby trees
-      const triggerBounds = mesh.getBoundingInfo().boundingBox;
-      const worldMin = triggerBounds.minimumWorld;
-      const worldMax = triggerBounds.maximumWorld;
-
-      const inLeaves = 
-        cameraX >= (worldMin.x - triggerMargin) && cameraX <= (worldMax.x + triggerMargin) &&
-        cameraY >= (worldMin.y - triggerMargin) && cameraY <= (worldMax.y + triggerMargin) &&
-        cameraZ >= (worldMin.z - triggerMargin) && cameraZ <= (worldMax.z + triggerMargin);
-
-      if (inLeaves) {
-        return treeIndex;
-      }
-    }
-
-    return -1;
   }
 
   /**
@@ -508,7 +584,10 @@ export class LevelTreeManager {
     for (const mesh of this.variationLeafMeshes) {
       if (mesh) mesh.dispose();
     }
-    for (const { mesh } of this.leafTriggerMeshes) {
+    for (const mesh of this.leafDebugMeshes) {
+      mesh.dispose();
+    }
+    for (const mesh of this.woodCollisionDebugMeshes) {
       mesh.dispose();
     }
     this.woodMaterial?.dispose();
@@ -519,6 +598,9 @@ export class LevelTreeManager {
     this.variations = [];
     this.colliderMeshes = [];
     this.leafColliderMeshes = [];
-    this.leafTriggerMeshes = [];
+    this.leafLocalBounds = [];
+    this.leafColliders = [];
+    this.leafDebugMeshes = [];
+    this.woodCollisionDebugMeshes = [];
   }
 }

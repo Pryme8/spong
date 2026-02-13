@@ -53,9 +53,6 @@ export function generateBushVariations(
   colliderResolution: number = 18
 ): BushVariation[] {
   const variations: BushVariation[] = [];
-
-  console.log(`Generating ${count} bush variations for level (collider resolution: ${colliderResolution})...`);
-
   for (let i = 0; i < count; i++) {
     const bushSeed = `${baseSeed}_bush_${i}`;
     const params = randomBushParamsForSeed(bushSeed);
@@ -80,13 +77,6 @@ export function generateBushVariations(
       fullMesh,
       colliderMesh
     });
-    
-    const fullTriCount = fullMesh.indices.length / 3;
-    const reduction = ((1 - colliderMesh.triangleCount / fullTriCount) * 100).toFixed(1);
-    console.log(
-      `  Bush variation ${i}: ${quads.length} quads, ` +
-      `${fullTriCount} full tris → ${colliderMesh.triangleCount} collider tris (${reduction}% reduction)`
-    );
   }
 
   return variations;

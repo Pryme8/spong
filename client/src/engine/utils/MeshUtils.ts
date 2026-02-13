@@ -41,8 +41,6 @@ export function registerShadowCasters(
  * Makes missing meshes instantly visible for debugging.
  */
 export function createFallbackMesh(name: string, scene: Scene, options?: MeshOptions): TransformNode {
-  console.warn(`[MeshUtils] No mesh builder found for "${name}", using red cube fallback`);
-  
   const hasShadows = options?.hasShadows ?? true;
   const primitives = MeshPrimitives.getInstance();
   const root = new TransformNode(`${name}_root`, scene);

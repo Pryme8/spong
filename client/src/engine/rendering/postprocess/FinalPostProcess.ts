@@ -433,9 +433,6 @@ export class FinalPostProcess {
       effect.setFloat('time', this.time);
       effect.setFloat('grainIntensity', this.grainIntensity);
     };
-
-    console.log('[FinalPostProcess] Initialized (Color Grading + Tonemapping + Pencil + Chromatic Aberration + Sharpening + FXAA + Vignette + Grain)');
-    
     // Animate grain over time
     scene.onBeforeRenderObservable.add(() => {
       this.time += 0.01;
@@ -561,6 +558,5 @@ export class FinalPostProcess {
     this.fxaaPass.dispose();
     this.vignettePass.dispose();
     this.grainPass.dispose();
-    console.log('[FinalPostProcess] Disposed');
   }
 }

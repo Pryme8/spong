@@ -113,17 +113,14 @@ position: { x: ${position.value.x.toFixed(3)}, y: ${position.value.y.toFixed(3)}
 rotation: { x: ${rotation.value.x.toFixed(3)}, y: ${rotation.value.y.toFixed(3)}, z: ${rotation.value.z.toFixed(3)} }`;
   
   exportedCode.value = code;
-  console.log('[WeaponDebug] Exported values:', code);
 }
 
 function copyToClipboard() {
   navigator.clipboard.writeText(exportedCode.value);
-  console.log('[WeaponDebug] Copied to clipboard');
 }
 
 function disableDebugMode() {
   emit('disable-debug');
-  console.log('[WeaponDebug] Debug mode disabled, weapon will use default positioning');
 }
 </script>
 

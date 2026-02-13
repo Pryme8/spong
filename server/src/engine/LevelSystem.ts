@@ -145,8 +145,6 @@ export class LevelSystem {
         occupiedCells.add(`${Math.floor((wx + 100) / CELL_SIZE)},${Math.floor((wz + 100) / CELL_SIZE)}`);
       }
     }
-    console.log(`Spawned ${pistolsSpawned} pistols across the level (${PISTOL_COUNT - pistolsSpawned} rejected underwater)`);
-
     this.spawnScattered('smg', 12, rng, opts, occupiedCells, 'SMGs');
     this.spawnScattered('lmg', 6, rng, opts, occupiedCells, 'LMGs');
     this.spawnScattered('shotgun', 8, rng, opts, occupiedCells, 'Shotguns');
@@ -157,13 +155,9 @@ export class LevelSystem {
     this.spawnScattered('helmet', 10, rng, opts, occupiedCells, 'Helmets');
 
     this.spawnScatteredNoValidate('medic_pack', 15, rng, opts, occupiedCells);
-    console.log('Spawned 15 Medic Packs across the level');
     this.spawnScatteredNoValidate('large_medic_pack', 8, rng, opts, occupiedCells);
-    console.log('Spawned 8 Large Medic Packs across the level');
     this.spawnScatteredNoValidate('apple', 20, rng, opts, occupiedCells);
-    console.log('Spawned 20 Apples across the level');
     this.spawnScatteredNoValidate('pill_bottle', 5, rng, opts, occupiedCells);
-    console.log('Spawned 5 Pill Bottles across the level');
   }
 
   private spawnScattered(
@@ -184,7 +178,6 @@ export class LevelSystem {
         occupiedCells.add(`${Math.floor((wx + 100) / CELL_SIZE)},${Math.floor((wz + 100) / CELL_SIZE)}`);
       }
     }
-    console.log(`Spawned ${n} ${label} across the level (${count - n} rejected underwater)`);
   }
 
   private spawnScatteredNoValidate(
@@ -225,7 +218,6 @@ export class LevelSystem {
       };
     });
     const totalTris = this.rockColliderMeshes.reduce((s, d) => s + d.mesh.triangleCount, 0);
-    console.log(`Spawned ${this.rockInstances.length} rocks with ${totalTris} total collision triangles`);
   }
 
   private spawnLevelTrees(
@@ -246,8 +238,6 @@ export class LevelSystem {
     this.treeInstances = waterLevelProvider
       ? allTreeInstances.filter(inst => waterLevelProvider.isValidSpawnPosition(inst.worldX, inst.worldY, inst.worldZ))
       : allTreeInstances;
-    const filtered = allTreeInstances.length - this.treeInstances.length;
-    if (filtered > 0) console.log(`Filtered out ${filtered} underwater trees`);
 
     this.treeColliderMeshes = this.treeInstances.map(instance => {
       const variation = variations[instance.variationId];
@@ -263,7 +253,6 @@ export class LevelSystem {
       };
     });
     const totalTris = this.treeColliderMeshes.reduce((s, tm) => s + tm.mesh.triangleCount, 0);
-    console.log(`Placed ${this.treeInstances.length} tree instances with ${totalTris} total collider triangles`);
   }
 
   private spawnLevelBushes(
@@ -284,9 +273,6 @@ export class LevelSystem {
     this.bushInstances = waterLevelProvider
       ? allBushInstances.filter(inst => waterLevelProvider.isValidSpawnPosition(inst.worldX, inst.worldY, inst.worldZ))
       : allBushInstances;
-    const filtered = allBushInstances.length - this.bushInstances.length;
-    if (filtered > 0) console.log(`[Room] Filtered out ${filtered} underwater bushes`);
-    console.log(`[Room] ✓ Placed ${this.bushInstances.length} bush instances (transforms only, no physics)`);
   }
 
   private buildOctree(): void {
@@ -323,7 +309,6 @@ export class LevelSystem {
       };
       this.octree.insert(entry);
     }
-    console.log(`[Room] Octree built with ${this.treeColliderMeshes.length + this.rockColliderMeshes.length} colliders`);
   }
 
   getTreeColliderMeshes(): Array<{ mesh: TreeColliderMesh; transform: TreeTransform }> {

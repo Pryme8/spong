@@ -399,8 +399,6 @@ export class BuildModeManager {
     const url = new URL(window.location.href);
     url.searchParams.set('build', base64);
     window.history.pushState({}, '', url);
-    
-    console.log(`[BuildMode] Building saved to URL (${blocks.length} blocks)`);
   }
 
   /**
@@ -425,11 +423,8 @@ export class BuildModeManager {
         gridZ: block.z,
         colorIndex: block.c
       }));
-      
-      console.log(`[BuildMode] Building loaded from URL (${this.pendingBlocks.length} blocks)`);
       return true;
     } catch (e) {
-      console.error('[BuildMode] Failed to load building from URL:', e);
       return false;
     }
   }

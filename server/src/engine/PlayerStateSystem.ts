@@ -57,7 +57,6 @@ export class PlayerStateSystem {
           entityId: entity.id,
           buffType: expiredBuff.type
         });
-        console.log(`[Buff] Player ${entity.id} buff expired: ${expiredBuff.type}`);
       }
     }
   }
@@ -158,7 +157,7 @@ export class PlayerStateSystem {
       const shootable = entity.get<ShootableComponent>(COMP_SHOOTABLE);
       const weaponTypeComp = entity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
       if (shootable && weaponTypeComp && shootable.currentBloom > 0 && weaponTypeComp.type in WEAPON_STATS) {
-        shootable.currentBloom = applyBloomDecay(shootable.currentBloom, weaponTypeComp.type as WeaponType);
+        shootable.currentBloom = applyBloomDecay(shootable.currentBloom, weaponTypeComp.type as WeaponType, FIXED_TIMESTEP);
       }
       if (stamina?.isExhausted) {
         pc.state.velX *= 0.5;

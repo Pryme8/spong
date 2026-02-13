@@ -299,7 +299,6 @@ const defaultValues = {
 function getShadowGenerator() {
   const manager = ShadowManager.getInstance();
   if (!manager) {
-    console.warn('[ShadowDebug] ShadowManager not initialized yet');
     return null;
   }
   return manager.getGenerator();
@@ -319,8 +318,6 @@ function updateMapSize() {
   const scene = generator.getShadowMap()?.getScene();
   const light = scene?.getLightByName('dirLight');
   if (!light || !scene) return;
-  
-  console.log(`[ShadowDebug] Map size change requires scene recreation (${mapSize.value})`);
 }
 
 function updateCascades() {
@@ -492,8 +489,6 @@ function resetToDefaults() {
   updateAutoExtends();
   updateFreezeCasters();
   updateDebugMode();
-  
-  console.log('[ShadowDebug] Reset to defaults');
 }
 
 function exportConfig() {
@@ -540,10 +535,8 @@ dirLight.autoUpdateExtends = ${config.autoUpdateExtends};
 dirLight.autoCalcShadowZBounds = ${config.autoCalcShadowZBounds};`;
 
   navigator.clipboard.writeText(configCode).then(() => {
-    console.log('[ShadowDebug] Configuration copied to clipboard');
     alert('Shadow configuration copied to clipboard!');
   }).catch(err => {
-    console.error('[ShadowDebug] Failed to copy:', err);
     alert('Failed to copy configuration');
   });
 }

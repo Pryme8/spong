@@ -11,7 +11,10 @@ import {
   getFireRateCooldownMs,
   calculateBarrelTipWorldPosition,
   calculateRecoilKick,
+  getRecoilRiseSpeed,
+  getRecoilRecoveryPerS,
   getBloomIncrement,
+  getBloomRange,
   applyBloomDecay,
   getCurrentAccuracy,
   type WeaponType
@@ -89,8 +92,6 @@ export class WeaponSystem {
     this.reloadProgress.value = 0;
     this.currentBloom = 0; // Reset bloom on weapon equip
     this.bloomPercent.value = 0;
-
-    console.log(`[WeaponSystem] Equipped ${type}: ${this.weaponAmmo}/${this.weaponCapacity} ammo, ${this.weaponFireRateCooldown}ms cooldown, zoom: ${this.weaponZoomFactor}x`);
   }
 
   /**
@@ -203,23 +204,16 @@ export class WeaponSystem {
     const pick = scene.pickWithRay(
       ray,
       (mesh) => {
-        // Skip projectile meshes
         if (mesh.name.startsWith('proj_')) return false;
-        // Skip our own player cube
         if (mesh.name === `cube_${myTransform.entityId}`) return false;
-        // Skip our player's head mesh
         if (mesh.name === `head_${myTransform.entityId}`) return false;
-        // Skip item meshes
         if (mesh.name.startsWith('item_')) return false;
-        // Skip the hidden base player cube
         if (mesh.name === 'basePlayerCube') return false;
         return mesh.isPickable;
       }
     );
 
-    // Sky pick sphere ensures we always hit something
     if (!pick || !pick.hit || !pick.pickedPoint) {
-      console.warn('[WeaponSystem] Pick failed despite sky pick sphere');
       return false;
     }
 
@@ -336,13 +330,14 @@ export class WeaponSystem {
       finalSpawnX, finalSpawnY, finalSpawnZ
     );
 
-    // Apply recoil kick to camera
-    const recoilKick = calculateRecoilKick(this.internalWeaponType);
-    cameraController.applyRecoilKick(recoilKick);
+    cameraController.applyRecoilKick(calculateRecoilKick(this.internalWeaponType), {
+      risePerS: getRecoilRiseSpeed(this.internalWeaponType),
+      recoveryPerS: getRecoilRecoveryPerS(this.internalWeaponType)
+    });
 
-    // Increase bloom
+    // Increase bloom (clamp to 100%)
     const bloomIncrement = getBloomIncrement(this.internalWeaponType);
-    this.currentBloom += bloomIncrement;
+    this.currentBloom = Math.min(getBloomRange(this.internalWeaponType), this.currentBloom + bloomIncrement);
 
     return true;
   }
@@ -407,13 +402,14 @@ export class WeaponSystem {
   }
 
   /**
-   * Update bloom decay (call every frame)
+   * Update bloom decay (call every frame with frame delta in seconds)
    */
-  updateBloom(): void {
+  updateBloom(dtSec: number): void {
     if (this.currentBloom > 0 && this.hasWeapon.value) {
-      this.currentBloom = applyBloomDecay(this.currentBloom, this.internalWeaponType);
+      this.currentBloom = applyBloomDecay(this.currentBloom, this.internalWeaponType, dtSec);
+      this.currentBloom = Math.min(getBloomRange(this.internalWeaponType), this.currentBloom);
     }
-    
+
     // Update reactive bloom percent (0-1 normalized)
     if (this.hasWeapon.value) {
       const stats = WEAPON_STATS[this.internalWeaponType];

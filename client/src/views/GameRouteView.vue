@@ -25,7 +25,6 @@ const roomId = ref('');
 const levelConfig = ref<any>({});
 
 function handleGameLoading(data: { roomId: string; seed: string; config: any }) {
-  console.log('[GameRouteView] Game loading started:', data);
   gameLoading.value = true;
   levelSeed.value = data.seed;
   roomId.value = data.roomId;
@@ -56,7 +55,6 @@ function handleGameLoading(data: { roomId: string; seed: string; config: any }) 
 }
 
 function handleLoadingComplete() {
-  console.log('[GameRouteView] Loading complete, game started');
   gameLoading.value = false;
   gameStarted.value = true;
 }

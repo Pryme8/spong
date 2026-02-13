@@ -13,8 +13,6 @@ import { playSFX, playSFX3D, stopSFX } from './audioHelpers';
  * Call this in your GameView setup, after scene is created.
  */
 export async function initializeAudio(scene: Scene): Promise<void> {
-  console.log('[Game] Initializing audio system...');
-
   // Initialize AudioManager
   const audioManager = AudioManager.initialize(scene);
 
@@ -33,8 +31,6 @@ export async function initializeAudio(scene: Scene): Promise<void> {
   if (musicChannel) {
     musicChannel.volume = 0.6;
   }
-
-  console.log('[Game] Audio system ready');
 }
 
 // ────────────────────────────────────────────────────────────────────────────

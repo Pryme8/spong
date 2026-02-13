@@ -315,13 +315,14 @@ export class ItemSystem {
       const pc = playerEntity.get<PlayerComponent>(COMP_PLAYER);
       if (!pc) continue;
       const collected = playerEntity.get<CollectedComponent>(COMP_COLLECTED);
-      if (collected && collected.items.length > 0) continue;
 
       const nearbyItems = this.queryPickupGrid(pc.state.posX, pc.state.posZ, PICKUP_RANGE);
       for (const itemId of nearbyItems) {
         if (scheduledItems.has(itemId)) continue;
         const itemEntity = this.world.getEntity(itemId);
         if (!itemEntity) continue;
+        const pickupEffect = itemEntity.get<PickupEffectComponent>(COMP_PICKUP_EFFECT);
+        if (!pickupEffect && collected && collected.items.length > 0) continue;
         const physics = itemEntity.get<PhysicsComponent>(COMP_PHYSICS);
         if (!physics) continue;
         const dx = pc.state.posX - physics.posX;

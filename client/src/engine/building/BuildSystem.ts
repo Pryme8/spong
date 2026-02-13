@@ -112,8 +112,6 @@ export class BuildSystem {
 
     // Create grid preview plane
     this.createPreviewGridPlane();
-
-    console.log('[BuildSystem] Initialized');
   }
 
   /**
@@ -292,8 +290,6 @@ export class BuildSystem {
    * Handle mouse down - for demolish hold-to-destroy.
    */
   handleMouseDown(button: number): void {
-    console.log(`[BuildSystem] handleMouseDown - button: ${button}, mode: ${this.currentMode}`);
-    
     if (button === 0) { // Left mouse button
       if (this.currentMode === 'select') {
         this.handleSelectClick();
@@ -303,7 +299,6 @@ export class BuildSystem {
         this.startDemolish();
       }
     } else if (button === 2) { // Right mouse button
-      console.log(`[BuildSystem] Right-click detected in ${this.currentMode} mode`);
       if (this.currentMode === 'select') {
         this.deselectGrid();
       } else if (this.currentMode === 'build') {
@@ -346,7 +341,6 @@ export class BuildSystem {
     this.enterCurrentMode();
 
     this.onModeChangeCallback?.(mode);
-    console.log(`[BuildSystem] Mode changed to: ${mode}`);
   }
 
   /**
@@ -460,7 +454,6 @@ export class BuildSystem {
           this.selectGrid(gridId);
           return;
         } else {
-          console.log('[BuildSystem] Cannot select grid - not owned by player');
           return;
         }
       }
@@ -493,8 +486,6 @@ export class BuildSystem {
 
     // Hide grid placement preview when a grid is selected
     this.hidePreviewGrid();
-
-    console.log(`[BuildSystem] Grid ${gridId} selected`);
   }
 
   private deselectGrid(): void {
@@ -504,7 +495,6 @@ export class BuildSystem {
         // Check if grid is empty
         if (grid.isEmpty() && grid.getIsOwned()) {
           // Destroy empty grids on deselect
-          console.log(`[BuildSystem] Grid ${this.selectedGridId} is empty - destroying`);
           if (this.networkClient) {
             this.networkClient.sendLow(Opcode.BuildingDestroy, { buildingEntityId: this.selectedGridId });
           }
@@ -513,14 +503,12 @@ export class BuildSystem {
           grid.setColorState('white');
           grid.hideSelectionCube();
           grid.hidePreview();
-          console.log(`[BuildGrid] Deselecting grid ${this.selectedGridId}, setting to white`);
         }
       }
     }
 
     this.selectedGridId = null;
     this.selectedGridIdRef.value = null;
-    console.log('[BuildSystem] Grid deselected');
   }
 
   // ========== BUILD MODE ==========
@@ -604,9 +592,6 @@ export class BuildSystem {
             const zOffset = normal.z > 0 ? this.WORLD_SIZE : -this.WORLD_SIZE;
             snapPosition = new Vector3(existingPos.x, existingPos.y, existingPos.z + zOffset);
           }
-          
-          console.log(`[BuildSystem] Snapping to grid ${gridId} face, normal: (${normal.x.toFixed(2)}, ${normal.y.toFixed(2)}, ${normal.z.toFixed(2)}), new pos: (${snapPosition.x.toFixed(1)}, ${snapPosition.y.toFixed(1)}, ${snapPosition.z.toFixed(1)})`);
-          
           // Show preview at snapped position with same rotation as existing grid
           this.showPreviewGrid(snapPosition, existingRotY, true);
           return;
@@ -628,15 +613,12 @@ export class BuildSystem {
       // Place on ground/terrain at hit position
       const position = pickResult.pickedPoint.clone();
       position.y += 0.1; // Slightly above ground
-      console.log(`[BuildSystem] Preview on ground at (${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)})`);
       this.showPreviewGrid(position, playerRotY, true);
     } else {
       // No hit - project plane 4 units in front of camera
       const cameraPos = this.camera.position.clone();
       const cameraForward = this.camera.getDirection(Vector3.Forward());
       const projectedPos = cameraPos.add(cameraForward.scale(4));
-      
-      console.log(`[BuildSystem] Preview projected 4 units forward at (${projectedPos.x.toFixed(1)}, ${projectedPos.y.toFixed(1)}, ${projectedPos.z.toFixed(1)})`);
       this.showPreviewGrid(projectedPos, playerRotY, true);
     }
   }
@@ -685,7 +667,6 @@ export class BuildSystem {
         gridY,
         gridZ
       });
-      console.log(`[BuildSystem] Removing block at (${gridX}, ${gridY}, ${gridZ})`);
     }
   }
 
@@ -717,7 +698,6 @@ export class BuildSystem {
         gridZ: gridPos.z,
         colorIndex: this.currentColorIndex
       });
-      console.log(`[BuildSystem] Placing block at (${gridPos.x}, ${gridPos.y}, ${gridPos.z})`);
     }
   }
 
@@ -759,7 +739,6 @@ export class BuildSystem {
 
   private createNewGrid(): void {
     if (!this.networkClient) {
-      console.warn('[BuildSystem] Cannot create grid - no network client');
       return;
     }
 
@@ -772,9 +751,7 @@ export class BuildSystem {
 
       // Send BuildingCreate message to server
       this.networkClient.sendLow(Opcode.BuildingCreate, { posX, posY, posZ, rotY });
-      console.log(`[BuildSystem] Requesting new grid at preview position (${posX.toFixed(1)}, ${posY.toFixed(1)}, ${posZ.toFixed(1)})`);
     } else {
-      console.warn('[BuildSystem] Cannot create grid - no preview position');
     }
   }
 
@@ -802,8 +779,6 @@ export class BuildSystem {
       this.gizmoManager.gizmos.rotationGizmo.yGizmo.isEnabled = true;
       this.gizmoManager.gizmos.rotationGizmo.zGizmo.isEnabled = false;
     }
-
-    console.log('[BuildSystem] Gizmos enabled for selected grid');
   }
 
   /**
@@ -823,8 +798,6 @@ export class BuildSystem {
       posZ: root.position.z,
       rotY: root.rotation.y
     });
-
-    console.log(`[BuildSystem] Transform synced for grid ${this.selectedGridId}`);
   }
 
   // ========== DEMOLISH MODE ==========
@@ -877,7 +850,6 @@ export class BuildSystem {
     this.demolishInProgress = true;
     this.demolishStartTime = performance.now();
     this.demolishProgressRef.value = 0;
-    console.log(`[BuildSystem] Starting demolish for grid ${this.demolishTargetId}`);
   }
 
   /**
@@ -889,7 +861,6 @@ export class BuildSystem {
     this.demolishInProgress = false;
     this.demolishProgressRef.value = 0;
     this.demolishTargetId = null;
-    console.log('[BuildSystem] Demolish cancelled');
   }
 
   /**
@@ -901,7 +872,6 @@ export class BuildSystem {
     // Send BuildingDestroy message to server
     if (this.networkClient) {
       this.networkClient.sendLow(Opcode.BuildingDestroy, { buildingEntityId: this.demolishTargetId });
-      console.log(`[BuildSystem] Demolishing grid ${this.demolishTargetId}`);
     }
 
     this.demolishInProgress = false;
@@ -930,8 +900,6 @@ export class BuildSystem {
     if (isOwned) {
       this.selectGrid(buildingEntityId);
     }
-
-    console.log(`[BuildSystem] Grid ${buildingEntityId} created at (${gridPositionX.toFixed(1)}, ${gridPositionY.toFixed(1)}, ${gridPositionZ.toFixed(1)})`);
   }
 
   /**
@@ -945,8 +913,6 @@ export class BuildSystem {
     const root = grid.getRoot();
     root.position.set(posX, posY, posZ);
     root.rotation.y = rotY;
-
-    console.log(`[BuildSystem] Grid ${buildingEntityId} transformed`);
   }
 
   /**
@@ -965,8 +931,6 @@ export class BuildSystem {
     if (this.selectedGridId === buildingEntityId) {
       this.deselectGrid();
     }
-
-    console.log(`[BuildSystem] Grid ${buildingEntityId} destroyed`);
   }
 
   /**
@@ -988,8 +952,6 @@ export class BuildSystem {
     }
     
     this.grids.set(buildingEntityId, grid);
-
-    console.log(`[BuildSystem] Grid ${buildingEntityId} initialized with ${blocks.length} blocks`);
   }
 
   /**
@@ -1035,6 +997,5 @@ export class BuildSystem {
     this.previewGridPlane?.dispose();
     this.previewGridMaterial?.dispose();
     this.previewGridRoot?.dispose();
-    console.log('[BuildSystem] Disposed');
   }
 }

@@ -28,15 +28,12 @@ export class TimeManager {
 
   static Initialize(scene: Scene): void {
     if (this.initialized) {
-      console.warn('[TimeManager] Already initialized');
       return;
     }
 
     World.getInstance(); // Ensure World singleton exists
     this.Now = performance.now();
     this.initialized = true;
-
-    console.log('[TimeManager] Initialized - call Update() from fixed timestep loop');
   }
 
   /**
@@ -52,6 +49,5 @@ export class TimeManager {
     World.dispose();
     this.Now = 0;
     this.initialized = false;
-    console.log('[TimeManager] Disposed');
   }
 }

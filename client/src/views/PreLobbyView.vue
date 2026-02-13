@@ -559,8 +559,6 @@ watch(lobbyConfig, (config) => {
 // Watch for game loading to start - emit immediately so GameView can load level
 watch(gameLoadingConfig, (config) => {
   if (config) {
-    console.log('[PreLobby] Game loading config received, emitting game-loading event:', config);
-    
     // Emit immediately when loading starts
     emit('game-loading', {
       roomId: roomId.value || '',
@@ -580,7 +578,6 @@ onMounted(async () => {
   // If no room specified, generate a unique one (user becomes owner)
   if (!targetRoom) {
     targetRoom = `lobby_${Math.random().toString(36).substring(2, 15)}`;
-    console.log(`[PreLobby] No room specified, created unique room: ${targetRoom}`);
   }
   
   await session.init(targetRoom);

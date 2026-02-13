@@ -501,12 +501,10 @@ export class LocalTransform {
       // Create armor mesh
       this.armorNode = createPlayerArmorMesh(`player_${this.entityId}`, this.scene);
       this.armorNode.parent = this.node;
-      console.log(`[LocalTransform] Created armor mesh for entity ${this.entityId}`);
     } else if (!hasArmor && this.armorNode) {
       // Remove armor mesh
       disposePlayerArmorMesh(`player_${this.entityId}`, this.scene);
       this.armorNode = null;
-      console.log(`[LocalTransform] Removed armor mesh for entity ${this.entityId}`);
     }
   }
 
@@ -518,12 +516,10 @@ export class LocalTransform {
       // Create helmet mesh attached to head
       this.helmetNode = createPlayerHelmetMesh(`player_${this.entityId}`, this.scene);
       this.helmetNode.parent = this.headNode;
-      console.log(`[LocalTransform] Created helmet mesh for entity ${this.entityId}`);
     } else if (!hasHelmet && this.helmetNode) {
       // Remove helmet mesh
       disposePlayerHelmetMesh(`player_${this.entityId}`, this.scene);
       this.helmetNode = null;
-      console.log(`[LocalTransform] Removed helmet mesh for entity ${this.entityId}`);
     }
   }
 

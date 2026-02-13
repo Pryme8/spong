@@ -37,8 +37,6 @@ export class ShadowManager {
     this.shadowGenerator.penumbraRatio = 0.5;
     this.shadowGenerator.freezeShadowCastersBoundingInfo = false;
     this.shadowGenerator.debug = false;
-
-    console.log('[ShadowManager] Initialized with Cascaded Shadows (4 cascades, 4096x4096)');
   }
 
   /**
@@ -47,7 +45,6 @@ export class ShadowManager {
    */
   static initialize(light: DirectionalLight): ShadowManager {
     if (ShadowManager.instance) {
-      console.warn('[ShadowManager] Already initialized, disposing previous instance');
       ShadowManager.instance.dispose();
     }
     ShadowManager.instance = new ShadowManager(light);
@@ -97,6 +94,5 @@ export class ShadowManager {
   dispose(): void {
     this.shadowGenerator.dispose();
     ShadowManager.instance = null;
-    console.log('[ShadowManager] Disposed');
   }
 }

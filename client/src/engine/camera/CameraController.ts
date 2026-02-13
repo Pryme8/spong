@@ -11,11 +11,19 @@ const FIRST_PERSON = true;
 const AIM_MAX_RANGE = 200;
 const CAMERA_DISTANCE = 6.0; // Third-person distance
 const CAMERA_TARGET_OFFSET_Y = 1.75; // Third-person target offset
-const EYE_HEIGHT = 1.9; // First-person eye height (head cube at y=1.3, eyes near top at +0.6)
+/** First-person camera height: inside head (head center 1.3, -0.2 so eyes are inside). Used by camera and remote weapon view. */
+export const EYE_HEIGHT = 1.0;
+/** First-person camera offset along look direction (into head). Also applied to weapon view node and first-person hold. */
+export const EYE_FORWARD_OFFSET = 0.3;
+/** Layer mask for meshes hidden from main camera (e.g. local player head). Default camera mask is 0x0FFFFFFF so this layer is not rendered. */
+export const LAYER_HIDDEN_FROM_MAIN = 0x10000000;
 const MOUSE_SENSITIVITY = 0.003;
 const PITCH_MIN = -1.4; // ~80 degrees down
 const PITCH_MAX = 1.4;  // ~80 degrees up
-const DEFAULT_FOV = FIRST_PERSON ? 1.0 : 0.8; // Wider FOV for first-person
+// Vertical FOV in radians. Human natural ~60–75°; 1.15 rad ≈ 66°
+const DEFAULT_FOV = FIRST_PERSON ? 1.15 : 0.8;
+const DEFAULT_RECOIL_RISE_PER_S = 12;
+const DEFAULT_RECOIL_RECOVERY_PER_S = 1.0; // Finesse-based decay of accumulator (rad/s)
 
 export class CameraController {
   private camera: FreeCamera;
@@ -35,9 +43,18 @@ export class CameraController {
   private defaultFov = DEFAULT_FOV;
   private targetFov = DEFAULT_FOV;
   private currentFov = DEFAULT_FOV;
-  
+
+  // Recoil: kick accumulates; drains into pitch (risePerS, weight) and degrades by finesse (recoveryPerS).
+  private kickAccumulator = 0;
+  private recoilRisePerS = DEFAULT_RECOIL_RISE_PER_S;
+  private recoilRecoveryPerS = DEFAULT_RECOIL_RECOVERY_PER_S;
+
   // Debug third-person toggle
   private debugThirdPerson = false;
+
+  /** Debug offset for first-person camera (height Y, forward = along look direction). Used by CameraDebugPanel. */
+  private debugOffsetY = 0;
+  private debugOffsetForward = 0;
 
   // Event handler references for cleanup
   private contextMenuHandler = (e: Event) => e.preventDefault();
@@ -69,11 +86,9 @@ export class CameraController {
       const touch = e.touches[0];
       const deltaX = touch.clientX - this.lastTouchX;
       const deltaY = touch.clientY - this.lastTouchY;
-      
       this.yaw -= deltaX * MOUSE_SENSITIVITY;
       this.pitch += deltaY * MOUSE_SENSITIVITY;
       this.pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, this.pitch));
-      
       this.lastTouchX = touch.clientX;
       this.lastTouchY = touch.clientY;
     }
@@ -82,10 +97,11 @@ export class CameraController {
   constructor(scene: Scene) {
     this.scene = scene;
     
-    // Create FreeCamera at default position
+    // Create FreeCamera at default position (layer mask excludes LAYER_HIDDEN_FROM_MAIN so local head is not visible)
     this.camera = new FreeCamera('freeCamera', new Vector3(0, 5, -8), scene);
     this.camera.fov = DEFAULT_FOV;
     this.camera.minZ = 0.05;
+    this.camera.layerMask = 0x0FFFFFFF;
     
     // Disable all default camera inputs - we'll handle rotation manually
     this.camera.inputs.clear();
@@ -117,36 +133,45 @@ export class CameraController {
   update(deltaTime: number) {
     if (!this.target) return;
 
+    const transfer = Math.min(this.kickAccumulator, this.recoilRisePerS * deltaTime);
+    this.kickAccumulator -= transfer;
+    this.pitch -= transfer;
+    this.kickAccumulator = Math.max(0, this.kickAccumulator - this.recoilRecoveryPerS * deltaTime);
+    this.pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, this.pitch));
+
+    const pitch = this.pitch;
+
     const useFirstPerson = FIRST_PERSON && !this.debugThirdPerson;
 
     if (useFirstPerson) {
-      // First-person: camera at eye height, look at calculated target point
-      this.camera.position.x = this.target.x;
-      this.camera.position.y = this.target.y + EYE_HEIGHT;
-      this.camera.position.z = this.target.z;
-      
-      // Calculate look target using same math as third-person
-      // This ensures movement direction matches look direction
-      const lookDist = 10; // Short distance for look target
-      const targetX = this.target.x + Math.sin(this.yaw) * Math.cos(this.pitch) * lookDist;
-      const targetY = this.target.y + EYE_HEIGHT - Math.sin(this.pitch) * lookDist;
-      const targetZ = this.target.z + Math.cos(this.yaw) * Math.cos(this.pitch) * lookDist;
-      
-      this.camera.setTarget(new Vector3(targetX, targetY, targetZ));
+      // First-person: camera at eye height + debug offset, then move along head node's forward (horizontal only)
+      const eyeY = this.target.y + EYE_HEIGHT + this.debugOffsetY;
+      const headForwardX = Math.sin(this.yaw);
+      const headForwardZ = Math.cos(this.yaw);
+      const forwardOffset = EYE_FORWARD_OFFSET + this.debugOffsetForward;
+
+      this.camera.position.x = this.target.x + headForwardX * forwardOffset;
+      this.camera.position.y = eyeY;
+      this.camera.position.z = this.target.z + headForwardZ * forwardOffset;
+
+      const lookX = Math.sin(this.yaw) * Math.cos(pitch);
+      const lookY = -Math.sin(pitch);
+      const lookZ = Math.cos(this.yaw) * Math.cos(pitch);
+      const lookDist = 10;
+      this.camera.setTarget(new Vector3(
+        this.camera.position.x + lookX * lookDist,
+        this.camera.position.y + lookY * lookDist,
+        this.camera.position.z + lookZ * lookDist
+      ));
     } else {
-      // Third-person: camera orbits behind player
       const targetY = this.target.y + CAMERA_TARGET_OFFSET_Y;
-      
-      // Spherical coordinates to cartesian
-      const camX = this.target.x - Math.sin(this.yaw) * Math.cos(this.pitch) * CAMERA_DISTANCE;
-      const camY = targetY + Math.sin(this.pitch) * CAMERA_DISTANCE;
-      const camZ = this.target.z - Math.cos(this.yaw) * Math.cos(this.pitch) * CAMERA_DISTANCE;
+      const camX = this.target.x - Math.sin(this.yaw) * Math.cos(pitch) * CAMERA_DISTANCE;
+      const camY = targetY + Math.sin(pitch) * CAMERA_DISTANCE;
+      const camZ = this.target.z - Math.cos(this.yaw) * Math.cos(pitch) * CAMERA_DISTANCE;
       
       this.camera.position.x = camX;
       this.camera.position.y = camY;
       this.camera.position.z = camZ;
-      
-      // Always look at player target
       this.camera.setTarget(new Vector3(this.target.x, targetY, this.target.z));
     }
     
@@ -166,26 +191,23 @@ export class CameraController {
   }
 
   /**
-   * Returns the camera pitch angle in radians.
+   * Returns the camera pitch in radians.
    */
   getPitch(): number {
-    return this.pitch;
+    return Math.max(PITCH_MIN, Math.min(PITCH_MAX, this.pitch));
   }
 
   /**
    * Get aim point by projecting 30 units from camera using manual yaw/pitch.
-   * Manual calculation avoids issues with camera forward at extreme angles.
    *
    * @param myEntityId The local player entity ID (unused, kept for compatibility)
    */
   getAimPoint(myEntityId: number | null): Vector3 {
-    const AIM_DISTANCE = 30; // Fixed aim distance
-    
-    // Calculate forward direction from yaw/pitch manually
-    // In our coordinate system: +X is right, +Y is up, +Z is forward
-    const dirX = Math.sin(this.yaw) * Math.cos(this.pitch);
-    const dirY = -Math.sin(this.pitch);
-    const dirZ = Math.cos(this.yaw) * Math.cos(this.pitch);
+    const AIM_DISTANCE = 30;
+    const pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, this.pitch));
+    const dirX = Math.sin(this.yaw) * Math.cos(pitch);
+    const dirY = -Math.sin(pitch);
+    const dirZ = Math.cos(this.yaw) * Math.cos(pitch);
     
     // Project 50 units from camera position
     return new Vector3(
@@ -232,8 +254,6 @@ export class CameraController {
    */
   toggleDebugThirdPerson(localPlayerTransform?: any): void {
     this.debugThirdPerson = !this.debugThirdPerson;
-    console.log(`[CameraController] Debug third-person: ${this.debugThirdPerson ? 'ON' : 'OFF'}`);
-    
     // Local player body/head/helmet always visible (first-person and debug third-person)
     if (localPlayerTransform) {
       localPlayerTransform.setMeshVisibility(true);
@@ -247,16 +267,24 @@ export class CameraController {
     return this.debugThirdPerson;
   }
 
+  /** Get first-person camera debug offset (height Y, forward = along look axis). */
+  getDebugOffset(): { y: number; forward: number } {
+    return { y: this.debugOffsetY, forward: this.debugOffsetForward };
+  }
+
+  /** Set first-person camera debug offset (height Y, forward = along look axis). */
+  setDebugOffset(y: number, forward: number): void {
+    this.debugOffsetY = y;
+    this.debugOffsetForward = forward;
+  }
+
   /**
-   * Apply recoil kick (upward camera movement)
-   * Directly modifies pitch - player must manually compensate
-   * @param kickAmount Amount to kick upward in radians
+   * Add kick to accumulator. Drains into pitch at risePerS (weight); degrades at recoveryPerS (finesse).
    */
-  applyRecoilKick(kickAmount: number): void {
-    // Subtract because positive pitch = looking down, negative = looking up
-    this.pitch -= kickAmount;
-    // Clamp to valid pitch range
-    this.pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, this.pitch));
+  applyRecoilKick(kickAmount: number, options?: { risePerS?: number; recoveryPerS?: number }): void {
+    this.kickAccumulator += kickAmount;
+    if (options?.risePerS !== undefined) this.recoilRisePerS = options.risePerS;
+    if (options?.recoveryPerS !== undefined) this.recoilRecoveryPerS = options.recoveryPerS;
   }
 
   /**
@@ -274,7 +302,5 @@ export class CameraController {
     }
     
     document.removeEventListener('pointerlockchange', this.pointerLockChangeHandler);
-    
-    console.log('[CameraController] Disposed');
   }
 }

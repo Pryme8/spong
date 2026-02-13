@@ -10,7 +10,7 @@ import type { TreeColliderMesh } from './treegen/TreeMesh.js';
 import type { TreeTransform } from './treegen/TreeMeshTransform.js';
 import type { RockColliderMesh, RockTransform } from './rockgen/index.js';
 import type { BoxCollider } from './physics.js';
-import { aabbVsVoxelGrid, capsuleVsTriangleMesh } from './collision.js';
+import { aabbVsVoxelGrid, capsuleVsTriangleMesh, capsuleVsTreeMesh } from './collision.js';
 
 const BOUNCE_DAMPING = COLLECTABLE.BOUNCE_DAMPING;
 const ITEM_RADIUS = 0.3; // Items use sphere collision
@@ -66,10 +66,10 @@ export function stepCollectable(
     }
   }
 
-  // ── Tree collision (use capsule with minimal height) ─────────────
+  // ── Tree collision (use tree-specific collision with voxel grid coordinates) ─────────────
   if (treeColliderMeshes) {
     for (const treeData of treeColliderMeshes) {
-      const result = capsuleVsTriangleMesh(
+      const result = capsuleVsTreeMesh(
         physics.posX, physics.posY, physics.posZ,
         ITEM_RADIUS, ITEM_RADIUS * 2, // Capsule approximating sphere
         treeData.mesh, treeData.transform

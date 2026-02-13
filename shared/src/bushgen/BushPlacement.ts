@@ -46,9 +46,7 @@ export function placeBushInstances(
   const maxAttempts = targetCount * 10; // Try 10x the target count
   
   let attempts = 0;
-  let underwaterCount = 0;
   let occupiedCount = 0;
-  const heightSamples: number[] = [];
   while (instances.length < targetCount && attempts < maxAttempts) {
     attempts++;
     
@@ -58,11 +56,6 @@ export function placeBushInstances(
     
     // Get terrain height at this position
     const worldY = terrainGetHeight(worldX, worldZ);
-    
-    // Sample some heights for debugging (first 50)
-    if (heightSamples.length < 50) {
-      heightSamples.push(worldY);
-    }
     
     // Calculate cell coordinates for occupancy check
     const cellX = Math.floor(worldX / cellSize);
@@ -89,17 +82,6 @@ export function placeBushInstances(
       worldZ
     });
   }
-  
-  // Calculate height statistics
-  const avgHeight = heightSamples.length > 0 
-    ? (heightSamples.reduce((a, b) => a + b, 0) / heightSamples.length).toFixed(2)
-    : 'N/A';
-  const minHeight = heightSamples.length > 0 ? Math.min(...heightSamples).toFixed(2) : 'N/A';
-  const maxHeight = heightSamples.length > 0 ? Math.max(...heightSamples).toFixed(2) : 'N/A';
-  
-  console.log(`[BushPlacement] Placed ${instances.length}/${targetCount} bushes (${attempts} attempts)`);
-  console.log(`[BushPlacement] Level bounds: ${minX} to ${maxX}, ${minZ} to ${maxZ}`);
-  console.log(`[BushPlacement] Skipped: ${underwaterCount} underwater, ${occupiedCount} occupied`);
-  console.log(`[BushPlacement] Terrain heights (sampled ${heightSamples.length}): min=${minHeight}, max=${maxHeight}, avg=${avgHeight}`);
+
   return instances;
 }

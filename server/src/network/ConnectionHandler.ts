@@ -63,10 +63,9 @@ export class ConnectionHandler {
     });
 
     ws.on('error', (err) => {
-      console.error(`WebSocket error for ${id}:`, err);
+
     });
 
-    console.log(`Client connected: ${id}`);
   }
 
   private async handleMessage(conn: ConnectionState, data: Buffer) {
@@ -84,7 +83,7 @@ export class ConnectionHandler {
         view.set(data);
         await handler(conn, arrayBuffer);
       } else {
-        console.warn(`No binary handler for opcode: 0x${opcode.toString(16)}`);
+
       }
     } else {
       // Low-frequency JSON message
@@ -92,25 +91,22 @@ export class ConnectionHandler {
       if (handler) {
         try {
           const json = data.slice(1).toString('utf-8');
-          console.log(`[ConnectionHandler] Received opcode 0x${opcode.toString(16)}, length=${data.length}, JSON: ${json}`);
+
           const payload = JSON.parse(json);
           await handler(conn, payload);
         } catch (err) {
           const json = data.slice(1).toString('utf-8');
-          console.error(`[ConnectionHandler] Error parsing JSON message for opcode 0x${opcode.toString(16)}:`, err);
-          console.error(`[ConnectionHandler] Raw JSON string: "${json}"`);
-          console.error(`[ConnectionHandler] Buffer length: ${data.length}, First 20 bytes:`, Array.from(data.slice(0, 20)));
+
           this.sendError(conn, 'PARSE_ERROR', 'Invalid JSON payload');
         }
       } else {
-        console.warn(`No message handler for opcode: 0x${opcode.toString(16)}`);
+
       }
     }
   }
 
   private handleDisconnect(conn: ConnectionState) {
-    console.log(`Client disconnected: ${conn.id}`);
-    
+
     // Notify all disconnect handlers
     this.disconnectHandlers.forEach(handler => {
       handler(conn);
@@ -122,7 +118,7 @@ export class ConnectionHandler {
   private heartbeat() {
     this.connections.forEach((conn) => {
       if (!conn.isAlive) {
-        console.log(`Terminating inactive connection: ${conn.id}`);
+
         conn.ws.terminate();
         this.connections.delete(conn.id);
         return;

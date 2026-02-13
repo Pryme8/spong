@@ -32,6 +32,8 @@ export class ProjectileManager {
   // Tracking for matching predicted projectiles with server confirmations
   private recentPredictedIds: number[] = [];
   private readonly MATCH_WINDOW_MS = 500; // Match window
+  /** When we skip spawning server visual for our own shot, map server entityId -> our predicted id so destroy(serverId) removes the right visual. */
+  private serverEntityIdToPredictedId = new Map<number, number>();
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -59,23 +61,20 @@ export class ProjectileManager {
 
   /** Spawn a projectile from server broadcast. */
   spawnFromServer(data: ProjectileSpawnData): void {
-    // If this is our own projectile, destroy the predicted version
+    // Our own shot: keep local-only visual to avoid warp; map server id so destroy(serverId) removes our predicted.
     if (this.myEntityId !== null && data.ownerId === this.myEntityId) {
-      // Destroy ALL predicted projectiles from us (there should only be one)
-      for (const id of [...this.recentPredictedIds]) {
+      const predictedId = this.recentPredictedIds.find(id => {
         const proj = this.projectiles.get(id);
-        if (proj && proj.isPredicted && proj.component.ownerId === data.ownerId) {
-          this.destroy(id);
-        }
+        return proj?.isPredicted && proj.component.ownerId === this.myEntityId;
+      });
+      if (predictedId !== undefined) {
+        this.serverEntityIdToPredictedId.set(data.entityId, predictedId);
+        this.recentPredictedIds = this.recentPredictedIds.filter(id => id !== predictedId);
       }
-      this.recentPredictedIds = this.recentPredictedIds.filter(id => this.projectiles.has(id));
-    }
-
-    // Don't create if already exists (safety check)
-    if (this.projectiles.has(data.entityId)) {
       return;
     }
 
+    if (this.projectiles.has(data.entityId)) return;
     this.createProjectile(data.entityId, data, false);
   }
 
@@ -83,20 +82,20 @@ export class ProjectileManager {
   spawnBatchFromServer(dataArray: ProjectileSpawnData[]): void {
     if (dataArray.length === 0) return;
 
-    // Clean up predicted projectiles once for the entire batch
     const ownerId = dataArray[0].ownerId;
     if (this.myEntityId !== null && ownerId === this.myEntityId) {
-      // Destroy ALL predicted projectiles from us
-      for (const id of [...this.recentPredictedIds]) {
-        const proj = this.projectiles.get(id);
-        if (proj && proj.isPredicted && proj.component.ownerId === ownerId) {
-          this.destroy(id);
-        }
+      const ourPredicted = this.recentPredictedIds
+        .map(id => ({ id, proj: this.projectiles.get(id) }))
+        .filter((p): p is { id: number; proj: ClientProjectile } => p.proj?.isPredicted === true && p.proj.component.ownerId === this.myEntityId)
+        .sort((a, b) => a.proj.spawnTime - b.proj.spawnTime)
+        .map(p => p.id);
+      for (let i = 0; i < dataArray.length && i < ourPredicted.length; i++) {
+        this.serverEntityIdToPredictedId.set(dataArray[i].entityId, ourPredicted[i]);
       }
-      this.recentPredictedIds = this.recentPredictedIds.filter(id => this.projectiles.has(id));
+      this.recentPredictedIds = this.recentPredictedIds.filter(id => !ourPredicted.includes(id));
+      return;
     }
 
-    // Create all projectiles in the batch
     for (const data of dataArray) {
       if (!this.projectiles.has(data.entityId)) {
         this.createProjectile(data.entityId, data, false);
@@ -132,9 +131,13 @@ export class ProjectileManager {
     return tempId;
   }
 
-  /** Remove a projectile by entity ID. Returns position if found. */
+  /** Remove a projectile by entity ID (server id or internal id). Returns position if found. */
   destroy(entityId: number): { x: number; y: number; z: number } | null {
-    const proj = this.projectiles.get(entityId);
+    const actualId = this.serverEntityIdToPredictedId.get(entityId) ?? entityId;
+    if (actualId !== entityId) {
+      this.serverEntityIdToPredictedId.delete(entityId);
+    }
+    const proj = this.projectiles.get(actualId);
     if (proj) {
       const position = {
         x: proj.mesh.position.x,
@@ -142,7 +145,10 @@ export class ProjectileManager {
         z: proj.mesh.position.z
       };
       proj.mesh.dispose();
-      this.projectiles.delete(entityId);
+      this.projectiles.delete(actualId);
+      for (const [sId, pId] of this.serverEntityIdToPredictedId) {
+        if (pId === actualId) this.serverEntityIdToPredictedId.delete(sId);
+      }
       return position;
     }
     return null;
@@ -242,30 +248,6 @@ export class ProjectileManager {
   }
 
   /**
-   * Find a predicted projectile that matches the server spawn data.
-   * Match by owner + recency. The cooldown system ensures at most one
-   * predicted projectile per player at a time, so owner match is sufficient.
-   */
-  private findMatchingPredicted(serverData: ProjectileSpawnData): number | null {
-    const now = Date.now();
-
-    for (const id of this.recentPredictedIds) {
-      const proj = this.projectiles.get(id);
-      if (!proj || !proj.isPredicted) continue;
-
-      // Check if too old
-      if (now - proj.spawnTime > this.MATCH_WINDOW_MS) continue;
-
-      // Match by owner -- cooldown guarantees one in-flight per player
-      if (proj.component.ownerId === serverData.ownerId) {
-        return id;
-      }
-    }
-
-    return null;
-  }
-
-  /**
    * Check swept collision against all players except the shooter.
    * Uses substeps for accuracy with fast projectiles (matches server).
    */
@@ -357,6 +339,7 @@ export class ProjectileManager {
       proj.mesh.dispose();
     }
     this.projectiles.clear();
+    this.serverEntityIdToPredictedId.clear();
     this.baseMesh.dispose();
     this.material.dispose();
   }

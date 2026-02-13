@@ -83,20 +83,17 @@ export class FootstepManager {
     // Debug logging for local player
     if (isLocalPlayer) {
       if (state.soundInstanceId || speed > 0.1) {
-        console.log(`[Footsteps] Local - speed: ${speed.toFixed(3)}, vel:[${velX.toFixed(2)},${velY.toFixed(2)},${velZ.toFixed(2)}], moving: ${isMoving}, grounded: ${isGrounded}, water: ${isInWater}, shouldPlay: ${shouldPlayFootsteps}, forceStop: ${forceStop}, stopped frames: ${state.stoppedFrames}, instanceId: ${state.soundInstanceId}`);
       }
     }
 
     // Always stop the current sound if we shouldn't be playing footsteps OR force stop
     if (!shouldPlayFootsteps || forceStop) {
       if (state.soundInstanceId) {
-        console.log(`[Footsteps] Stopping footsteps for entity ${entityId} (isLocal: ${isLocalPlayer}, reason: ${!shouldPlayFootsteps ? 'shouldntPlay' : 'forceStop'})`);
         const instanceToStop = state.soundInstanceId;
         this.audioManager.stopInstance(instanceToStop);
         
         // Additional safety: if this is local player and force stopping, kill ALL footstep sounds
         if (isLocalPlayer && forceStop) {
-          console.log(`[Footsteps] Force stopping ALL footstep_running sounds for local player`);
           this.audioManager.stop('footstep_running');
         }
         

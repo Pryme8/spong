@@ -100,8 +100,6 @@ export class AudioManager {
 
     this.setupDefaultChannels();
     this.setupUnlock();
-
-    console.log(`[AudioManager] Created. AudioContext state: ${this.ctx.state}`);
   }
 
   /**
@@ -132,7 +130,6 @@ export class AudioManager {
       if (this.ctx.state === 'suspended') {
         this.ctx.resume().then(() => {
           this.unlocked = true;
-          console.log(`[AudioManager] AudioContext unlocked (state: ${this.ctx.state})`);
         });
       } else {
         this.unlocked = true;
@@ -185,13 +182,10 @@ export class AudioManager {
    * Fetches and decodes each audio file into an AudioBuffer.
    */
   async loadSounds(soundManifest: { name: string; path: string; channel?: string; maxInstances?: number; spatial?: boolean; startTime?: number; refDistance?: number; maxDistance?: number; rolloffFactor?: number }[]): Promise<void> {
-    console.log(`[AudioManager] Loading ${soundManifest.length} sounds...`);
-
     const loadPromises = soundManifest.map(async (item) => {
       try {
         const response = await fetch(item.path);
         if (!response.ok) {
-          console.warn(`[AudioManager] "${item.name}" - HTTP ${response.status} for ${item.path}`);
           return;
         }
 
@@ -247,14 +241,11 @@ export class AudioManager {
 
         this.sounds.set(item.name, soundDef);
       } catch (error) {
-        console.warn(`[AudioManager] Failed to load "${item.name}" from ${item.path}:`, error);
       }
     });
 
     await Promise.all(loadPromises);
     this.initialized = true;
-
-    console.log(`[AudioManager] Loaded ${this.sounds.size}/${soundManifest.length} sounds: ${this.getSoundNames().join(', ')}`);
   }
 
   /**
@@ -263,7 +254,6 @@ export class AudioManager {
    */
   play(soundName: string, options: PlaySoundOptions = {}): string | null {
     if (!this.initialized) {
-      console.warn(`[AudioManager] Cannot play "${soundName}" - not initialized yet`);
       return null;
     }
 
@@ -275,7 +265,6 @@ export class AudioManager {
     const soundDef = this.sounds.get(soundName);
     if (!soundDef || !soundDef.buffer) {
       if (!this.warnedSounds.has(soundName)) {
-        console.warn(`[AudioManager] Sound "${soundName}" not loaded`);
         this.warnedSounds.add(soundName);
       }
       return null;

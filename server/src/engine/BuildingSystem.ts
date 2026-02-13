@@ -62,7 +62,6 @@ export class BuildingSystem {
   handleBuildingCreate(playerEntityId: number, data: BuildingCreateMessage): void {
     const playerEntity = this.world.getEntity(playerEntityId);
     if (!playerEntity) {
-      console.error('[Building] Player entity not found:', playerEntityId);
       return;
     }
 
@@ -96,13 +95,11 @@ export class BuildingSystem {
   handleBlockPlace(playerEntityId: number, data: BlockPlaceMessage): void {
     const playerEntity = this.world.getEntity(playerEntityId);
     if (!playerEntity) {
-      console.error('[Building] Player entity not found:', playerEntityId);
       return;
     }
 
     const buildingEntity = this.buildingEntities.get(data.buildingEntityId);
     if (!buildingEntity) {
-      console.error('[Building] Building entity not found:', data.buildingEntityId);
       return;
     }
 

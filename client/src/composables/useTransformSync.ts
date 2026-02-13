@@ -39,7 +39,6 @@ export function useTransformSync(
       waterLevelProviderGetter
     );
     transforms.value.set(entityId, transform);
-    console.log(`Created LocalTransform for entity ${entityId} (local=${isLocal})`);
     return transform;
   };
 
@@ -52,7 +51,6 @@ export function useTransformSync(
     if (transform) {
       transform.dispose();
       transforms.value.delete(entityId);
-      console.log(`Removed LocalTransform for entity ${entityId}`);
     }
   };
   

@@ -233,8 +233,8 @@
         <label>Hemi Intensity</label>
         <input 
           type="range" 
-          v-model.number="hemiLightIntensity" 
-          min="0.0" 
+          v-model.number="hemiLightIntensity"
+          min="0.35"
           max="2.0" 
           step="0.01"
           @input="() => updateHemisphericLightIntensity(hemiLightIntensity)"
@@ -703,37 +703,6 @@ function exportSettings() {
     ambientMinIntensity: ambientMinIntensity.value,
     ambientMaxIntensity: ambientMaxIntensity.value
   };
-  
-  console.log('──────────────────────────────────────');
-  console.log('Post Process Settings:');
-  console.log('──────────────────────────────────────');
-  console.log(JSON.stringify(settings, null, 2));
-  console.log('──────────────────────────────────────');
-  console.log('Code:');
-  console.log(`finalPostProcess.setExposure(${settings.exposure});`);
-  console.log(`finalPostProcess.setContrast(${settings.contrast});`);
-  console.log(`finalPostProcess.setSaturation(${settings.saturation});`);
-  console.log(`finalPostProcess.setChromaticAberration(${settings.chromaticAberration});`);
-  console.log(`finalPostProcess.setSharpening(${settings.sharpening});`);
-  console.log(`finalPostProcess.setGrainIntensity(${settings.grainIntensity});`);
-  console.log(`finalPostProcess.setPencilEnabled(${settings.pencilEnabled});`);
-  console.log(`finalPostProcess.setPencilEdgeStrength(${settings.pencilEdgeStrength});`);
-  console.log(`finalPostProcess.setPencilDepthWeight(${settings.pencilDepthWeight});`);
-  console.log(`finalPostProcess.setPencilNormalWeight(${settings.pencilNormalWeight});`);
-  console.log(`finalPostProcess.setPencilEdgeThreshold(${settings.pencilEdgeThreshold});`);
-  console.log(`finalPostProcess.setPencilHatchIntensity(${settings.pencilHatchIntensity});`);
-  console.log(`finalPostProcess.setPencilHatchScale(${settings.pencilHatchScale});`);
-  console.log(`finalPostProcess.setPencilPaperIntensity(${settings.pencilPaperIntensity});`);
-  console.log(`session.setDirectionalLightIntensity(${settings.dirLightIntensity});`);
-  console.log(`session.setDirectionalLightColor('${settings.dirLightColor}');`);
-  console.log(`session.setHemisphericLightIntensity(${settings.hemiLightIntensity});`);
-  console.log(`session.setHemisphericLightColor('${settings.hemiLightColor}');`);
-  console.log(`session.setHemisphericGroundColor('${settings.hemiGroundColor}');`);
-  console.log(`session.setAmbientTintStrength(${settings.ambientTintStrength});`);
-  console.log(`session.setAmbientMinIntensity(${settings.ambientMinIntensity});`);
-  console.log(`session.setAmbientMaxIntensity(${settings.ambientMaxIntensity});`);
-  console.log('──────────────────────────────────────');
-  
   alert('Settings exported to console (F12)');
 }
 </script>

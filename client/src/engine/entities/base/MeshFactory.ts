@@ -66,7 +66,6 @@ export class MeshFactory {
     this.registry.set('ladder', createLadderMesh);
 
     this.initialized = true;
-    console.log(`[MeshFactory] Initialized with ${this.registry.size} mesh types`);
   }
 
   /**
@@ -80,7 +79,6 @@ export class MeshFactory {
     options?: MeshOptions
   ): TransformNode {
     if (!this.initialized) {
-      console.warn('[MeshFactory] Not initialized! Call MeshFactory.initialize() first.');
       this.initialize();
     }
 

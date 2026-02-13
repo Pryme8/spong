@@ -65,8 +65,6 @@ export function generateCloud(seed: string): CloudVoxelGrid {
     fillSphere(grid, cx, cy, cz, radius);
   }
 
-  console.log(`[CloudGen] Placed ${sphereCount} spheres`);
-
   // ── Step 2: Clear everything below CLOUD_FLOOR_Y ───────────
   grid.clearBelowY(CLOUD_FLOOR_Y);
 
@@ -98,14 +96,10 @@ export function generateCloud(seed: string): CloudVoxelGrid {
     }
   }
 
-  console.log(`[CloudGen] Inflation region: ${modifiedCells.size} cells`);
-
   // ── Step 5: Extend blur region upward ──────────────────────
   // Also blur solid cells up to BLUR_EXTEND_Y above the highest inflated cell
   // to smooth the transition between inflated bottom and original spheres.
   extendBlurRegion(grid, modifiedCells, BLUR_EXTEND_Y);
-
-  console.log(`[CloudGen] Blur region: ${modifiedCells.size} cells`);
 
   // ── Step 6: Blur pass over modified + extended cells ───────
   blurModifiedCells(grid, modifiedCells, BLUR_PASSES);
@@ -115,9 +109,6 @@ export function generateCloud(seed: string): CloudVoxelGrid {
   // Now cut through that gradient: anything below the threshold
   // becomes empty, revealing the soft rounded contour underneath.
   thresholdGrid(grid, SURFACE_THRESHOLD);
-
-  const solidCount = grid.getSolidCount();
-  console.log(`[CloudGen] Final solid voxels: ${solidCount}`);
 
   return grid;
 }

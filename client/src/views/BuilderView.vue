@@ -121,8 +121,6 @@ onMounted(async () => {
     roomId: 'builder_room_1',
     isMobile: false
   });
-
-  console.log('[BuilderView] Initialized - BuildSystem integrated via useGameSession');
 });
 
 // Cleanup on unmount

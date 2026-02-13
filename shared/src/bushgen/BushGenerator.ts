@@ -116,9 +116,6 @@ export function generateBush(seed: string, params?: BushParams): BushVoxelGrid {
       break;
     }
   }
-
-  console.log(`[BushGen] Placed ${spheres.length} spheres`);
-
   // ── Step 2: Find lowest solid voxel and shift down to ground ───
   let minY = grid.height;
   for (let y = 0; y < grid.height; y++) {
@@ -133,7 +130,6 @@ export function generateBush(seed: string, params?: BushParams): BushVoxelGrid {
 
   // Shift entire density field down so lowest point is at Y=0
   if (minY > 0 && minY < grid.height) {
-    console.log(`[BushGen] Shifting bush down by ${minY} cells to ground`);
     const tempGrid = new BushVoxelGrid();
     
     for (let y = minY; y < grid.height; y++) {
@@ -175,17 +171,11 @@ export function generateBush(seed: string, params?: BushParams): BushVoxelGrid {
       }
     }
   }
-
-  console.log(`[BushGen] Blur region: ${modifiedCells.size} cells`);
-
   // ── Step 5: Blur pass over all solid cells ─────────────────
   blurModifiedCells(grid, modifiedCells, blurPasses);
 
   // ── Step 6: Threshold pass ─────────────────────────────────
   thresholdGrid(grid, surfaceThreshold);
-
-  const solidCount = grid.getSolidCount();
-  console.log(`[BushGen] Final solid voxels: ${solidCount}`);
 
   return grid;
 }

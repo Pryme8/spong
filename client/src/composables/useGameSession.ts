@@ -244,46 +244,35 @@ export function useGameSession() {
     TimeManager.Initialize(scene);
     
     cameraController = new CameraController(scene);
-    damagePopupSystem = new DamagePopupSystem(scene);
-    
+    // Damage popup notifications disabled (Particle Master); splatter effect still active
+    // damagePopupSystem = new DamagePopupSystem(scene);
+
     // Create invisible sky pick sphere for catching sky shots
     skyPickSphere = new SkyPickSphere(scene);
     
     // Initialize audio system
-    console.log('[GameSession] Initializing audio system...');
     try {
       const audioManager = AudioManager.Initialize();
       await audioManager.loadSounds(SOUND_MANIFEST);
       audioManager.setMasterVolume(0.8);
       footstepManager = new FootstepManager();
-      console.log('[GameSession] FootstepManager initialized');
     } catch (error) {
-      console.error('[GameSession] Failed to initialize audio:', error);
     }
     
     // 2. Generate level if seed is provided, otherwise create flat ground
     if (config.levelSeed && scene) {
-      console.log(`[GameSession] Generating level with seed: ${config.levelSeed}`);
       voxelGrid = new VoxelGrid();
       voxelGrid.generateFromNoise(config.levelSeed);
-      console.log(`[GameSession] Generated ${voxelGrid.getSolidCount()} solid voxels`);
-      
       // Run greedy meshing
       const mesher = new GreedyMesher(voxelGrid);
       const quads = mesher.generateMesh();
-      console.log(`[GameSession] Optimized to ${quads.length} quads`);
-      
       // Create Babylon.js mesh
       levelMesh = new LevelMesh(scene);
       levelMesh.createFromQuads(quads);
-      console.log('[GameSession] Level mesh created');
-      
       // Initialize water manager
       try {
         waterManager = new LevelWaterManager(scene);
         await waterManager.initialize(voxelGrid);
-        console.log('[GameSession] Water manager initialized');
-        
         // Update water ripples every frame (time comes from TimeManager)
         let mirrorRefreshFrames = 0;
         scene.onBeforeRenderObservable.add(() => {
@@ -297,7 +286,6 @@ export function useGameSession() {
           }
         });
       } catch (error) {
-        console.error('[GameSession] Failed to initialize water manager:', error);
       }
       
       // Get disable flags from level config
@@ -308,12 +296,9 @@ export function useGameSession() {
         try {
           treeManager = new LevelTreeManager(scene, config.levelSeed);
           await treeManager.initialize();
-          console.log('[GameSession] Tree manager initialized');
         } catch (error) {
-          console.error('[GameSession] Failed to initialize tree manager:', error);
         }
       } else {
-        console.log('[GameSession] Trees disabled - skipping tree manager');
       }
       
       // Initialize rock manager for this level
@@ -321,12 +306,9 @@ export function useGameSession() {
         try {
           rockManager = new LevelRockManager(scene, config.levelSeed);
           await rockManager.initialize();
-          console.log('[GameSession] Rock manager initialized');
         } catch (error) {
-          console.error('[GameSession] Failed to initialize rock manager:', error);
         }
       } else {
-        console.log('[GameSession] Rocks disabled - skipping rock manager');
       }
       
       // Initialize bush manager for this level
@@ -334,12 +316,9 @@ export function useGameSession() {
         try {
           bushManager = new LevelBushManager(scene, config.levelSeed);
           await bushManager.initialize();
-          console.log('[GameSession] Bush manager initialized');
         } catch (error) {
-          console.error('[GameSession] Failed to initialize bush manager:', error);
         }
       } else {
-        console.log('[GameSession] Bushes disabled - skipping bush manager');
       }
       
       // Initialize cloud post-processing and cloud manager
@@ -347,9 +326,7 @@ export function useGameSession() {
         cloudPostProcess = new CloudPostProcess(scene, cameraController.getCamera());
         cloudManager = new LevelCloudManager(scene, config.levelSeed, cloudPostProcess);
         await cloudManager.initialize();
-        console.log('[GameSession] Cloud manager initialized');
       } catch (error) {
-        console.error('[GameSession] Failed to initialize cloud manager:', error);
       }
       
       // Initialize leaf effect and blood splatter (creates their post-processes)
@@ -359,47 +336,34 @@ export function useGameSession() {
       finalPostProcess = new FinalPostProcess(scene, cameraController.getCamera());
     } else if (scene) {
       // Flat terrain for shooting range / builder / editor rooms
-      console.log('[GameSession] Creating flat terrain');
-      
       // Generate flat terrain at y=0 (50 voxels * 0.5 height = 25 units, offset by LEVEL_OFFSET_Y = -25)
       voxelGrid = new VoxelGrid();
       voxelGrid.generateFromNoise(config.roomId, 0.02, 3, 50);
-      console.log(`[GameSession] Generated ${voxelGrid.getSolidCount()} solid voxels for flat terrain`);
-      
       // Run greedy meshing
       const mesher = new GreedyMesher(voxelGrid);
       const quads = mesher.generateMesh();
-      console.log(`[GameSession] Optimized to ${quads.length} quads`);
-      
       // Create Babylon.js mesh
       levelMesh = new LevelMesh(scene);
       levelMesh.createFromQuads(quads);
-      console.log('[GameSession] Flat terrain mesh created');
-
       // Initialize tree and rock managers using roomId as seed (for builder rooms, etc.)
       try {
         const treeSeed = config.roomId + '_tree';
         treeManager = new LevelTreeManager(scene, treeSeed);
         await treeManager.initialize();
-        console.log('[GameSession] Tree manager initialized for flat terrain room with seed:', treeSeed);
       } catch (error) {
-        console.error('[GameSession] Failed to initialize tree manager:', error);
       }
 
       try {
         const rockSeed = config.roomId + '_rock';
         rockManager = new LevelRockManager(scene, rockSeed);
         await rockManager.initialize();
-        console.log('[GameSession] Rock manager initialized for flat terrain room with seed:', rockSeed);
       } catch (error) {
-        console.error('[GameSession] Failed to initialize rock manager:', error);
       }
     }
     
     // If in loading phase, position camera to look at terrain from an angle
     // and start the render loop immediately so the scene is visible
     if (config.isLoadingPhase && engine && scene) {
-      console.log('[GameSession] Loading phase - positioning camera to view terrain');
       const camera = cameraController!.getCamera();
       
       // Position camera high and to the side for a panoramic terrain view
@@ -417,7 +381,6 @@ export function useGameSession() {
         camera.setTarget(new Vector3(0, 20, 0));
         scene.render();
       });
-      console.log('[GameSession] Loading phase render loop started');
     }
     
     window.addEventListener('resize', handleResize);
@@ -427,7 +390,7 @@ export function useGameSession() {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = import.meta.env.DEV 
       ? `${wsProtocol}//${window.location.host}/ws`
-      : `ws://${window.location.hostname}:3000/ws`;
+      : `${wsProtocol}//${window.location.hostname}:3000/ws`;
     
     networkClient = new NetworkClient(wsUrl);
     simulatedLatencyMs.value = getSimulatedLatencyMs();
@@ -450,23 +413,89 @@ export function useGameSession() {
     (window as any).toggleLeafDebug = (visible: boolean = true) => {
       if (treeManager) {
         treeManager.toggleLeafCollisionDebug(visible);
-      } else {
-        console.warn('Tree manager not initialized yet');
       }
     };
     (window as any).toggleWoodDebug = (visible: boolean = true) => {
       if (treeManager) {
         treeManager.toggleWoodCollisionDebug(visible);
-      } else {
-        console.warn('Tree manager not initialized yet');
       }
     };
-    console.log('🌲 Debug commands available:');
-    console.log('  toggleLeafDebug(true)  - Show leaf trigger volumes (green wireframe)');
-    console.log('  toggleWoodDebug(true)  - Show wood collision meshes (red wireframe)');
-    console.log('  toggleLeafDebug(false) - Hide leaf triggers');
-    console.log('  toggleWoodDebug(false) - Hide wood collision');
-    
+    (window as any).toggleBushDebug = (visible: boolean = true) => {
+      if (bushManager) {
+        bushManager.toggleBushCollisionDebug(visible);
+      }
+    };
+    (window as any).debugLeafBounds = (index: number = 0) => {
+      if (!treeManager) return 'Tree manager not loaded';
+      const colliders = treeManager.getLeafColliders();
+      if (colliders.length === 0) return 'No leaf colliders found';
+      if (index >= colliders.length) return `Index ${index} out of range (max ${colliders.length - 1})`;
+      
+      const c = colliders[index];
+      
+      // Calculate the world-space AABB of the local box after rotation
+      const corners = [
+        { x: c.localMinX, z: c.localMinZ },
+        { x: c.localMaxX, z: c.localMinZ },
+        { x: c.localMinX, z: c.localMaxZ },
+        { x: c.localMaxX, z: c.localMaxZ }
+      ];
+      let worldMinX = Infinity, worldMaxX = -Infinity;
+      let worldMinZ = Infinity, worldMaxZ = -Infinity;
+      for (const corner of corners) {
+        // Forward rotation: local → world
+        const wx = c.cosRotY * corner.x - c.sinRotY * corner.z + c.posX;
+        const wz = c.sinRotY * corner.x + c.cosRotY * corner.z + c.posZ;
+        if (wx < worldMinX) worldMinX = wx;
+        if (wx > worldMaxX) worldMaxX = wx;
+        if (wz < worldMinZ) worldMinZ = wz;
+        if (wz > worldMaxZ) worldMaxZ = wz;
+      }
+      
+      return {
+        position: { x: c.posX.toFixed(2), y: c.posY.toFixed(2), z: c.posZ.toFixed(2) },
+        rotation: { y: c.rotY.toFixed(2), sin: c.sinRotY.toFixed(4), cos: c.cosRotY.toFixed(4) },
+        localMin: { x: c.localMinX.toFixed(2), y: c.localMinY.toFixed(2), z: c.localMinZ.toFixed(2) },
+        localMax: { x: c.localMaxX.toFixed(2), y: c.localMaxY.toFixed(2), z: c.localMaxZ.toFixed(2) },
+        worldApproxMin: { x: worldMinX.toFixed(2), y: (c.posY + c.localMinY).toFixed(2), z: worldMinZ.toFixed(2) },
+        worldApproxMax: { x: worldMaxX.toFixed(2), y: (c.posY + c.localMaxY).toFixed(2), z: worldMaxZ.toFixed(2) },
+        totalLeafColliders: colliders.length
+      };
+    };
+    (window as any).debugCameraPos = () => {
+      if (!scene || !scene.activeCamera) return 'No camera';
+      const cam = scene.activeCamera;
+      return {
+        x: cam.position.x.toFixed(2),
+        y: cam.position.y.toFixed(2),
+        z: cam.position.z.toFixed(2)
+      };
+    };
+    (window as any).debugLeafCheck = () => {
+      if (!scene || !scene.activeCamera || !treeManager) return 'Not ready';
+      const cam = scene.activeCamera;
+      const result = treeManager.checkCameraInLeaves(cam.position.x, cam.position.y, cam.position.z);
+      return {
+        cameraPos: { x: cam.position.x.toFixed(2), y: cam.position.y.toFixed(2), z: cam.position.z.toFixed(2) },
+        inLeaves: result >= 0,
+        treeIndex: result
+      };
+    };
+    (window as any).showDebugCommands = () => {
+      return `
+🌲 Tree & Bush Debug Commands:
+  toggleLeafDebug(true)   - Show leaf trigger volumes (green wireframe)
+  toggleLeafDebug(false)  - Hide leaf triggers
+  toggleWoodDebug(true)   - Show wood collision meshes (red wireframe)
+  toggleWoodDebug(false)  - Hide wood collision
+  toggleBushDebug(true)   - Show bush trigger volumes (cyan wireframe)
+  toggleBushDebug(false)  - Hide bush triggers
+  debugLeafBounds()       - Show first leaf trigger bounds info
+  debugCameraPos()        - Show current camera position
+  debugLeafCheck()        - Check if camera is in leaves right now
+  showDebugCommands()     - Show this help message
+      `.trim();
+    };
     // Track latency and update remote player footsteps
     networkClient.onHighFrequency(Opcode.TransformUpdate, (data: any) => {
       if (data.entityId === myEntityId.value && lastInputSendTime > 0) {
@@ -611,7 +640,6 @@ export function useGameSession() {
     // Handle buff applied
     networkClient.onLowFrequency(Opcode.BuffApplied, (payload: any) => {
       if (payload.entityId === myEntityId.value) {
-        console.log(`[Buff] Applied: ${payload.buffType} for ${payload.duration}s`);
         if (payload.buffType === 'infinite_stamina') {
           playerHasInfiniteStamina.value = true;
         }
@@ -621,7 +649,6 @@ export function useGameSession() {
     // Handle buff expired
     networkClient.onLowFrequency(Opcode.BuffExpired, (payload: any) => {
       if (payload.entityId === myEntityId.value) {
-        console.log(`[Buff] Expired: ${payload.buffType}`);
         if (payload.buffType === 'infinite_stamina') {
           playerHasInfiniteStamina.value = false;
         }
@@ -662,7 +689,6 @@ export function useGameSession() {
     networkClient.onLowFrequency(Opcode.BuildingInitialState, (payload: BuildingInitialStateMessage) => {
       buildingCollisionManager?.initialize(payload);
       buildSystem?.handleBuildingInitialState(payload);
-      console.log(`[GameSession] Building ${payload.buildingEntityId} initialized`);
     });
 
     networkClient.onLowFrequency(Opcode.BuildingCreated, (payload: BuildingCreatedMessage) => {
@@ -671,7 +697,6 @@ export function useGameSession() {
         blocks: [] // New building starts empty
       });
       buildSystem?.handleBuildingCreated(payload);
-      console.log(`[GameSession] Building ${payload.buildingEntityId} created`);
     });
     
     networkClient.onLowFrequency(Opcode.BlockPlaced, (payload: BlockPlacedMessage) => {
@@ -693,13 +718,11 @@ export function useGameSession() {
         rotY: payload.rotY
       });
       buildSystem?.handleBuildingTransformed(payload);
-      console.log(`[GameSession] Building ${payload.buildingEntityId} transformed`);
     });
 
     networkClient.onLowFrequency(Opcode.BuildingDestroyed, (payload: BuildingDestroyedMessage) => {
       buildingCollisionManager?.removeBuilding(payload.buildingEntityId);
       buildSystem?.handleBuildingDestroyed(payload);
-      console.log(`[GameSession] Building ${payload.buildingEntityId} destroyed`);
     });
 
     // Ladder system network handlers
@@ -727,8 +750,6 @@ export function useGameSession() {
       triggerBox.isVisible = false;
       triggerBox.isPickable = false;
       ladderTriggers.set(payload.entityId, triggerBox);
-
-      console.log(`[GameSession] Ladder ${payload.entityId} spawned with ${payload.segmentCount} segments`);
     });
 
     networkClient.onLowFrequency(Opcode.LadderDestroyed, (payload: LadderDestroyedMessage) => {
@@ -747,8 +768,6 @@ export function useGameSession() {
         triggerBox.dispose();
         ladderTriggers.delete(payload.entityId);
       }
-
-      console.log(`[GameSession] Ladder ${payload.entityId} destroyed`);
     });
     
     networkClient.onLowFrequency(Opcode.EntityDeath, (payload: any) => {
@@ -766,7 +785,6 @@ export function useGameSession() {
     });
     
     networkClient.onLowFrequency(Opcode.KillFeed, (payload: KillFeedMessage) => {
-      console.log('[KillFeed] Received payload:', payload);
       const entry: KillFeedEntry = {
         id: killFeedIdCounter++,
         killerEntityId: payload.killerEntityId,
@@ -777,8 +795,6 @@ export function useGameSession() {
         isHeadshot: payload.isHeadshot,
         timestamp: payload.timestamp
       };
-      console.log('[KillFeed] Created entry with isHeadshot:', entry.isHeadshot);
-      
       // Add to feed (max 5 entries)
       killFeedEntries.value.push(entry);
       if (killFeedEntries.value.length > 5) {
@@ -843,7 +859,6 @@ export function useGameSession() {
 
     // Handle explosion spawns from server (visual effects)
     networkClient.onLowFrequency(Opcode.ExplosionSpawn, (payload: { posX: number; posY: number; posZ: number; radius: number }) => {
-      console.log('[GameSession] Explosion received:', payload);
       if (scene) {
         // Create explosion sphere visual
         const sphere = MeshBuilder.CreateSphere(`explosion_${Date.now()}`, {
@@ -852,9 +867,6 @@ export function useGameSession() {
         }, scene);
         
         sphere.position.set(payload.posX, payload.posY, payload.posZ);
-        
-        console.log('[GameSession] Created explosion sphere at', sphere.position, 'with diameter', payload.radius * 2);
-        
         // Create glowing material
         const material = new StandardMaterial(`explosion_mat_${Date.now()}`, scene);
         material.diffuseColor = new Color3(1, 0.5, 0); // Orange
@@ -873,7 +885,6 @@ export function useGameSession() {
           if (t >= 1) {
             scene.onBeforeRenderObservable.remove(observer);
             sphere.dispose();
-            console.log('[GameSession] Explosion sphere disposed');
             return;
           }
           
@@ -892,7 +903,6 @@ export function useGameSession() {
     
     // Handle item pickup events from server
     networkClient.onLowFrequency(Opcode.ItemPickup, (payload) => {
-      console.log(`[GameSession] ItemPickup received: type=${payload.itemType}, playerId=${payload.playerId}, myEntityId=${myEntityId.value}`);
       if (scene && transformSync) {
         // Get player's transform to equip visual weapon
         const playerTransform = transformSync.getTransform(payload.playerId);
@@ -902,14 +912,12 @@ export function useGameSession() {
       // Play pickup sound
       if (payload.playerId === myEntityId.value) {
         // Local player: play globally (non-spatial)
-        console.log(`[GameSession] Playing local pickup sound`);
         playSFX('item_pickup', 0.8);
       } else if (transformSync) {
         // Remote player: play spatially at their position
         const remoteTransform = transformSync.getTransform(payload.playerId);
         if (remoteTransform) {
           const state = remoteTransform.getState();
-          console.log(`[GameSession] Playing remote pickup sound at (${state.posX}, ${state.posY}, ${state.posZ})`);
           playSFX3D('item_pickup', state.posX, state.posY, state.posZ, 0.8);
         }
       }
@@ -919,18 +927,13 @@ export function useGameSession() {
       if (weaponTypes.includes(payload.itemType)) {
         remotePlayerWeapons.set(payload.playerId, payload.itemType);
       }
-      console.log(`[GameSession] After pickup: hasLadder=${hasLadder.value}, hasHammer=${hasHammer.value}`);
     });
     
     // Handle item drop sound events from server (for remote players)
     networkClient.onLowFrequency(Opcode.ItemDropSound, (payload: any) => {
       // Check if we should play: either no excludeSender flag, or we're not the sender
       const shouldPlay = !payload.excludeSender || payload.entityId !== myEntityId.value;
-      
-      console.log(`[GameSession] ItemDropSound received: entityId=${payload.entityId}, myEntityId=${myEntityId.value}, excludeSender=${payload.excludeSender}, shouldPlay=${shouldPlay}`);
-      
       if (shouldPlay && payload.entityId !== myEntityId.value) {
-        console.log(`[GameSession] Playing remote drop sound at (${payload.posX}, ${payload.posY}, ${payload.posZ})`);
         playSFX3D('item_pickup', payload.posX, payload.posY, payload.posZ, 0.8);
       }
     });
@@ -973,10 +976,8 @@ export function useGameSession() {
     // Handle bush spawns from server (level rooms only)
     networkClient.onLowFrequency(Opcode.BushSpawn, (payload) => {
       if (!bushManager) {
-        console.warn('[GameSession] Received BushSpawn but bushManager not initialized!');
         return;
       }
-      console.log(`[GameSession] Received ${payload.bushes.length} bushes from server`);
       const instances = payload.bushes.map((b: any) => ({
         variationId: b.variationId,
         worldX: b.posX,
@@ -998,9 +999,6 @@ export function useGameSession() {
       if (treeColliders.length === 0 && rockColliders.length === 0) {
         return; // Nothing to build yet
       }
-      
-      console.log(`[GameSession] Building octree with ${treeColliders.length} trees, ${rockColliders.length} rocks...`);
-      
       // Create octree covering play area
       octree = new Octree(0, 10, 0, 110, 6, 8);
       
@@ -1038,8 +1036,6 @@ export function useGameSession() {
         };
         octree.insert(entry);
       }
-      
-      console.log(`[GameSession] Octree built with ${treeColliders.length + rockColliders.length} colliders`);
     }
     
     // Handle other players joining
@@ -1047,14 +1043,11 @@ export function useGameSession() {
       if (!scene || !transformSync) return;
       const transform = transformSync.createTransform(playerInfo.entityId, false);
       const playerColor = hexToColor3(playerInfo.color);
+      transform.setPlayerColor(playerColor);
       const cube = createPlayerInstance(`cube_${playerInfo.entityId}`, scene, playerColor);
       cube.parent = transform.getNode();
       cube.position.y = 0;
-      
-      // Register body cube for shadows
-      if (shadowManager) {
-        shadowManager.addShadowCaster(cube, true);
-      }
+      transform.registerPlayerCube(cube);
       waterManager?.refreshMirrorRenderList();
     });
     
@@ -1069,20 +1062,17 @@ export function useGameSession() {
     // Register loading phase handlers BEFORE connecting so we never miss messages
     if (config.isLoadingPhase) {
       networkClient.onLowFrequency(Opcode.PlayersReadyUpdate, (data: any) => {
-        console.log('[GameSession] PlayersReadyUpdate:', data);
         loadingSecondsRemaining.value = data.secondsRemaining;
         loadingReadyPlayers.value = data.readyPlayers;
         loadingTotalPlayers.value = data.totalPlayers;
       });
       
       networkClient.onLowFrequency(Opcode.GameBegin, () => {
-        console.log('[GameSession] GameBegin received');
         isInLoadingPhase = false;
         gameBegun.value = true;
         
         // Spawn the player if we have a pending entity ID
         if (pendingEntityId !== null && spawnPlayerFn) {
-          console.log('[GameSession] Spawning player after loading phase');
           spawnPlayerFn(pendingEntityId);
           pendingEntityId = null;
         }
@@ -1098,26 +1088,21 @@ export function useGameSession() {
     try {
       await networkClient.connect();
       isConnected.value = true;
-      console.log('[GameSession] Joining room:', config.roomId, 'with config:', config.levelConfig);
       room.joinRoom(config.roomId, config.levelConfig);
-      
+
       // Auto-send ClientReady during loading phase once connected
       if (config.isLoadingPhase) {
         // Small delay to ensure room join is processed first
         setTimeout(() => {
           networkClient!.sendLow(Opcode.ClientReady, {});
-          console.log('[GameSession] Auto-sent ClientReady after connection');
         }, 500);
       }
     } catch (err) {
-      console.error('[GameSession] Failed to connect:', err);
     }
     
     // Helper function to spawn player
     const spawnPlayer = (entityId: number) => {
       if (!scene || !transformSync) return;
-      
-      console.log('[GameSession] Spawning player with entity ID:', entityId);
       myEntityId.value = entityId;
       
       // Camera will be repositioned by CameraController.setTarget below
@@ -1129,17 +1114,14 @@ export function useGameSession() {
       // Find our player color from the players map
       const myPlayerInfo = Array.from(room.players.value.values()).find(p => p.entityId === entityId);
       const playerColor = myPlayerInfo ? hexToColor3(myPlayerInfo.color) : hexToColor3('#00ff88');
+      myTransform.value.setPlayerColor(playerColor);
       const cube = createPlayerInstance(`cube_${entityId}`, scene, playerColor);
       cube.parent = myTransform.value.getNode();
       cube.position.y = 0;
-      
-      // Register body cube for shadows
+      myTransform.value.registerPlayerCube(cube);
       if (shadowManager) {
         shadowManager.addShadowCaster(cube, true);
       }
-      
-      console.log(`[GameSession] Spawned local player cube for entity ${entityId}`);
-      
       // Set up input manager
       inputManager = new InputManager(scene, config.isMobile || false);
       
@@ -1196,16 +1178,12 @@ export function useGameSession() {
         
         if (kbInfo.type === 1) { // KEYDOWN
           if (key === '1') {
-            console.log('[GameSession] Key 1 pressed - switching to select mode');
             buildSystem.setMode('select');
           } else if (key === '2') {
-            console.log('[GameSession] Key 2 pressed - switching to build mode');
             buildSystem.setMode('build');
           } else if (key === '3') {
-            console.log('[GameSession] Key 3 pressed - switching to transform mode');
             buildSystem.setMode('transform');
           } else if (key === '4') {
-            console.log('[GameSession] Key 4 pressed - switching to demolish mode');
             buildSystem.setMode('demolish');
           } else if (key === '[') {
             buildSystem.prevColor();
@@ -1223,7 +1201,6 @@ export function useGameSession() {
         
         if (kbInfo.type === 1) { // KEYDOWN
           if (key === 'escape' && ladderPlacementSystem.isActive()) {
-            console.log('[GameSession] ESC pressed - canceling ladder placement');
             ladderPlacementSystem.cancel();
           }
         }
@@ -1236,11 +1213,9 @@ export function useGameSession() {
 
         if (pointerInfo.type === 1) { // POINTERDOWN
           const evt = pointerInfo.event as PointerEvent;
-          console.log(`[GameSession] Mouse down - button ${evt.button}, mode: ${buildMode.value}`);
           buildSystem.handleMouseDown(evt.button);
         } else if (pointerInfo.type === 2) { // POINTERUP
           const evt = pointerInfo.event as PointerEvent;
-          console.log(`[GameSession] Mouse up - button ${evt.button}, mode: ${buildMode.value}`);
           buildSystem.handleMouseUp(evt.button);
         }
       });
@@ -1253,7 +1228,6 @@ export function useGameSession() {
         if (pointerInfo.type === 2) { // POINTERUP (right-click to place/finalize)
           const evt = pointerInfo.event as PointerEvent;
           if (evt.button === 2) { // Right mouse button
-            console.log('[GameSession] Right-click - ladder placement');
             ladderPlacementSystem.handleRightClick();
           }
         }
@@ -1293,7 +1267,6 @@ export function useGameSession() {
           
           // Play drop sound globally for local player
           if (dropSuccess) {
-            console.log(`[GameSession] Playing local drop sound`);
             playSFX('item_pickup', 0.8);
           }
         }
@@ -1474,7 +1447,6 @@ export function useGameSession() {
       
       // If in loading phase, save the entity ID but don't spawn yet
       if (isInLoadingPhase) {
-        console.log('[GameSession] Received entity ID during loading phase, deferring spawn until GameBegin');
         pendingEntityId = entityId;
         myEntityId.value = entityId;
         return;
@@ -1536,30 +1508,21 @@ export function useGameSession() {
   // Leaf effect functions
   async function initializeLeafEffect(scene: Scene, camera: any) {
     if (!scene || !camera) return;
-
-    console.log('[GameSession] Initializing leaf effect...');
     leafEffect = new BushLeafEffect(scene);
     
     try {
       await leafEffect.generate();
-      console.log('[GameSession] Leaf textures generated successfully');
-      
       selectedTextureIndex1 = Math.floor(Math.random() * 3);
       selectedTextureIndex2 = Math.floor(Math.random() * 3);
       while (selectedTextureIndex2 === selectedTextureIndex1) {
         selectedTextureIndex2 = Math.floor(Math.random() * 3);
       }
-      console.log(`[GameSession] Initial texture sets selected: ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
-      
       setupLeafTriggerDetection(scene, camera);
       
       // Initialize blood splatter effect and post-process
-      console.log('[GameSession] Initializing blood splatter effect...');
       bloodSplatterEffect = new BloodSplatterEffect(scene);
       setupBloodSplatterPostProcess(scene, camera);
-      console.log('[GameSession] Blood splatter effect initialized');
     } catch (error) {
-      console.error('[GameSession] Failed to generate leaf textures:', error);
     }
   }
 
@@ -1668,8 +1631,6 @@ export function useGameSession() {
     };
 
     scene.onBeforeRenderObservable.add(checkCameraInLeaves);
-    
-    console.log('[GameSession] Leaf trigger detection and post-process set up');
   }
 
   function setupBloodSplatterPostProcess(scene: Scene, camera: any) {
@@ -1756,8 +1717,6 @@ export function useGameSession() {
         effect.setFloat('alpha', 0.0);
       }
     };
-
-    console.log('[GameSession] Blood splatter post-process set up');
   }
 
   function checkCameraInLeaves() {
@@ -1795,8 +1754,6 @@ export function useGameSession() {
   }
 
   function onLeavesEnter(x: number, y: number, z: number) {
-    console.log('[GameSession] Camera entered tree leaves');
-    
     leafEntryX = x;
     leafEntryY = y;
     leafEntryZ = z;
@@ -1805,27 +1762,20 @@ export function useGameSession() {
       const audioManager = AudioManager.getInstance();
       audioManager.play('rustle', { volume: 0.5, position: { x, y, z } });
     } catch (e) {
-      console.warn('[GameSession] AudioManager not initialized yet');
     }
   }
 
   function onLeavesLeave() {
-    console.log('[GameSession] Camera left tree leaves');
-    
     selectedTextureIndex1 = Math.floor(Math.random() * 3);
     selectedTextureIndex2 = Math.floor(Math.random() * 3);
     
     while (selectedTextureIndex2 === selectedTextureIndex1) {
       selectedTextureIndex2 = Math.floor(Math.random() * 3);
     }
-    
-    console.log(`[GameSession] Next leaf entry will use texture sets ${selectedTextureIndex1} and ${selectedTextureIndex2}`);
-    
     try {
       const audioManager = AudioManager.getInstance();
       audioManager.play('rustle', { volume: 0.4, position: { x: leafEntryX, y: leafEntryY, z: leafEntryZ } });
     } catch (e) {
-      console.warn('[GameSession] AudioManager not initialized yet');
     }
   }
   
@@ -1833,7 +1783,6 @@ export function useGameSession() {
   const sendClientReady = () => {
     if (networkClient) {
       networkClient.sendLow(Opcode.ClientReady, {});
-      console.log('[GameSession] Sent ClientReady');
     }
   };
   
@@ -1851,7 +1800,6 @@ export function useGameSession() {
   const onGameBegin = (callback: () => void) => {
     // If game already began (we missed it), call immediately
     if (gameBegun.value) {
-      console.log('[GameSession] GameBegin already received, calling callback immediately');
       callback();
       return;
     }
@@ -1905,9 +1853,10 @@ export function useGameSession() {
     if (light) light.diffuse = hexToColor3(value);
   };
 
+  const MIN_HEMI_INTENSITY = 0.35;
   const setHemisphericLightIntensity = (value: number) => {
     const light = getHemisphericLight();
-    if (light) light.intensity = value;
+    if (light) light.intensity = Math.max(MIN_HEMI_INTENSITY, value);
   };
 
   const setHemisphericLightColor = (value: string) => {
@@ -2003,7 +1952,7 @@ export function useGameSession() {
       pencilPaperIntensity: finalPostProcess?.pencilPaperIntensity ?? 0.08,
       dirLightIntensity: dirLight?.intensity ?? 0.8,
       dirLightColor: dirLight ? color3ToHex(dirLight.diffuse) : '#fff2d9',
-      hemiLightIntensity: hemiLight?.intensity ?? 0.25,
+      hemiLightIntensity: Math.max(MIN_HEMI_INTENSITY, hemiLight?.intensity ?? MIN_HEMI_INTENSITY),
       hemiLightColor: hemiLight ? color3ToHex(hemiLight.diffuse) : '#8080b3',
       hemiGroundColor: hemiLight
         ? color3ToHex((hemiLight.metadata as { baseGroundColor?: Color3 } | undefined)?.baseGroundColor ?? hemiLight.groundColor)
@@ -2070,6 +2019,8 @@ export function useGameSession() {
     gameBegun,
     getScene: () => scene,
     getCamera: () => cameraController?.getCamera() || null,
+    getCameraDebugOffset: () => cameraController?.getDebugOffset() ?? { y: 0, forward: 0 },
+    setCameraDebugOffset: (y: number, forward: number) => cameraController?.setDebugOffset(y, forward),
     getPlayerTransform: () => myTransform.value,
     myTransform, // Direct ref access for debug panels
     getNetworkClient: () => networkClient,

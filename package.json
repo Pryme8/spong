@@ -1,6 +1,6 @@
 {
   "name": "spong",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "description": "Multiplayer game with Vue3, Babylon.js, and Fastify",
   "workspaces": [

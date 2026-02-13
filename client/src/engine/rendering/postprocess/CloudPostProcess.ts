@@ -282,8 +282,6 @@ export class CloudPostProcess {
       effect.setFloat2('cloudUVScale', scaleX, scaleY);
       effect.setFloat2('cloudUVOffset', offsetX, offsetY);
     };
-
-    console.log('[CloudPostProcess] Initialized (mask RTT + cloud RTT + composite)');
   }
 
   /** Add a mesh to the mask RTT with the black override material. */
@@ -348,6 +346,5 @@ export class CloudPostProcess {
     this.cloudRT.dispose();
     this.compositePass.dispose();
     this.blackMat.dispose();
-    console.log('[CloudPostProcess] Disposed');
   }
 }

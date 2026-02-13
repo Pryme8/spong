@@ -41,7 +41,6 @@ export class GameLoop {
    */
   start(engine: Engine, scene: Scene, deps: GameLoopDependencies): void {
     if (this.stopHandle) {
-      console.warn('[GameLoop] Already running');
       return;
     }
 
@@ -121,8 +120,8 @@ export class GameLoop {
       // Update reload progress
       deps.weaponSystem.updateReload(now);
 
-      // Update weapon bloom decay
-      deps.weaponSystem.updateBloom();
+      // Update weapon bloom decay (time-based so sustained fire can reach max bloom)
+      deps.weaponSystem.updateBloom(frameDelta);
 
       // Handle auto-fire for automatic weapons (SMG, LMG)
       if (myTransform && deps.inputManager?.isMouseHeld() && deps.weaponSystem.isAutoFireWeapon()) {
@@ -137,8 +136,6 @@ export class GameLoop {
     this.stopHandle = () => {
       engine.stopRenderLoop();
     };
-
-    console.log('[GameLoop] Started');
   }
 
   /**
@@ -148,7 +145,6 @@ export class GameLoop {
     if (this.stopHandle) {
       this.stopHandle();
       this.stopHandle = null;
-      console.log('[GameLoop] Stopped');
     }
   }
 }

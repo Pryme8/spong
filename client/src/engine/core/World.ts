@@ -46,7 +46,6 @@ export class World {
   deltaSeconds: number = 0;
 
   private constructor() {
-    console.log('[World] Created world singleton');
   }
 
   static getInstance(): World {
@@ -61,13 +60,11 @@ export class World {
       World.instance.gameTime = 0;
       World.instance.deltaTime = 0;
       World.instance.deltaSeconds = 0;
-      console.log('[World] Reset world state');
     }
   }
 
   static dispose(): void {
     World.instance = null;
-    console.log('[World] Disposed world singleton');
   }
 
   /**
@@ -95,8 +92,6 @@ export class World {
     this.sun.directionX = Math.cos(elevRad) * Math.sin(azimRad);
     this.sun.directionY = Math.sin(elevRad);
     this.sun.directionZ = Math.cos(elevRad) * Math.cos(azimRad);
-
-    console.log(`[World] Sun updated: elevation=${elevation.toFixed(1)}°, azimuth=${azimuth.toFixed(1)}° -> dir=(${this.sun.directionX.toFixed(2)}, ${this.sun.directionY.toFixed(2)}, ${this.sun.directionZ.toFixed(2)})`);
   }
 
   /**

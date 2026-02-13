@@ -90,9 +90,6 @@ export class BuildGrid {
     this.root = new TransformNode('buildGrid_root', scene);
     this.root.position = worldPosition;
     this.root.rotation.y = rotationY;
-
-    console.log(`[BuildGrid] Grid root created at world position: ${this.root.position.toString()}, rotation.y: ${this.root.rotation.y.toFixed(3)}`);
-
     // Initialize transforms
     this.transforms = new BuildGridTransforms(this.root);
 
@@ -198,9 +195,6 @@ export class BuildGrid {
     plane.isVisible = false; // Invisible
     plane.isPickable = true; // Used for raycasting
     plane.parent = this.root;
-
-    console.log('[BuildGrid] Created raycast plane - pickable:', plane.isPickable, 'visible:', plane.isVisible, 'parent:', plane.parent?.name);
-
     return plane;
   }
 
@@ -261,8 +255,6 @@ export class BuildGrid {
     instance.metadata = { originalColor };
 
     this.blockInstances.set(index, instance);
-    
-    console.log(`[BuildGrid] Block placed at (${gridX}, ${gridY}, ${gridZ}) color=${colorIndex}, localPos=${localPos.toString()}, worldRoot=${this.root.position.toString()}, instances=${this.blockInstances.size}`);
   }
 
   /**
@@ -296,7 +288,6 @@ export class BuildGrid {
 
     if (!this.previewBlock) {
       this.createPreviewBlock();
-      console.log('[BuildGrid] Preview block parent:', this.previewBlock.parent?.name);
     }
 
     // Update color
@@ -311,10 +302,6 @@ export class BuildGrid {
     
     // Debug - log once when first shown
     if (!this.previewBlock!.metadata?.logged) {
-      console.log(`[BuildGrid] Preview at grid (${gridPos.x},${gridPos.y},${gridPos.z}) -> local ${localPos.toString()}`);
-      console.log('[BuildGrid] Preview visible:', this.previewBlock!.isVisible);
-      console.log('[BuildGrid] Root position:', this.root.position.toString());
-      console.log('[BuildGrid] Root rotation:', this.root.rotation.toString());
       this.previewBlock!.metadata = { logged: true };
     }
   }
@@ -336,8 +323,6 @@ export class BuildGrid {
     this.previewBlock.material = this.previewMaterial;
     this.previewBlock.parent = this.instanceContainer;
     this.previewBlock.isPickable = false; // Don't interfere with raycasting
-    
-    console.log('[BuildGrid] Preview block created');
   }
 
   /**
@@ -353,8 +338,6 @@ export class BuildGrid {
    * Exit build mode - run greedy meshing and create final mesh.
    */
   exitBuildMode(): void {
-    console.log('[BuildGrid] Exiting build mode - keeping blocks as instances (no greedy mesh)');
-
     // Skip greedy meshing for now - just keep the block instances
     // TODO: Add greedy meshing back later for performance optimization
     
@@ -368,8 +351,6 @@ export class BuildGrid {
 
     // 2. Mark as finalized
     this.isFinalized = true;
-
-    console.log('[BuildGrid] Exited build mode - blocks remain as instances');
   }
 
   /**
@@ -461,9 +442,6 @@ export class BuildGrid {
     mat.vertexColorEnabled = true;
 
     mesh.material = mat;
-
-    console.log(`[BuildGrid] Created mesh with ${positions.length / 3} vertices, ${indices.length / 3} triangles`);
-
     return mesh;
   }
 
@@ -591,8 +569,6 @@ export class BuildGrid {
       });
     }
     // Red state doesn't change block colors, just the selection cube
-
-    console.log(`[BuildGrid] Grid state set to: ${state}, updated ${this.blockInstances.size} blocks`);
   }
 
   /**
@@ -700,7 +676,5 @@ export class BuildGrid {
     this.gridRaycastPlane.dispose();
     this.instanceContainer.dispose();
     this.root.dispose();
-
-    console.log('[BuildGrid] Disposed');
   }
 }

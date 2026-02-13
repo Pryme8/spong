@@ -265,8 +265,6 @@ watch([isInRoom, () => {
 }], ([inRoom, newScene]) => {
   if (inRoom && newScene && !scene) {
     scene = newScene;
-    console.log('[RockView] Scene available and in room, initializing rock generation');
-    
     // Small delay to ensure scene is fully ready
     setTimeout(() => {
       // Initialize seed and generate rock (also creates bounding box)
@@ -296,12 +294,8 @@ function getSizeName(): string {
 
 function generateAndDisplay() {
   if (!scene) {
-    console.warn('[RockView] Scene not available, cannot generate rock');
     return;
   }
-
-  console.log('[RockView] Starting rock generation with seed:', seed.value);
-
   // Generate rock density
   const t0 = performance.now();
   rockGrid = generateRock(seed.value);
@@ -324,17 +318,11 @@ function generateAndDisplay() {
 
   // Generate collider mesh
   regenerateColliderMesh();
-
-  console.log(`[RockView] ${solidCount.value} solid voxels, ${quads.length} quads, ${fullTriCount.value} full tris → ${colliderTriCount.value} collider tris (gen: ${genTimeMs.value}ms, mesh: ${meshTimeMs.value}ms)`);
-
   // Update existing or create new rock mesh
   if (rockMesh) {
-    console.log('[RockView] Updating existing rock mesh');
     updateRockMesh(rockMesh, quads);
   } else {
-    console.log('[RockView] Creating new rock mesh');
     rockMesh = createRockMesh(quads);
-    console.log('[RockView] Rock mesh created at position:', rockMesh.position);
   }
 
   // Update bounding box for new rock size
@@ -594,9 +582,6 @@ function updateColliderVisualization() {
   // Generate colliders with current parameters
   const colliders = generateRockColliders(rockGrid, maxDepth.value, fillThreshold.value);
   colliderCount.value = colliders.length;
-
-  console.log(`[RockView] Generated ${colliders.length} colliders (depth=${maxDepth.value}, threshold=${fillThreshold.value})`);
-
   for (const col of colliders) {
     // Calculate box dimensions
     const width = col.maxX - col.minX;
@@ -679,7 +664,6 @@ function createColliderMeshVisualization() {
 function updateMeshVisibility() {
   if (rockMesh) {
     rockMesh.setEnabled(showFullMesh.value);
-    console.log('[RockView] Rock mesh visibility set to:', showFullMesh.value, 'Position:', rockMesh.position);
   }
 
   if (showColliderMesh.value && colliderMesh) {

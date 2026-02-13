@@ -55,19 +55,16 @@ export class NetworkClient {
     this.url = url;
     this.simulatedLatencyMs = getSimulatedLatencyMs();
     if (this.simulatedLatencyMs > 0) {
-      console.log(`[NetworkClient] Simulating latency: ${this.simulatedLatencyMs} ms one-way (RTT ≈ ${2 * this.simulatedLatencyMs} ms). Use ?latency= or ?lag= in URL.`);
     }
   }
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        console.log('[NetworkClient] Attempting WebSocket connection to:', this.url);
         this.ws = new WebSocket(this.url);
         this.ws.binaryType = 'arraybuffer';
 
         this.ws.onopen = () => {
-          console.log('[NetworkClient] Connected to server');
           this.reconnectAttempts = 0;
           this.connectionListeners.forEach(cb => cb());
           resolve();
@@ -84,17 +81,14 @@ export class NetworkClient {
         };
 
         this.ws.onerror = (error) => {
-          console.error('[NetworkClient] WebSocket error. URL:', this.url, 'Error:', error);
           reject(error);
         };
 
         this.ws.onclose = (event) => {
-          console.log('[NetworkClient] Disconnected from server. Code:', event.code, 'Reason:', event.reason);
           this.disconnectionListeners.forEach(cb => cb());
           this.attemptReconnect();
         };
       } catch (err) {
-        console.error('[NetworkClient] Exception during connection attempt:', err);
         reject(err);
       }
     });
@@ -104,15 +98,11 @@ export class NetworkClient {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-      console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-      
       setTimeout(() => {
         this.connect().catch(err => {
-          console.error('Reconnection failed:', err);
         });
       }, delay);
     } else {
-      console.error('Max reconnection attempts reached');
     }
   }
 
@@ -125,7 +115,6 @@ export class NetworkClient {
 
   private handleMessage(data: ArrayBuffer | string) {
     if (typeof data === 'string') {
-      console.warn('Received string message, expected binary');
       return;
     }
 
@@ -159,9 +148,7 @@ export class NetworkClient {
           const jsonBytes = new Uint8Array(data, 1);
           const jsonString = new TextDecoder().decode(jsonBytes);
           const payload = JSON.parse(jsonString);
-          console.error(`[NetworkClient] Server error: ${payload.code} - ${payload.message}`);
         } catch (err) {
-          console.error('[NetworkClient] Failed to parse error message:', err);
         }
         return;
       }
@@ -174,10 +161,8 @@ export class NetworkClient {
           const payload = JSON.parse(jsonString);
           handlers.forEach(handler => handler(payload));
         } catch (err) {
-          console.error('Error parsing low-frequency message:', err);
         }
       } else {
-        console.warn(`[NetworkClient] No handler for low-frequency opcode: 0x${opcode.toString(16)}`);
       }
     }
   }
@@ -189,12 +174,10 @@ export class NetworkClient {
 
   sendLow(opcode: Opcode, payload: any) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn('Cannot send message: WebSocket not connected');
       return;
     }
 
     const json = JSON.stringify(payload);
-    console.log(`[NetworkClient] Sending opcode 0x${opcode.toString(16)}, JSON: ${json}`);
     const encoder = new TextEncoder();
     const jsonBytes = encoder.encode(json);
     const buffer = new ArrayBuffer(1 + jsonBytes.length);
@@ -212,7 +195,6 @@ export class NetworkClient {
 
   sendBinary(data: ArrayBuffer) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn('Cannot send binary: WebSocket not connected');
       return;
     }
 

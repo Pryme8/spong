@@ -30,7 +30,6 @@ export class LadderSystem {
   handleLadderPlace(playerEntityId: number, data: LadderPlaceMessage): void {
     const playerEntity = this.world.getEntity(playerEntityId);
     if (!playerEntity) {
-      console.error('[Ladder] Player entity not found:', playerEntityId);
       return;
     }
 
@@ -64,12 +63,10 @@ export class LadderSystem {
   handleLadderDestroy(playerEntityId: number, data: LadderDestroyMessage): void {
     const playerEntity = this.world.getEntity(playerEntityId);
     if (!playerEntity) {
-      console.error('[Ladder] Player entity not found:', playerEntityId);
       return;
     }
     const ladderEntity = this.ladderEntities.get(data.entityId);
     if (!ladderEntity) {
-      console.error('[Ladder] Ladder entity not found:', data.entityId);
       return;
     }
     this.world.destroyEntity(ladderEntity.id);

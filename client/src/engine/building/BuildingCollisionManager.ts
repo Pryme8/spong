@@ -38,9 +38,6 @@ export class BuildingCollisionManager {
     blocks: Array<{ gridX: number; gridY: number; gridZ: number; colorIndex: number }>;
   }): void {
     const { buildingEntityId, gridPositionX, gridPositionY, gridPositionZ, gridRotationY, gridSize, blocks } = data;
-    
-    console.log(`[BuildingCollisionManager] Initializing building ${buildingEntityId} with ${blocks.length} blocks at position (${gridPositionX.toFixed(1)}, ${gridPositionY.toFixed(1)}, ${gridPositionZ.toFixed(1)})`);
-    
     // Create voxel data array
     const voxelData = new Uint8Array(gridSize * gridSize * gridSize);
     
@@ -58,8 +55,6 @@ export class BuildingCollisionManager {
       voxelData,
       gridSize
     });
-    
-    console.log(`[BuildingCollisionManager] Initialized building ${buildingEntityId} at (${gridPositionX.toFixed(1)}, ${gridPositionY.toFixed(1)}, ${gridPositionZ.toFixed(1)}) with ${blocks.length} blocks`);
   }
   
   /**
@@ -68,7 +63,6 @@ export class BuildingCollisionManager {
   addBlock(data: { buildingEntityId: number; gridX: number; gridY: number; gridZ: number; colorIndex: number }): void {
     const buildingState = this.buildingStates.get(data.buildingEntityId);
     if (!buildingState) {
-      console.warn(`[BuildingCollisionManager] Cannot add block - building ${data.buildingEntityId} not found`);
       return;
     }
     
@@ -85,7 +79,6 @@ export class BuildingCollisionManager {
   removeBlock(data: { buildingEntityId: number; gridX: number; gridY: number; gridZ: number }): void {
     const buildingState = this.buildingStates.get(data.buildingEntityId);
     if (!buildingState) {
-      console.warn(`[BuildingCollisionManager] Cannot remove block - building ${data.buildingEntityId} not found`);
       return;
     }
     
@@ -108,7 +101,6 @@ export class BuildingCollisionManager {
   }): void {
     const buildingState = this.buildingStates.get(data.buildingEntityId);
     if (!buildingState) {
-      console.warn(`[BuildingCollisionManager] Cannot update transform - building ${data.buildingEntityId} not found`);
       return;
     }
 
@@ -123,9 +115,7 @@ export class BuildingCollisionManager {
    */
   removeBuilding(buildingEntityId: number): void {
     if (this.buildingStates.delete(buildingEntityId)) {
-      console.log(`[BuildingCollisionManager] Removed building ${buildingEntityId}`);
     } else {
-      console.warn(`[BuildingCollisionManager] Cannot remove building - building ${buildingEntityId} not found`);
     }
   }
   
@@ -206,7 +196,6 @@ export class BuildingCollisionManager {
    */
   clear(): void {
     this.buildingStates.clear();
-    console.log('[BuildingCollisionManager] Cleared all building states');
   }
 
   /**

@@ -56,27 +56,21 @@ export class JoinSyncSystem {
     for (const msg of itemMessages) {
       this.sendToConn(conn, Opcode.ItemSpawn, msg);
     }
-    console.log(`Sent ${itemMessages.length} existing items to ${logId}`);
-
     const treeMsg = this.getTreeSpawnMessage();
     if (treeMsg) {
       this.sendToConn(conn, Opcode.TreeSpawn, treeMsg);
       const t = treeMsg as { trees: unknown[] };
-      console.log(`Sent ${t.trees?.length ?? 0} trees to ${logId}`);
     }
     const rockMsg = this.getRockSpawnMessage();
     if (rockMsg) {
       this.sendToConn(conn, Opcode.RockSpawn, rockMsg);
       const r = rockMsg as { rocks: unknown[] };
-      console.log(`Sent ${r.rocks?.length ?? 0} rocks to ${logId}`);
     }
     const bushMsg = this.getBushSpawnMessage();
     if (bushMsg) {
       this.sendToConn(conn, Opcode.BushSpawn, bushMsg);
       const b = bushMsg as { bushes: unknown[] };
-      console.log(`[JoinSync] ✓ Sent ${b.bushes?.length ?? 0} bushes to ${logId}`);
     } else {
-      console.log(`[JoinSync] ✗ No bushes to send`);
     }
 
     this.sendDummySpawns(conn);
@@ -105,7 +99,6 @@ export class JoinSyncSystem {
     for (const buildingMsg of buildingMessages) {
       this.sendToConn(conn, Opcode.BuildingInitialState, buildingMsg);
       const b = buildingMsg as { blocks: unknown[]; buildingEntityId: number };
-      console.log(`Sent ${b.blocks?.length ?? 0} building blocks (entity ${b.buildingEntityId}) to ${logId}`);
     }
   }
 }

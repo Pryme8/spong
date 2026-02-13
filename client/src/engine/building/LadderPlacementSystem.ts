@@ -56,8 +56,6 @@ export class LadderPlacementSystem {
     this.previewMaterial.emissiveColor = new Color3(0.3, 0.6, 1); // Blue glow (valid)
     this.previewMaterial.alpha = 0.4;
     this.previewMaterial.disableLighting = false;
-
-    console.log('[LadderPlacementSystem] Initialized');
   }
 
   /**
@@ -87,11 +85,9 @@ export class LadderPlacementSystem {
     if (this.state === 'idle') {
       // Start placement
       this.state = 'initial';
-      console.log('[LadderPlacementSystem] Started placement');
     } else if (this.state === 'initial' && this.firstSegmentPosition !== null) {
       // Move to extension mode
       this.state = 'extending';
-      console.log('[LadderPlacementSystem] Extension mode activated');
     } else if (this.state === 'extending') {
       // Finalize placement
       this.finalizePlacement();
@@ -107,7 +103,6 @@ export class LadderPlacementSystem {
     this.firstSegmentNormal = null;
     this.segmentCount = 1;
     this.hidePreview();
-    console.log('[LadderPlacementSystem] Placement canceled');
   }
 
   /**
@@ -211,9 +206,6 @@ export class LadderPlacementSystem {
       normalZ: this.firstSegmentNormal.z,
       segmentCount: this.segmentCount
     });
-
-    console.log(`[LadderPlacementSystem] Placed ladder with ${this.segmentCount} segments at (${this.firstSegmentPosition.x.toFixed(2)}, ${this.firstSegmentPosition.y.toFixed(2)}, ${this.firstSegmentPosition.z.toFixed(2)})`);
-
     // Reset state
     this.cancel();
   }
@@ -334,6 +326,5 @@ export class LadderPlacementSystem {
       this.previewMaterial.dispose();
       this.previewMaterial = null;
     }
-    console.log('[LadderPlacementSystem] Disposed');
   }
 }

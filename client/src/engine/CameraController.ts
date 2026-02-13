@@ -232,8 +232,6 @@ export class CameraController {
    */
   toggleDebugThirdPerson(localPlayerTransform?: any): void {
     this.debugThirdPerson = !this.debugThirdPerson;
-    console.log(`[CameraController] Debug third-person: ${this.debugThirdPerson ? 'ON' : 'OFF'}`);
-    
     // Show/hide local player mesh based on debug mode
     if (localPlayerTransform) {
       localPlayerTransform.setMeshVisibility(this.debugThirdPerson);

@@ -32,8 +32,6 @@ export class BushLeafEffect extends BaseEffect {
    * Total: 3 color textures + 3 mask textures = 6 textures.
    */
   async generate(): Promise<void> {
-    console.log('[BushLeafEffect] Starting texture generation...');
-
     // Load all leaf images first
     const loadedImages = await this.loadAllLeafImages();
 
@@ -46,7 +44,6 @@ export class BushLeafEffect extends BaseEffect {
     }
 
     this.isReady = true;
-    console.log('[BushLeafEffect] Generated 3 texture pairs (6 total textures)');
   }
 
   /**
@@ -71,7 +68,6 @@ export class BushLeafEffect extends BaseEffect {
       img.crossOrigin = 'anonymous';
       img.onload = () => resolve(img);
       img.onerror = () => {
-        console.warn(`[BushLeafEffect] Failed to load ${url}, using placeholder`);
         // Create a placeholder colored square
         const canvas = document.createElement('canvas');
         canvas.width = 256;

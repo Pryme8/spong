@@ -2,9 +2,26 @@
  * Level bush manager - handles bush mesh generation and instancing for levels.
  */
 
-import { Scene, Mesh, StandardMaterial, Color3, VertexData, TransformNode } from '@babylonjs/core';
+import { Scene, Mesh, StandardMaterial, Color3, VertexData, TransformNode, MeshBuilder } from '@babylonjs/core';
 import { generateBushVariations, BUSH_GRID_W, BUSH_GRID_H, BUSH_GRID_D, BUSH_VOXEL_SIZE, type BushVariation, type BushInstance } from '@spong/shared';
 import { ShadowManager } from '../systems/ShadowManager';
+
+/** Bush collider data: pre-transformed local-space AABB + world position */
+export interface BushColliderData {
+  /** Local-space axis-aligned bounding box (before world transform) */
+  localMinX: number;
+  localMinY: number;
+  localMinZ: number;
+  localMaxX: number;
+  localMaxY: number;
+  localMaxZ: number;
+  /** World position (bushes have no rotation) */
+  posX: number;
+  posY: number;
+  posZ: number;
+  /** Index into the bush instances array */
+  bushIndex: number;
+}
 
 /**
  * Manages bush mesh variations and instances for a level.
@@ -18,7 +35,20 @@ export class LevelBushManager {
   private variationMeshes: Mesh[] = [];
   private instanceRoots: TransformNode[] = [];
   private bushMaterial!: StandardMaterial;
-  private bushTriggerMeshes: Array<{ mesh: Mesh; bushIndex: number }> = [];
+  
+  /** Pre-computed local-space AABBs for each bush variation */
+  private bushLocalBounds: Array<{ minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }> = [];
+  
+  /** Bush collider data for all instances (for octree + point-in-local-AABB checks) */
+  private bushColliders: BushColliderData[] = [];
+  
+  /** Babylon meshes used only for debug visualization */
+  private bushDebugMeshes: Mesh[] = [];
+
+  // Bush mesh transform constants
+  private static readonly BUSH_SCALE = 0.25;
+  private static readonly HALF_W = BUSH_GRID_W * BUSH_VOXEL_SIZE * 0.5;
+  private static readonly HALF_D = BUSH_GRID_D * BUSH_VOXEL_SIZE * 0.5;
 
   constructor(scene: Scene, levelSeed: string) {
     this.scene = scene;
@@ -32,8 +62,6 @@ export class LevelBushManager {
    * Call this once during level load.
    */
   async initialize(): Promise<void> {
-    console.log(`[BushManager] Initializing bush meshes for level ${this.levelSeed}...`);
-
     // Generate bush variations (8 variations)
     this.variations = generateBushVariations(this.levelSeed, 8, 18);
 
@@ -52,23 +80,50 @@ export class LevelBushManager {
       bushMesh.receiveShadows = true;
       bushMesh.setEnabled(false); // Base mesh is hidden, only instances are visible
       this.variationMeshes.push(bushMesh);
+      
+      // Pre-compute the local-space AABB for this variation's collider
+      const localBounds = this.computeBushLocalBounds(variation.colliderMesh);
+      this.bushLocalBounds.push(localBounds);
     }
+  }
 
-    console.log(`[BushManager] Created ${this.variationMeshes.length} bush variation meshes`);
+  /**
+   * Compute the local-space AABB of a bush collider mesh after centering/scaling.
+   */
+  private computeBushLocalBounds(colliderMesh: any): { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number } {
+    const { BUSH_SCALE, HALF_W, HALF_D } = LevelBushManager;
+    const raw = colliderMesh.vertices;
+    
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    
+    for (let i = 0; i < raw.length; i += 3) {
+      const lx = (raw[i] - HALF_W) * BUSH_SCALE;
+      const ly = raw[i + 1] * BUSH_SCALE;
+      const lz = (raw[i + 2] - HALF_D) * BUSH_SCALE;
+      
+      if (lx < minX) minX = lx;
+      if (ly < minY) minY = ly;
+      if (lz < minZ) minZ = lz;
+      if (lx > maxX) maxX = lx;
+      if (ly > maxY) maxY = ly;
+      if (lz > maxZ) maxZ = lz;
+    }
+    
+    return { minX, minY, minZ, maxX, maxY, maxZ };
   }
 
   /**
    * Spawn bush instances from server data.
    */
   spawnBushInstances(instances: BushInstance[]): void {
-    console.log(`[BushManager] Spawning ${instances.length} bush instances...`);
-
+    this.bushColliders = [];
+    
     for (let i = 0; i < instances.length; i++) {
       const instance = instances[i];
       const baseMesh = this.variationMeshes[instance.variationId];
       
       if (!baseMesh) {
-        console.warn(`Missing bush mesh for variation ${instance.variationId}`);
         continue;
       }
 
@@ -77,25 +132,29 @@ export class LevelBushManager {
       bushInstance.position.set(instance.worldX, instance.worldY, instance.worldZ);
       this.instanceRoots.push(bushInstance as any);
       
-      // Debug first 3 bushes
-      if (i < 3) {
-        console.log(`[BushManager] Bush ${i}: pos=(${instance.worldX.toFixed(1)}, ${instance.worldY.toFixed(1)}, ${instance.worldZ.toFixed(1)}), variation=${instance.variationId}`);
-        console.log(`[BushManager]   Base mesh bounds:`, baseMesh.getBoundingInfo().boundingBox);
-      }
-      
       // Register shadows
       if (this.hasShadows) {
         const sm = ShadowManager.getInstance();
         if (sm) sm.addShadowCaster(bushInstance, false);
       }
       
-      // Create invisible trigger mesh for this bush instance
-      const colliderMesh = this.variations[instance.variationId].colliderMesh;
-      const triggerMesh = this.createBushTriggerMesh(colliderMesh, instance, i);
-      this.bushTriggerMeshes.push({ mesh: triggerMesh, bushIndex: i });
+      // Store bush collider data (local AABB + world position)
+      const localBounds = this.bushLocalBounds[instance.variationId];
+      if (localBounds) {
+        this.bushColliders.push({
+          localMinX: localBounds.minX,
+          localMinY: localBounds.minY,
+          localMinZ: localBounds.minZ,
+          localMaxX: localBounds.maxX,
+          localMaxY: localBounds.maxY,
+          localMaxZ: localBounds.maxZ,
+          posX: instance.worldX,
+          posY: instance.worldY,
+          posZ: instance.worldZ,
+          bushIndex: i
+        });
+      }
     }
-
-    console.log(`[BushManager] Spawned ${instances.length} bush instances with ${this.bushTriggerMeshes.length} triggers`);
   }
 
   /**
@@ -144,53 +203,6 @@ export class LevelBushManager {
     vertexData.applyToMesh(mesh);
 
     mesh.convertToFlatShadedMesh();
-    
-    // Debug first variation's bounds to verify mesh construction
-    if (variation.id === 0 || this.variationMeshes.length === 0) {
-      mesh.refreshBoundingInfo();
-      const bounds = mesh.getBoundingInfo().boundingBox;
-      console.log(`[BushManager] Variation ${variation.id} mesh bounds (local space): min=(${bounds.minimumWorld.x.toFixed(2)}, ${bounds.minimumWorld.y.toFixed(2)}, ${bounds.minimumWorld.z.toFixed(2)}), max=(${bounds.maximumWorld.x.toFixed(2)}, ${bounds.maximumWorld.y.toFixed(2)}, ${bounds.maximumWorld.z.toFixed(2)})`);
-      console.log(`[BushManager]   Expected Y range: [0, ~2.0] for a properly grounded bush`);
-    }
-
-    return mesh;
-  }
-
-  /**
-   * Create invisible trigger mesh for bush detection.
-   * Must apply same transforms as visible bush mesh (centering + scaling).
-   */
-  private createBushTriggerMesh(colliderMesh: any, instance: BushInstance, bushIndex: number): Mesh {
-    const mesh = new Mesh(`bush_trigger_${bushIndex}`, this.scene);
-    const vd = new VertexData();
-    
-    // Collider vertices are in raw world units (BUSH_VOXEL_SIZE scale)
-    // Need to center and scale them like the visible mesh
-    const BUSH_SCALE = 0.25;
-    const halfW = BUSH_GRID_W * BUSH_VOXEL_SIZE * 0.5;
-    const halfD = BUSH_GRID_D * BUSH_VOXEL_SIZE * 0.5;
-    
-    const rawVertices = colliderMesh.vertices;
-    const transformedPositions: number[] = [];
-    
-    for (let i = 0; i < rawVertices.length; i += 3) {
-      transformedPositions.push(
-        (rawVertices[i] - halfW) * BUSH_SCALE,
-        rawVertices[i + 1] * BUSH_SCALE,
-        (rawVertices[i + 2] - halfD) * BUSH_SCALE
-      );
-    }
-    
-    vd.positions = transformedPositions;
-    vd.indices = Array.from(colliderMesh.indices);
-    
-    vd.applyToMesh(mesh);
-
-    // Position at world location
-    mesh.position.set(instance.worldX, instance.worldY, instance.worldZ);
-
-    mesh.isVisible = false;
-    mesh.isPickable = true;
 
     return mesh;
   }
@@ -278,42 +290,93 @@ export class LevelBushManager {
     return mat;
   }
 
+  /** Get bush collider data for octree insertion and point-in-volume tests. */
+  getBushColliders(): BushColliderData[] {
+    return this.bushColliders;
+  }
+
   /**
-   * Check if camera position is inside any bush trigger volume.
+   * Check if a world-space point is inside a specific bush collider.
+   * Bushes have no rotation, so this is a simple AABB offset check.
+   */
+  static PointInBushCollider(px: number, py: number, pz: number, collider: BushColliderData): boolean {
+    // Translate point relative to collider world position
+    const localX = px - collider.posX;
+    const localY = py - collider.posY;
+    const localZ = pz - collider.posZ;
+    
+    // Test against local AABB
+    return localX >= collider.localMinX && localX <= collider.localMaxX &&
+           localY >= collider.localMinY && localY <= collider.localMaxY &&
+           localZ >= collider.localMinZ && localZ <= collider.localMaxZ;
+  }
+
+  /**
+   * Check if camera position is inside any bush volume.
+   * Uses bush collider data with local-space AABB test.
    * Returns the bush index if inside, -1 if outside all bushes.
    */
   checkCameraInBushes(cameraX: number, cameraY: number, cameraZ: number): number {
-    const triggerMargin = -0.1;
-    const maxCheckDistance = 15;
-    const maxCheckDistanceSq = maxCheckDistance * maxCheckDistance;
+    const maxCheckDistanceSq = 15 * 15;
 
-    for (const { mesh, bushIndex } of this.bushTriggerMeshes) {
-      const meshPos = mesh.position;
-      
-      const dx = cameraX - meshPos.x;
-      const dy = cameraY - meshPos.y;
-      const dz = cameraZ - meshPos.z;
+    for (const collider of this.bushColliders) {
+      // Fast distance check first
+      const dx = cameraX - collider.posX;
+      const dy = cameraY - collider.posY;
+      const dz = cameraZ - collider.posZ;
       const distSq = dx * dx + dy * dy + dz * dz;
       
       if (distSq > maxCheckDistanceSq) {
         continue;
       }
 
-      const triggerBounds = mesh.getBoundingInfo().boundingBox;
-      const worldMin = triggerBounds.minimumWorld;
-      const worldMax = triggerBounds.maximumWorld;
-
-      const inBush = 
-        cameraX >= (worldMin.x - triggerMargin) && cameraX <= (worldMax.x + triggerMargin) &&
-        cameraY >= (worldMin.y - triggerMargin) && cameraY <= (worldMax.y + triggerMargin) &&
-        cameraZ >= (worldMin.z - triggerMargin) && cameraZ <= (worldMax.z + triggerMargin);
-
-      if (inBush) {
-        return bushIndex;
+      if (LevelBushManager.PointInBushCollider(cameraX, cameraY, cameraZ, collider)) {
+        return collider.bushIndex;
       }
     }
 
     return -1;
+  }
+
+  /**
+   * Toggle bush collision mesh debug visualization.
+   * Creates box meshes showing the local AABBs positioned in world space.
+   */
+  toggleBushCollisionDebug(visible: boolean): void {
+    if (visible && this.bushDebugMeshes.length === 0) {
+      for (let i = 0; i < this.bushColliders.length; i++) {
+        const collider = this.bushColliders[i];
+        
+        const mesh = MeshBuilder.CreateBox(`bush_debug_${i}`, {
+          width: collider.localMaxX - collider.localMinX,
+          height: collider.localMaxY - collider.localMinY,
+          depth: collider.localMaxZ - collider.localMinZ
+        }, this.scene);
+        
+        // Position box center (local center offset + world position)
+        const localCenterX = (collider.localMinX + collider.localMaxX) * 0.5;
+        const localCenterY = (collider.localMinY + collider.localMaxY) * 0.5;
+        const localCenterZ = (collider.localMinZ + collider.localMaxZ) * 0.5;
+        
+        mesh.position.set(
+          collider.posX + localCenterX,
+          collider.posY + localCenterY,
+          collider.posZ + localCenterZ
+        );
+        
+        const mat = new StandardMaterial(`bush_debug_mat_${i}`, this.scene);
+        mat.wireframe = true;
+        mat.emissiveColor = new Color3(0, 1, 1); // Cyan
+        mesh.material = mat;
+        
+        this.bushDebugMeshes.push(mesh);
+      }
+    } else if (!visible) {
+      for (const mesh of this.bushDebugMeshes) {
+        mesh.dispose();
+      }
+      this.bushDebugMeshes = [];
+    }
   }
 
   /**
@@ -326,13 +389,15 @@ export class LevelBushManager {
     for (const mesh of this.variationMeshes) {
       mesh.dispose();
     }
-    for (const { mesh } of this.bushTriggerMeshes) {
+    for (const mesh of this.bushDebugMeshes) {
       mesh.dispose();
     }
     this.bushMaterial?.dispose();
     this.instanceRoots = [];
     this.variationMeshes = [];
     this.variations = [];
-    this.bushTriggerMeshes = [];
+    this.bushLocalBounds = [];
+    this.bushColliders = [];
+    this.bushDebugMeshes = [];
   }
 }

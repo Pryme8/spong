@@ -45,8 +45,6 @@ export async function createScene(engine: NullEngine): Promise<Scene> {
   if (havokInstance) {
     const havokPlugin = new HavokPlugin(true, havokInstance);
     scene.enablePhysics(new Vector3(0, -9.81, 0), havokPlugin);
-    console.log('Havok physics enabled on server');
-    
     // Create ground plane collider for projectiles to hit
     const ground = MeshBuilder.CreateGround('ground', {
       width: 30,

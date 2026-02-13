@@ -231,7 +231,6 @@ function updateBlurRadius() {
   // Update blur radius and regenerate texture
   wm.params.shoreFade = shoreFadeDist.value;
   wm.refreshHeightTexture();
-  console.log(`[WaterDebug] Regenerating texture with blur radius ${shoreFadeDist.value}`);
 }
 
 function updateWind() {
@@ -240,7 +239,6 @@ function updateWind() {
   world.wind.directionZ = windDirZ.value;
   world.wind.speed = windSpeed.value;
   world.wind.strength = windStrength.value;
-  console.log(`[WaterDebug] Updated global wind: dir=(${windDirX.value}, ${windDirZ.value}), speed=${windSpeed.value}, strength=${windStrength.value}`);
 }
 
 function updateShader() {
@@ -261,7 +259,6 @@ function updateShader() {
   p.cellStrength = cellStrength.value;
 
   // Params are now set - onBindObservable will push them to GPU on next render
-  console.log(`[WaterDebug] Updated cellScale to ${p.cellScale}`);
 }
 
 function resetToDefaults() {
@@ -290,7 +287,6 @@ function resetToDefaults() {
   updateBlurRadius();
   updateWind();
   updateShader();
-  console.log('[WaterDebug] Reset to defaults');
 }
 
 function exportConfig() {
@@ -318,7 +314,6 @@ cellScale: ${cellScale.value}
 cellStrength: ${cellStrength.value}`;
 
   navigator.clipboard.writeText(config).then(() => {
-    console.log('[WaterDebug] Config copied to clipboard');
   });
 }
 

@@ -37,10 +37,8 @@ export class GameStartSystem {
 
   startCountdown(): boolean {
     if (this.phase !== 'lobby') {
-      console.log('[GameStart] Cannot start countdown - already in progress');
       return false;
     }
-    console.log('[GameStart] Starting 3-second countdown');
     this.phase = 'countdown';
     this.countdownSeconds = 3;
     this.broadcastCountdown();
@@ -59,7 +57,6 @@ export class GameStartSystem {
 
   cancelCountdown(): void {
     if (this.phase !== 'countdown') return;
-    console.log('[GameStart] Countdown cancelled');
     if (this.countdownTimer) {
       clearInterval(this.countdownTimer);
       this.countdownTimer = undefined;
@@ -77,7 +74,6 @@ export class GameStartSystem {
 
   /** Call when entering loading; Room then does level gen + GameLoading broadcast + startLoadingTimer(). */
   enterLoadingPhase(seed: string): void {
-    console.log('[GameStart] Entering loading phase');
     this.phase = 'loading';
     this.loadingSeconds = 10;
     this.readyPlayers.clear();
@@ -108,14 +104,12 @@ export class GameStartSystem {
 
   markPlayerReady(playerId: string): boolean {
     if (this.phase !== 'loading') return false;
-    console.log('[GameStart] Player ready:', playerId);
     this.readyPlayers.add(playerId);
     this.broadcastReadyUpdate();
     return true;
   }
 
   private startGame(): void {
-    console.log('[GameStart] Starting game');
     this.phase = 'playing';
     this.broadcast(Opcode.GameBegin, {});
   }

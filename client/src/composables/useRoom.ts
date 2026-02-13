@@ -23,7 +23,7 @@ export function useRoom(networkClient: NetworkClient) {
 
   // Handle room state (when joining)
   networkClient.onLowFrequency(Opcode.RoomState, (payload: RoomStateMessage) => {
-    console.log('[useRoom] Received RoomState:', payload);
+
     roomId.value = payload.roomId;
     myEntityId.value = payload.myEntityId;
     ownerId.value = payload.ownerId;
@@ -40,15 +40,12 @@ export function useRoom(networkClient: NetworkClient) {
       }
     });
 
-    console.log(`[useRoom] Joined room ${payload.roomId} with entity ID ${payload.myEntityId}`);
-    console.log(`[useRoom] Room has ${payload.players.length} player(s), ownerId: ${payload.ownerId}`);
   });
 
   // Handle player joined
   networkClient.onLowFrequency(Opcode.PlayerJoined, (payload: PlayerJoinedMessage) => {
     players.value.set(payload.player.id, payload.player);
-    console.log(`Player ${payload.player.id} joined (entity ${payload.player.entityId})`);
-    
+
     // Spawn cube for this player
     if (onPlayerJoinedCallback) {
       onPlayerJoinedCallback(payload.player);
@@ -58,8 +55,7 @@ export function useRoom(networkClient: NetworkClient) {
   // Handle player left
   networkClient.onLowFrequency(Opcode.PlayerLeft, (payload: PlayerLeftMessage) => {
     players.value.delete(payload.playerId);
-    console.log(`Player ${payload.playerId} left (entity ${payload.entityId})`);
-    
+
     // Remove cube for this player
     if (onPlayerLeftCallback) {
       onPlayerLeftCallback(payload.entityId);
@@ -67,7 +63,7 @@ export function useRoom(networkClient: NetworkClient) {
   });
 
   const joinRoom = (targetRoomId: string, config?: any) => {
-    console.log('[useRoom] Sending RoomJoin request:', { roomId: targetRoomId, config });
+
     networkClient.sendLow(Opcode.RoomJoin, { roomId: targetRoomId, config });
   };
 

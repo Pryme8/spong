@@ -29,8 +29,6 @@ export class SkyPickSphere {
     if (this.sphere.material) {
       this.sphere.material.backFaceCulling = false;
     }
-
-    console.log('[SkyPickSphere] Created (200 radius, follows player)');
   }
 
   /**
@@ -42,6 +40,5 @@ export class SkyPickSphere {
 
   dispose(): void {
     this.sphere.dispose();
-    console.log('[SkyPickSphere] Disposed');
   }
 }

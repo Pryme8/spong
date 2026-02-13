@@ -143,9 +143,6 @@ function generateAndDisplay() {
   const t2 = performance.now();
   meshTimeMs.value = Math.round(t2 - t1);
   quadCount.value = quads.length;
-
-  console.log(`[CloudView] ${solidCount.value} solid voxels, ${quads.length} quads (gen: ${genTimeMs.value}ms, mesh: ${meshTimeMs.value}ms)`);
-
   // Update existing or create new cloud mesh
   if (cloudMesh) {
     updateCloudMesh(cloudMesh, quads);

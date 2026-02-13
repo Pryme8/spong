@@ -118,8 +118,6 @@ onMounted(() => {
     sunDirY.value = world.sun.directionY;
     sunDirZ.value = world.sun.directionZ;
   }, 100);
-  
-  console.log('[WorldDebugPanel] Mounted');
 });
 
 onUnmounted(() => {
@@ -135,7 +133,6 @@ function updateWind() {
   world.wind.directionZ = windDirZ.value;
   world.wind.speed = windSpeed.value;
   world.wind.strength = windStrength.value;
-  console.log(`[WorldDebug] Updated wind: dir=(${windDirX.value.toFixed(2)}, ${windDirZ.value.toFixed(2)}), speed=${windSpeed.value.toFixed(2)}, strength=${windStrength.value.toFixed(1)}`);
 }
 
 function updateSun() {
@@ -156,7 +153,6 @@ function resetToDefaults() {
   
   updateWind();
   updateSun();
-  console.log('[WorldDebug] Reset to defaults');
 }
 
 function close() {

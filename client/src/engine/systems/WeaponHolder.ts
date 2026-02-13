@@ -7,6 +7,7 @@
 import type { Scene, TransformNode, Camera } from '@babylonjs/core';
 import type { WeaponType } from './WeaponSystem';
 import { WEAPON_STATS } from '@spong/shared';
+import { EYE_FORWARD_OFFSET } from '../camera/CameraController';
 import { createPistolMesh, disposePistolMesh } from '../entities/weapons/PistolMesh';
 import { createSMGMesh, disposeSMGMesh } from '../entities/weapons/SMGMesh';
 import { createLMGMesh, disposeLMGMesh } from '../entities/weapons/LMGMesh';
@@ -76,11 +77,7 @@ export class WeaponHolder {
     this.currentWeaponType = weaponType;
 
     // Initial positioning (will be updated each frame via update methods)
-    if (this.isLocal) {
-      this.positionForFirstPerson();
-    } else {
-      this.positionForThirdPerson();
-    }
+    this.positionForFirstPerson();
   }
 
   /**
@@ -133,31 +130,17 @@ export class WeaponHolder {
   private positionForFirstPerson(): void {
     if (!this.weaponNode || !this.currentWeaponType) return;
 
-    // Use weapon-specific hold transform if defined
+    // Use weapon-specific hold transform if defined; add EYE_FORWARD_OFFSET to local Z so gun stays aligned with camera (camera is 0.1 forward)
     const stats = WEAPON_STATS[this.currentWeaponType];
+    const forwardZ = EYE_FORWARD_OFFSET;
     if (stats.holdTransform) {
       const { position, rotation } = stats.holdTransform;
-      this.weaponNode.position.set(position.x, position.y, position.z);
+      this.weaponNode.position.set(position.x, position.y, position.z + forwardZ);
       this.weaponNode.rotation.set(rotation.x, rotation.y, rotation.z);
     } else {
-      // Fallback to default positioning
-      this.weaponNode.position.set(0.3, -0.2, 0.5);
+      this.weaponNode.position.set(0.3, -0.2, 0.5 + forwardZ);
       this.weaponNode.rotation.set(0, 0, 0);
     }
-  }
-
-  /**
-   * Position weapon for third-person view (remote players)
-   * Weapon is on right side of player
-   */
-  private positionForThirdPerson(): void {
-    if (!this.weaponNode) return;
-
-    // Position on right side of player body
-    this.weaponNode.position.set(0.4, 0.3, 0);
-    
-    // Rotate to point forward and slightly up
-    this.weaponNode.rotation.set(0, Math.PI * 0.5, 0);
   }
 
   /**
@@ -177,17 +160,17 @@ export class WeaponHolder {
   }
 
   /**
-   * Update weapon position for third-person (called every frame)
-   * Attaches weapon to player transform node
+   * Update weapon position for third-person (called every frame).
+   * viewNode is at eye height with yaw+pitch so we use the same first-person hold transform,
+   * making the remote gun match what the other client sees in first person.
    */
-  updateThirdPerson(playerNode: TransformNode): void {
+  updateThirdPerson(viewNode: TransformNode): void {
     if (!this.weaponNode) return;
 
-    // Parent weapon to player node
-    if (this.weaponNode.parent !== playerNode) {
-      this.weaponNode.parent = playerNode;
+    if (this.weaponNode.parent !== viewNode) {
+      this.weaponNode.parent = viewNode;
       if (!this.debugMode) {
-        this.positionForThirdPerson();
+        this.positionForFirstPerson();
       }
     }
   }

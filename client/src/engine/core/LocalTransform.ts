@@ -17,6 +17,7 @@ import { ShadowManager } from '../systems/ShadowManager';
 import { createPlayerArmorMesh, disposePlayerArmorMesh } from '../entities/items/PlayerArmorMesh';
 import { createPlayerHelmetMesh, disposePlayerHelmetMesh } from '../entities/items/PlayerHelmetMesh';
 import type { BuildingCollisionManager } from '../building/BuildingCollisionManager';
+import { EYE_HEIGHT, EYE_FORWARD_OFFSET, LAYER_HIDDEN_FROM_MAIN } from '../camera/CameraController';
 import { WeaponHolder } from '../systems/WeaponHolder';
 import type { WeaponType } from '../systems/WeaponSystem';
 
@@ -33,6 +34,8 @@ export class LocalTransform {
   private armorNode: TransformNode | null = null;
   private helmetNode: TransformNode | null = null;
   private weaponHolder: WeaponHolder;
+  /** For remote players: view node at eye height with yaw+pitch so weapon matches first-person view. */
+  private weaponViewNode: TransformNode | null = null;
   private state: CharacterState;
   private voxelGrid?: VoxelGrid;
   private buildingCollisionManager?: BuildingCollisionManager;
@@ -144,9 +147,12 @@ export class LocalTransform {
     }, scene);
     this.headNode.parent = this.node;
     this.headNode.position.set(0, 1.3, 0);
+    if (isLocal) {
+      this.headNode.layerMask = LAYER_HIDDEN_FROM_MAIN;
+    }
 
     const headMat = new StandardMaterial(`headMat_${entityId}`, scene);
-    headMat.diffuseColor = new Color3(0.6, 0.5, 0.4); // Darker skin tone
+    headMat.diffuseColor = new Color3(0.6, 0.5, 0.4); // Default; overridden by setPlayerColor when player joins
     headMat.emissiveColor = new Color3(0, 0, 0); // No glow
     headMat.specularColor = new Color3(0.2, 0.15, 0.1); // Subtle specular
     this.headNode.material = headMat;
@@ -158,6 +164,14 @@ export class LocalTransform {
 
     // Initialize weapon holder
     this.weaponHolder = new WeaponHolder(scene, `player_${entityId}`, isLocal);
+
+    // Remote players: create view node at eye height so weapon can use first-person hold transform
+    if (!isLocal) {
+      this.weaponViewNode = new TransformNode(`player_${entityId}_weaponView`, scene);
+      this.weaponViewNode.parent = this.node;
+      this.weaponViewNode.position.set(0, EYE_HEIGHT, EYE_FORWARD_OFFSET);
+      this.weaponViewNode.rotationQuaternion = Quaternion.Identity();
+    }
   }
 
   private registerShadows(): void {
@@ -168,12 +182,23 @@ export class LocalTransform {
     sm.addShadowCaster(this.headNode, true); // Enable self-shadows
   }
 
-  /** Called when player cube instance is attached to this transform. */
+  /**
+   * Set player color (used for head so players have distinct skin/head colors like the cube).
+   */
+  setPlayerColor(color: Color3): void {
+    const headMat = this.headNode.material as StandardMaterial;
+    if (headMat) headMat.diffuseColor = color.clone();
+  }
+
+  /** Called when player cube instance is attached. Hides default body only; keeps head visible and repositions it to sit on the cube (cube top at 0.5, head center at 0.8). */
   registerPlayerCube(cube: Mesh): void {
+    this.bodyNode.setEnabled(false);
+    this.headNode.position.y = 0.8; // Cube is 1.0 tall, top at 0.5; head 0.6 tall → center at 0.5 + 0.3
     if (this.hasShadows) {
       const sm = ShadowManager.getInstance();
       if (sm) {
-        sm.addShadowCaster(cube, true); // Enable self-shadows
+        sm.addShadowCaster(cube, true);
+        sm.addShadowCaster(this.headNode, true);
       }
     }
   }
@@ -231,17 +256,24 @@ export class LocalTransform {
 
     // Get collision data for client-side prediction (must match server exactly)
     const blockColliders = this.buildingCollisionManager?.getBlockColliders();
-    let treeColliders = this.treeColliderGetter?.() ?? [];
-    let rockColliders = this.rockColliderGetter?.() ?? [];
-    
+    const fullTreeColliders = this.treeColliderGetter?.() ?? [];
+    const fullRockColliders = this.rockColliderGetter?.() ?? [];
+    let treeColliders = fullTreeColliders;
+    let rockColliders = fullRockColliders;
+
     // Query octree for nearby colliders (broad-phase culling)
     const octree = this.octreeGetter?.();
     if (octree) {
       const nearby = octree.queryPoint(this.state.posX, this.state.posY, this.state.posZ, 8);
       treeColliders = nearby.filter((e: any) => e.type === 'tree').map((e: any) => e.data);
       rockColliders = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
+      // Fallback: if octree has no tree/rock entries (e.g. built before TreeSpawn), use full list
+      if (treeColliders.length === 0 && fullTreeColliders.length > 0) {
+        treeColliders = fullTreeColliders;
+      }
+      if (rockColliders.length === 0 && fullRockColliders.length > 0) rockColliders = fullRockColliders;
     }
-    
+
     const waterProvider = this.waterLevelProviderGetter ? this.waterLevelProviderGetter() : undefined;
     stepCharacter(this.state, this.input, deltaTime, this.voxelGrid, treeColliders, rockColliders, blockColliders, waterProvider);
   }
@@ -300,17 +332,20 @@ export class LocalTransform {
       // 4. Replay all unacknowledged inputs
       // CRITICAL: Must use same collision data as initial prediction
       const blockColliders = this.buildingCollisionManager?.getBlockColliders();
-      let treeColliders = this.treeColliderGetter?.() ?? [];
-      let rockColliders = this.rockColliderGetter?.() ?? [];
-      
-      // Query octree for nearby colliders (broad-phase culling)
+      const fullTreeColliders = this.treeColliderGetter?.() ?? [];
+      const fullRockColliders = this.rockColliderGetter?.() ?? [];
+      let treeColliders = fullTreeColliders;
+      let rockColliders = fullRockColliders;
+
       const octree = this.octreeGetter?.();
       if (octree) {
         const nearby = octree.queryPoint(this.state.posX, this.state.posY, this.state.posZ, 8);
         treeColliders = nearby.filter((e: any) => e.type === 'tree').map((e: any) => e.data);
         rockColliders = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
+        if (treeColliders.length === 0 && fullTreeColliders.length > 0) treeColliders = fullTreeColliders;
+        if (rockColliders.length === 0 && fullRockColliders.length > 0) rockColliders = fullRockColliders;
       }
-      
+
       for (const snapshot of this.inputBuffer) {
         const waterProvider = this.waterLevelProviderGetter ? this.waterLevelProviderGetter() : undefined;
         stepCharacter(this.state, snapshot.input, FIXED_TIMESTEP, this.voxelGrid, treeColliders, rockColliders, blockColliders, waterProvider);
@@ -466,6 +501,14 @@ export class LocalTransform {
       Quaternion.SlerpToRef(this.prevRotation, this.targetRotation, this.interpT, this.node.rotationQuaternion);
       this.headNode.rotation.x = this.targetHeadPitch;
 
+      // View node is a child of the body, so we only set local rotation: PI so -Z = body forward, plus pitch.
+      // Pitch is negated so remote weapon points the same direction as the local first-person view.
+      if (this.weaponViewNode && this.weaponViewNode.rotationQuaternion) {
+        this.weaponViewNode.rotationQuaternion.copyFrom(
+          Quaternion.RotationYawPitchRoll(Math.PI, -this.targetHeadPitch, 0)
+        );
+      }
+
       // Update remote player's weapon holder (third-person view)
       this.updateWeaponHolder();
     }
@@ -491,12 +534,18 @@ export class LocalTransform {
       // Create armor mesh
       this.armorNode = createPlayerArmorMesh(`player_${this.entityId}`, this.scene);
       this.armorNode.parent = this.node;
-      console.log(`[LocalTransform] Created armor mesh for entity ${this.entityId}`);
     } else if (!hasArmor && this.armorNode) {
       // Remove armor mesh
       disposePlayerArmorMesh(`player_${this.entityId}`, this.scene);
       this.armorNode = null;
-      console.log(`[LocalTransform] Removed armor mesh for entity ${this.entityId}`);
+    }
+  }
+
+  private setHelmetLayerMask(mask: number): void {
+    if (!this.helmetNode) return;
+    const meshes = this.helmetNode.getChildMeshes(false);
+    for (const mesh of meshes) {
+      mesh.layerMask = mask;
     }
   }
 
@@ -505,15 +554,15 @@ export class LocalTransform {
    */
   setHelmet(hasHelmet: boolean) {
     if (hasHelmet && !this.helmetNode) {
-      // Create helmet mesh attached to head
       this.helmetNode = createPlayerHelmetMesh(`player_${this.entityId}`, this.scene);
       this.helmetNode.parent = this.headNode;
-      console.log(`[LocalTransform] Created helmet mesh for entity ${this.entityId}`);
+      if (this.isLocal) {
+        this.setHelmetLayerMask(LAYER_HIDDEN_FROM_MAIN);
+      }
     } else if (!hasHelmet && this.helmetNode) {
       // Remove helmet mesh
       disposePlayerHelmetMesh(`player_${this.entityId}`, this.scene);
       this.helmetNode = null;
-      console.log(`[LocalTransform] Removed helmet mesh for entity ${this.entityId}`);
     }
   }
 
@@ -532,11 +581,15 @@ export class LocalTransform {
   }
 
   /**
-   * Set visibility of player mesh (for debug third-person view)
+   * Set visibility of player mesh (for debug third-person view). When visible, head/helmet use main layer so camera sees them.
    */
   setMeshVisibility(visible: boolean): void {
     this.headNode.isVisible = visible;
     this.bodyNode.isVisible = visible;
+    if (this.isLocal) {
+      this.headNode.layerMask = visible ? 0x0FFFFFFF : LAYER_HIDDEN_FROM_MAIN;
+      this.setHelmetLayerMask(visible ? 0x0FFFFFFF : LAYER_HIDDEN_FROM_MAIN);
+    }
   }
 
   /**
@@ -554,8 +607,8 @@ export class LocalTransform {
       // First-person mode (weapon attached to camera)
       this.weaponHolder.updateFirstPerson(camera);
     } else {
-      // Third-person mode (weapon attached to player node)
-      this.weaponHolder.updateThirdPerson(this.node);
+      // Third-person: weapon on view node at eye height so it matches first-person position
+      this.weaponHolder.updateThirdPerson(this.weaponViewNode ?? this.node);
     }
   }
 
@@ -567,6 +620,10 @@ export class LocalTransform {
     if (this.helmetNode) {
       disposePlayerHelmetMesh(`player_${this.entityId}`, this.scene);
       this.helmetNode = null;
+    }
+    if (this.weaponViewNode) {
+      this.weaponViewNode.dispose();
+      this.weaponViewNode = null;
     }
     this.weaponHolder.dispose();
     this.bodyNode.dispose();
