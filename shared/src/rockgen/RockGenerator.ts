@@ -30,8 +30,14 @@ const ROCK_SIZES: RockSizeConfig[] = [
   { gridSize: 20, minRadius: 7, maxRadius: 9, minClipPasses: 6, maxClipPasses: 11 }   // Large (~5 units final)
 ];
 
-const NOISE_AMPLITUDE = 1.0; // Noise distortion strength
-const SURFACE_THRESHOLD = 0.15; // Final threshold to clean edges
+const DEFAULT_NOISE_AMPLITUDE = 1.0;
+const DEFAULT_SURFACE_THRESHOLD = 0.15;
+
+/** Optional overrides for level variety (same seed + params = same rock). */
+export interface RockParams {
+  noiseAmplitude?: number;
+  surfaceThreshold?: number;
+}
 
 /**
  * Deterministically choose rock size based on seed.
@@ -49,12 +55,15 @@ function selectRockSize(seed: string): RockSizeConfig {
 /**
  * Generate a rock voxel grid from a seed string.
  * Size is randomly selected from three variants based on seed.
+ * Optional params add variety (e.g. level gen uses seed-derived params).
  */
-export function generateRock(seed: string): RockVoxelGrid {
+export function generateRock(seed: string, params?: RockParams): RockVoxelGrid {
   const sizeConfig = selectRockSize(seed);
   const rng = new SeededRandom(seed);
   const grid = new RockVoxelGrid(sizeConfig.gridSize);
-  
+  const noiseAmplitude = params?.noiseAmplitude ?? DEFAULT_NOISE_AMPLITUDE;
+  const surfaceThreshold = params?.surfaceThreshold ?? DEFAULT_SURFACE_THRESHOLD;
+
   const centerX = sizeConfig.gridSize * 0.5;
   const centerY = sizeConfig.gridSize * 0.5;
   const centerZ = sizeConfig.gridSize * 0.5;
@@ -97,12 +106,12 @@ export function generateRock(seed: string): RockVoxelGrid {
   console.log(`[RockGen] Applied ${clipPasses} clip passes`);
 
   // ── Step 3: Noise distortion ───────────────────────────────
-  applyNoiseDistortion(grid, seed, NOISE_AMPLITUDE);
+  applyNoiseDistortion(grid, seed, noiseAmplitude);
   
   console.log(`[RockGen] Applied noise distortion`);
 
   // ── Step 4: Threshold pass ─────────────────────────────────
-  applyThreshold(grid, SURFACE_THRESHOLD);
+  applyThreshold(grid, surfaceThreshold);
   
   console.log(`[RockGen] Applied threshold, solid count: ${grid.getSolidCount()}`);
 

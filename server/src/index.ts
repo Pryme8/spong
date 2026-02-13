@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
+import path from 'path';
 import { config } from './config.js';
 import { websocketPlugin } from './plugins/websocket.js';
 import { RoomManager } from './rooms/RoomManager.js';
@@ -62,6 +64,17 @@ await fastify.register(websocketPlugin);
 fastify.get('/health', async () => {
   return { status: 'ok', timestamp: Date.now() };
 });
+
+// Optional: serve client static + SPA fallback (e.g. Docker with PUBLIC_DIR set)
+if (config.publicDir) {
+  await fastify.register(fastifyStatic, {
+    root: path.resolve(config.publicDir),
+    index: false
+  });
+  fastify.get('*', (_req, reply) => {
+    reply.sendFile('index.html', path.resolve(config.publicDir!));
+  });
+}
 
 // Initialize room manager after plugins are ready
 await fastify.ready();

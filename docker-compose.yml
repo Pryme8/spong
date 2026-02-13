@@ -1,0 +1,9 @@
+# Single-container run. Build: docker compose up --build
+# Then open http://localhost:3000
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PUBLIC_DIR: /app/client-dist

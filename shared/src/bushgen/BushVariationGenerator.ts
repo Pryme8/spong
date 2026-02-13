@@ -3,8 +3,9 @@
  * Generates pre-made bush variations that can be instanced.
  */
 
-import { generateBush } from './BushGenerator.js';
+import { generateBush, type BushParams } from './BushGenerator.js';
 import { BushGreedyMesher } from './BushGreedyMesher.js';
+import { SeededRandom } from '../rng.js';
 import { BushMeshBuilder } from './BushMeshBuilder.js';
 import { BushMeshDecimator } from './BushMeshDecimator.js';
 import type { BushQuad } from './BushGreedyMesher.js';
@@ -21,6 +22,20 @@ export interface BushVariation {
   fullMesh: BushMesh;
   /** Simplified collider mesh for trigger detection */
   colliderMesh: BushColliderMesh;
+}
+
+/** Ranges give level bushes variety in shape/density; editor uses defaults when no params. */
+function randomBushParamsForSeed(bushSeed: string): BushParams {
+  const r = new SeededRandom(bushSeed);
+  return {
+    minSpheres: r.int(2, 4),
+    maxSpheres: r.int(5, 8),
+    minRadius: r.range(1.5, 2.5),
+    maxRadius: r.range(3.5, 5),
+    spreadFactor: r.range(0.15, 0.35),
+    blurPasses: r.int(1, 3),
+    surfaceThreshold: r.range(0.1, 0.2),
+  };
 }
 
 /**
@@ -43,7 +58,8 @@ export function generateBushVariations(
 
   for (let i = 0; i < count; i++) {
     const bushSeed = `${baseSeed}_bush_${i}`;
-    const grid = generateBush(bushSeed);
+    const params = randomBushParamsForSeed(bushSeed);
+    const grid = generateBush(bushSeed, params);
     
     // Greedy mesh it
     const mesher = new BushGreedyMesher(grid);

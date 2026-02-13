@@ -30,7 +30,7 @@ export function createDoubleBarrelShotgunMesh(name: string, scene: Scene, option
   // Frame (horizontal box) - width and height swapped from shotgun
   const frame = primitives.createBoxInstance(
     `${name}_frame`,
-    0.18,  // width (X) - swapped with height
+    0.2,   // width (X) - swapped with height
     0.15,  // height (Y) - swapped with width
     0.8,   // depth (Z) - same as shotgun
     diffuseColor,
@@ -47,21 +47,22 @@ export function createDoubleBarrelShotgunMesh(name: string, scene: Scene, option
     emissiveColor
   );
 
-  // Foregrip (horizontal box pointing forward - pump action)
-  const foregrip = primitives.createBoxInstance(
-    `${name}_foregrip`,
-    0.12,  // width (X) - grip thickness
-    0.1,   // height (Y) - shorter
-    0.25,  // depth (Z) - grip length (horizontal)
+  // Front pistol grip (vertical)
+  const frontGrip = primitives.createBoxInstance(
+    `${name}_front_grip`,
+    0.09,  // width (X)
+    0.18,  // height (Y)
+    0.12,  // depth (Z)
     diffuseColor,
     emissiveColor
   );
 
   // Barrel 1 (left cylinder)
-  const barrelRadius = 0.15 * 0.6; // same diameter as shotgun
+  const barrelDiameter = 0.15 * 0.6; // same diameter as shotgun
+  const barrelRadius = barrelDiameter * 0.5;
   const barrel1 = primitives.createCylinderInstance(
     `${name}_barrel1`,
-    barrelRadius,
+    barrelDiameter,
     0.2,
     diffuseColor,
     emissiveColor
@@ -70,7 +71,7 @@ export function createDoubleBarrelShotgunMesh(name: string, scene: Scene, option
   // Barrel 2 (right cylinder)
   const barrel2 = primitives.createCylinderInstance(
     `${name}_barrel2`,
-    barrelRadius,
+    barrelDiameter,
     0.2,
     diffuseColor,
     emissiveColor
@@ -93,8 +94,8 @@ export function createDoubleBarrelShotgunMesh(name: string, scene: Scene, option
   // Frame bottom = 0 - 0.15/2 = -0.075, grip top at Y + 0.233/2, so Y = -0.075 - 0.233/2 = -0.1915
   grip.position.set(0, -0.1915, -0.25);
 
-  // Position foregrip forward, below frame
-  foregrip.position.set(0, -0.13, 0.3);
+  // Position front grip forward, below frame
+  frontGrip.position.set(0, -0.17, 0.24);
 
   // Rotate barrels to point forward
   barrel1.rotation.z = Math.PI * 0.5;
@@ -106,11 +107,12 @@ export function createDoubleBarrelShotgunMesh(name: string, scene: Scene, option
   // Frame extends from z = 0.1 - 0.8/2 to 0.1 + 0.8/2 = -0.3 to 0.5
   // Frame Y position is 0, frame height 0.15, so 2/3 up = 0 + (0.15 * 2/3 - 0.15/2) = 0.025
   // Barrel length 0.2, sticks out by 0.05, so center at 0.5 + 0.05 = 0.55
-  // Offset left by barrel radius
-  barrel1.position.set(-barrelRadius, 0.025, 0.55);
+  // Offset left by barrel radius so barrels touch
+  const barrelSpacing = barrelRadius;
+  barrel1.position.set(-barrelSpacing, 0.025, 0.55);
 
   // Position barrel 2 (right) - offset to the right
-  barrel2.position.set(barrelRadius, 0.025, 0.55);
+  barrel2.position.set(barrelSpacing, 0.025, 0.55);
 
   // Position iron sight moved back by its depth from end of frame, sitting on top
   // Frame top = 0 + 0.15/2 = 0.075, iron sight bottom at Y - 0.075/2, so Y = 0.075 + 0.075/2 = 0.1125
@@ -120,7 +122,7 @@ export function createDoubleBarrelShotgunMesh(name: string, scene: Scene, option
   // Parent all to root
   frame.parent = root;
   grip.parent = root;
-  foregrip.parent = root;
+  frontGrip.parent = root;
   barrel1.parent = root;
   barrel2.parent = root;
   ironSight.parent = root;
@@ -131,7 +133,7 @@ export function createDoubleBarrelShotgunMesh(name: string, scene: Scene, option
     if (sm) {
       sm.addShadowCaster(frame, true);
       sm.addShadowCaster(grip, true);
-      sm.addShadowCaster(foregrip, true);
+      sm.addShadowCaster(frontGrip, true);
       sm.addShadowCaster(barrel1, true);
       sm.addShadowCaster(barrel2, true);
       sm.addShadowCaster(ironSight, true);

@@ -1,0 +1,111 @@
+/**
+ * Sends full initial state to a newly joined connection: items, level (trees/rocks/bushes),
+ * dummy spawns, existing players' armor/helmet/materials, building state.
+ * Room calls sendInitialState(conn) from addPlayer (inside setTimeout).
+ */
+
+import type { Entity } from '@spong/shared';
+import {
+  Opcode,
+  COMP_ARMOR,
+  COMP_HELMET,
+  COMP_MATERIALS,
+  type ArmorComponent,
+  type HelmetComponent,
+  type MaterialsComponent,
+  type ArmorUpdateMessage,
+  type HelmetUpdateMessage,
+  type MaterialsUpdateMessage,
+} from '@spong/shared';
+
+export interface JoinSyncSystemOptions {
+  sendToConn: (conn: unknown, opcode: number, msg: unknown) => void;
+  getItemInitialMessages: () => unknown[];
+  getTreeSpawnMessage: () => unknown | null;
+  getRockSpawnMessage: () => unknown | null;
+  getBushSpawnMessage: () => unknown | null;
+  sendDummySpawns: (conn: unknown) => void;
+  getPlayerEntities: () => Entity[];
+  getBuildingInitialMessages: () => unknown[];
+}
+
+export class JoinSyncSystem {
+  private readonly sendToConn: (conn: unknown, opcode: number, msg: unknown) => void;
+  private readonly getItemInitialMessages: () => unknown[];
+  private readonly getTreeSpawnMessage: () => unknown | null;
+  private readonly getRockSpawnMessage: () => unknown | null;
+  private readonly getBushSpawnMessage: () => unknown | null;
+  private readonly sendDummySpawns: (conn: unknown) => void;
+  private readonly getPlayerEntities: () => Entity[];
+  private readonly getBuildingInitialMessages: () => unknown[];
+
+  constructor(options: JoinSyncSystemOptions) {
+    this.sendToConn = options.sendToConn;
+    this.getItemInitialMessages = options.getItemInitialMessages;
+    this.getTreeSpawnMessage = options.getTreeSpawnMessage;
+    this.getRockSpawnMessage = options.getRockSpawnMessage;
+    this.getBushSpawnMessage = options.getBushSpawnMessage;
+    this.sendDummySpawns = options.sendDummySpawns;
+    this.getPlayerEntities = options.getPlayerEntities;
+    this.getBuildingInitialMessages = options.getBuildingInitialMessages;
+  }
+
+  sendInitialState(conn: unknown, connIdForLog?: string): void {
+    const logId = connIdForLog ?? 'player';
+    const itemMessages = this.getItemInitialMessages();
+    for (const msg of itemMessages) {
+      this.sendToConn(conn, Opcode.ItemSpawn, msg);
+    }
+    console.log(`Sent ${itemMessages.length} existing items to ${logId}`);
+
+    const treeMsg = this.getTreeSpawnMessage();
+    if (treeMsg) {
+      this.sendToConn(conn, Opcode.TreeSpawn, treeMsg);
+      const t = treeMsg as { trees: unknown[] };
+      console.log(`Sent ${t.trees?.length ?? 0} trees to ${logId}`);
+    }
+    const rockMsg = this.getRockSpawnMessage();
+    if (rockMsg) {
+      this.sendToConn(conn, Opcode.RockSpawn, rockMsg);
+      const r = rockMsg as { rocks: unknown[] };
+      console.log(`Sent ${r.rocks?.length ?? 0} rocks to ${logId}`);
+    }
+    const bushMsg = this.getBushSpawnMessage();
+    if (bushMsg) {
+      this.sendToConn(conn, Opcode.BushSpawn, bushMsg);
+      const b = bushMsg as { bushes: unknown[] };
+      console.log(`[JoinSync] ✓ Sent ${b.bushes?.length ?? 0} bushes to ${logId}`);
+    } else {
+      console.log(`[JoinSync] ✗ No bushes to send`);
+    }
+
+    this.sendDummySpawns(conn);
+
+    const playerEntities = this.getPlayerEntities();
+    for (const playerEntity of playerEntities) {
+      const armor = playerEntity.get<ArmorComponent>(COMP_ARMOR);
+      if (armor && armor.current > 0) {
+        this.sendToConn(conn, Opcode.ArmorUpdate, { entityId: playerEntity.id, armor: armor.current } satisfies ArmorUpdateMessage);
+      }
+      const helmet = playerEntity.get<HelmetComponent>(COMP_HELMET);
+      if (helmet?.hasHelmet) {
+        this.sendToConn(conn, Opcode.HelmetUpdate, {
+          entityId: playerEntity.id,
+          hasHelmet: helmet.hasHelmet,
+          helmetHealth: helmet.helmetHealth
+        } satisfies HelmetUpdateMessage);
+      }
+      const materials = playerEntity.get<MaterialsComponent>(COMP_MATERIALS);
+      if (materials) {
+        this.sendToConn(conn, Opcode.MaterialsUpdate, { entityId: playerEntity.id, materials: materials.current } satisfies MaterialsUpdateMessage);
+      }
+    }
+
+    const buildingMessages = this.getBuildingInitialMessages();
+    for (const buildingMsg of buildingMessages) {
+      this.sendToConn(conn, Opcode.BuildingInitialState, buildingMsg);
+      const b = buildingMsg as { blocks: unknown[]; buildingEntityId: number };
+      console.log(`Sent ${b.blocks?.length ?? 0} building blocks (entity ${b.buildingEntityId}) to ${logId}`);
+    }
+  }
+}

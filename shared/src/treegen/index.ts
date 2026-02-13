@@ -10,5 +10,4 @@ export * from './TreeMesh.js';
 export * from './TreeMeshBuilder.js';
 export * from './TreeLeafMeshBuilder.js';
 export * from './TreeMeshDecimator.js';
-// TreeMeshTransform exports inverseTransformPoint/Direction which conflicts with rockgen
-// Import directly as TreeTransform when needed from './TreeMeshTransform.js'
+export type { TreeTransform } from './TreeMeshTransform.js';

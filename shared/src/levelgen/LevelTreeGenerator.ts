@@ -3,8 +3,37 @@
  * Generates tree variations for level placement.
  */
 
-import { TreeGenerator, TreeVoxelGrid, TreeGreedyMesher, TreeMeshBuilder, TreeMeshDecimator, type TreeQuad, type TreeMesh, type TreeColliderMesh } from '../treegen/index.js';
+import { TreeGenerator, TreeVoxelGrid, TreeGreedyMesher, TreeMeshBuilder, TreeMeshDecimator, type TreeQuad, type TreeMesh, type TreeColliderMesh, type TreeParams } from '../treegen/index.js';
 import { SeededRandom } from '../rng.js';
+
+/** Ranges match TreeView.vue randomSeed() so level trees match editor variety (twist, sway, etc.) */
+function randomTreeParamsForSeed(treeSeed: string): Partial<TreeParams> {
+  const r = new SeededRandom(treeSeed);
+  return {
+    trunkSegments: Math.floor(r.next() * (18 - 8 + 1)) + 8,
+    trunkMidSegments: Math.floor(r.next() * (9 - 4 + 1)) + 4,
+    trunkTopSegments: Math.floor(r.next() * (6 - 4 + 1)) + 4,
+    trunkStepLength: r.next() * (1.25 - 0.8) + 0.8,
+    trunkTaper: r.next() * (0.980 - 0.960) + 0.960,
+    trunkSway: r.next() * 1.0,
+    trunkTwist: r.next() * 1.0 - 0.5,
+    yawAngle: r.next() * (1.4 - 0.55) + 0.55,
+    yawDeviation: r.next() * (0.6 - 0.15) + 0.15,
+    pitchAngle: r.next() * (1.2 - 0.80) + 0.80,
+    pitchDeviation: r.next() * (0.4 - 0.10) + 0.10,
+    stepLength: r.next() * (1.1 - 0.45) + 0.45,
+    stepDeviation: r.next() * (0.40 - 0.2) + 0.2,
+    thicknessDecay: r.next() * (0.70 - 0.6) + 0.6,
+    minThickness: r.next() * (0.70 - 0.4) + 0.4,
+    leafRadius: Math.floor(r.next() * (6 - 4 + 1)) + 4,
+    leafRadiusVariation: r.next() * 1.0,
+    leafBlobs: Math.floor(r.next() * (4 - 1 + 1)) + 1,
+    gravityDroop: r.next() * (0.12 - (-0.12)) + (-0.12),
+    rootSegments: Math.floor(r.next() * (6 - 1 + 1)) + 1,
+    rootBranches: Math.floor(r.next() * (6 - 2 + 1)) + 2,
+    rootGravityDroop: r.next() * (0.70 - 0.50) + 0.50,
+  };
+}
 
 export interface TreeVariation {
   /** Unique ID for this tree variation (0-17) */
@@ -48,8 +77,9 @@ export function generateTreeVariations(baseSeed: string, gridResolution: number 
   for (let i = 0; i < VARIATION_COUNT; i++) {
     const treeSeed = `${baseSeed}_tree_${i}`;
     const grid = new TreeVoxelGrid();
-    const generator = new TreeGenerator(treeSeed, grid);
-    
+    const params = randomTreeParamsForSeed(treeSeed);
+    const generator = new TreeGenerator(treeSeed, grid, params);
+
     // Generate the tree
     generator.generate();
     

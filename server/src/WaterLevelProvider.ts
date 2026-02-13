@@ -6,7 +6,7 @@
  * height is below the water level.
  */
 
-import { VoxelGrid, VOXEL_HEIGHT, LEVEL_OFFSET_Y } from '@spong/shared';
+import { VoxelGrid } from '@spong/shared';
 import type { WaterLevelProvider } from '@spong/shared';
 
 const WATER_LEVEL_Y = -14;

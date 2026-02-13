@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rock Striation Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+        }
+
+        #container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #8b7355;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        #canvasContainer {
+            position: relative;
+            width: 1024px;
+            height: 1024px;
+            margin: 20px auto;
+        }
+
+        #canvas {
+            display: block;
+            width: 1024px;
+            height: 1024px;
+            border: 3px solid #333;
+            cursor: crosshair;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            background: #000;
+        }
+
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+        }
+
+        .control-group {
+            display: inline-block;
+            margin: 10px 20px;
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #ccc;
+        }
+
+        input[type="range"] {
+            width: 200px;
+        }
+
+        button {
+            background: #6b5344;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #8b7355;
+        }
+
+        .info {
+            text-align: center;
+            color: #888;
+            margin-top: 10px;
+        }
+
+        select {
+            padding: 5px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>Rock Striation Generator</h1>
+
+        <div id="canvasContainer">
+            <canvas id="canvas" width="1024" height="1024"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>Pattern:</label>
+                <select id="patternSelect">
+                    <option value="horizontal">Horizontal Bedding</option>
+                    <option value="diagonal">Diagonal Strata</option>
+                    <option value="wavy">Wavy / Folded</option>
+                    <option value="foliation">Metamorphic Foliation</option>
+                    <option value="crossBed">Cross-Bedding</option>
+                    <option value="vein">Vein / Fracture</option>
+                    <option value="banded">Banded (Gneiss)</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Layer Count: <span id="layerValue">24</span></label>
+                <input type="range" id="layerSlider" min="6" max="60" value="24">
+            </div>
+
+            <div class="control-group">
+                <label>Roughness: <span id="roughValue">0.4</span></label>
+                <input type="range" id="roughSlider" min="0" max="1" step="0.05" value="0.4">
+            </div>
+
+            <div class="control-group">
+                <label>Contrast: <span id="contrastValue">0.7</span></label>
+                <input type="range" id="contrastSlider" min="0.2" max="1" step="0.05" value="0.7">
+            </div>
+
+            <div class="control-group">
+                <label>Grain: <span id="grainValue">0.08</span></label>
+                <input type="range" id="grainSlider" min="0" max="0.25" step="0.01" value="0.08">
+            </div>
+
+            <div class="control-group">
+                <label>Warp (displace): <span id="distortValue">1</span></label>
+                <input type="range" id="distortSlider" min="0" max="1" step="0.05" value="1">
+            </div>
+
+            <br>
+
+            <button id="regenerateBtn">Regenerate</button>
+            <button id="randomSeedBtn">Random Seed</button>
+        </div>
+
+        <div class="info">
+            Black-to-white striation patterns. Warp displaces pixels (bends the texture); Grain adds noise. Use Random Seed for variation.
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const patternSelect = document.getElementById('patternSelect');
+        const layerSlider = document.getElementById('layerSlider');
+        const roughSlider = document.getElementById('roughSlider');
+        const contrastSlider = document.getElementById('contrastSlider');
+        const grainSlider = document.getElementById('grainSlider');
+        const distortSlider = document.getElementById('distortSlider');
+        const regenerateBtn = document.getElementById('regenerateBtn');
+        const randomSeedBtn = document.getElementById('randomSeedBtn');
+
+        layerSlider.oninput = () => document.getElementById('layerValue').textContent = layerSlider.value;
+        roughSlider.oninput = () => document.getElementById('roughValue').textContent = roughSlider.value;
+        contrastSlider.oninput = () => document.getElementById('contrastValue').textContent = contrastSlider.value;
+        grainSlider.oninput = () => document.getElementById('grainValue').textContent = grainSlider.value;
+        distortSlider.oninput = () => document.getElementById('distortValue').textContent = distortSlider.value;
+
+        let seed = 12345;
+
+        class SeededRandom {
+            constructor(s) {
+                this.seed = s;
+            }
+            next() {
+                this.seed = (this.seed * 9301 + 49297) % 233280;
+                return this.seed / 233280;
+            }
+            range(min, max) {
+                return this.next() * (max - min) + min;
+            }
+        }
+
+        function hash(x, y) {
+            return ((x * 73856093) ^ (y * 19349663)) >>> 0;
+        }
+
+        function hash2(seed, x, y) {
+            return ((seed * 31 + x) * 73856093 ^ (y * 19349663)) >>> 0;
+        }
+
+        function noise2D(rng, x, y, freq) {
+            const xi = Math.floor(x * freq) & 255;
+            const yi = Math.floor(y * freq) & 255;
+            const xf = (x * freq) % 1;
+            const yf = (y * freq) % 1;
+            const u = xf * xf * (3 - 2 * xf);
+            const v = yf * yf * (3 - 2 * yf);
+            const h = hash(xi, yi);
+            const a = (h % 1000) / 1000;
+            const b = ((h >> 8) % 1000) / 1000;
+            const c = ((h >> 16) % 1000) / 1000;
+            const d = ((h >> 24) % 1000) / 1000;
+            return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+        }
+
+        function smoothstep(t) {
+            return t * t * (3 - 2 * t);
+        }
+
+        function gradNoiseTileable(seed, u, v, gridSize) {
+            const x = u * gridSize;
+            const y = v * gridSize;
+            const xi = Math.floor(x) % gridSize;
+            const yi = Math.floor(y) % gridSize;
+            const xf = x - Math.floor(x);
+            const yf = y - Math.floor(y);
+            const uu = smoothstep(xf);
+            const vv = smoothstep(yf);
+            function grad(ix, iy) {
+                const h = hash2(seed, ix, iy);
+                const angle = (h % 628) / 100;
+                return { x: Math.cos(angle), y: Math.sin(angle) };
+            }
+            function corner(g, ox, oy) {
+                return g.x * (xf - ox) + g.y * (yf - oy);
+            }
+            const g00 = grad(xi, yi);
+            const g10 = grad((xi + 1) % gridSize, yi);
+            const g01 = grad(xi, (yi + 1) % gridSize);
+            const g11 = grad((xi + 1) % gridSize, (yi + 1) % gridSize);
+            const n00 = corner(g00, 0, 0);
+            const n10 = corner(g10, 1, 0);
+            const n01 = corner(g01, 0, 1);
+            const n11 = corner(g11, 1, 1);
+            const n0 = n00 * (1 - uu) + n10 * uu;
+            const n1 = n01 * (1 - uu) + n11 * uu;
+            return n0 * (1 - vv) + n1 * vv;
+        }
+
+        function gray(t) {
+            const g = Math.max(0, Math.min(255, Math.round(255 * t)));
+            return `rgb(${g},${g},${g})`;
+        }
+
+        function sampleBilinear(data, w, h, sx, sy) {
+            sx = Math.max(0, Math.min(w - 1.001, sx));
+            sy = Math.max(0, Math.min(h - 1.001, sy));
+            const ix = Math.floor(sx);
+            const iy = Math.floor(sy);
+            const fx = sx - ix;
+            const fy = sy - iy;
+            const i = (iy * w + ix) * 4;
+            const j = i + w * 4;
+            const r00 = data[i];
+            const r10 = data[i + 4];
+            const r01 = data[j];
+            const r11 = data[j + 4];
+            const r = r00 * (1 - fx) * (1 - fy) + r10 * fx * (1 - fy) + r01 * (1 - fx) * fy + r11 * fx * fy;
+            return Math.max(0, Math.min(255, Math.round(r)));
+        }
+
+        function sampleBilinearTiled(data, w, h, sx, sy) {
+            sx = ((sx % w) + w) % w;
+            sy = ((sy % h) + h) % h;
+            const ix = Math.floor(sx) % w;
+            const iy = Math.floor(sy) % h;
+            const fx = sx - Math.floor(sx);
+            const fy = sy - Math.floor(sy);
+            const ix1 = (ix + 1) % w;
+            const iy1 = (iy + 1) % h;
+            const i00 = (iy * w + ix) * 4;
+            const i10 = (iy * w + ix1) * 4;
+            const i01 = (iy1 * w + ix) * 4;
+            const i11 = (iy1 * w + ix1) * 4;
+            const r = data[i00] * (1 - fx) * (1 - fy) + data[i10] * fx * (1 - fy) + data[i01] * (1 - fx) * fy + data[i11] * fx * fy;
+            return Math.max(0, Math.min(255, Math.round(r)));
+        }
+
+        function applyGrain(ctx, w, h, amount) {
+            if (amount <= 0) return;
+            const data = ctx.getImageData(0, 0, w, h);
+            const rng = new SeededRandom(seed + 999);
+            const scale = amount * 255;
+            for (let i = 0; i < data.data.length; i += 4) {
+                const g = data.data[i];
+                const noise = (rng.next() - 0.5) * 2 * scale;
+                const v = Math.max(0, Math.min(255, Math.round(g + noise)));
+                data.data[i] = data.data[i + 1] = data.data[i + 2] = v;
+            }
+            ctx.putImageData(data, 0, 0);
+        }
+
+        function applyDistortion(ctx, w, h, amount) {
+            if (amount <= 0) return;
+            const data = ctx.getImageData(0, 0, w, h);
+            const src = new Uint8ClampedArray(data.data);
+            const distScale = amount * 90;
+            const grid1 = 24;
+            const grid2 = 48;
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const u = x / w;
+                    const v = y / h;
+                    const nScale = 0.4;
+                    const dx = (gradNoiseTileable(seed, u, v, grid1) * 0.6 + gradNoiseTileable(seed + 1000, u, v, grid2) * 0.4) * nScale * distScale;
+                    const dy = (gradNoiseTileable(seed + 500, u, v, grid1) * 0.6 + gradNoiseTileable(seed + 1500, u, v, grid2) * 0.4) * nScale * distScale;
+                    const sx = x + dx;
+                    const sy = y + dy;
+                    const val = sampleBilinearTiled(src, w, h, sx, sy);
+                    const i = (y * w + x) * 4;
+                    data.data[i] = data.data[i + 1] = data.data[i + 2] = val;
+                }
+            }
+            ctx.putImageData(data, 0, 0);
+        }
+
+        function applyPostProcessing(ctx, w, h) {
+            const distort = parseFloat(distortSlider.value);
+            const grain = parseFloat(grainSlider.value);
+            if (distort > 0) applyDistortion(ctx, w, h, distort);
+            if (grain > 0) applyGrain(ctx, w, h, grain);
+        }
+
+        function drawHorizontal(ctx, w, h, layerCount, roughness, contrast) {
+            const rng = new SeededRandom(seed);
+            const step = 6;
+            let y = 0;
+            for (let i = 0; i < layerCount; i++) {
+                const thick = 0.8 + rng.next() * 0.5;
+                const bandHeight = (h / layerCount) * thick;
+                const topY = y;
+                y += bandHeight;
+                const botY = Math.min(y, h);
+                ctx.beginPath();
+                ctx.moveTo(0, topY);
+                for (let x = 0; x <= w; x += step) {
+                    const n = (noise2D(rng, x * 0.0015 + seed, topY * 0.001, 1.5) - 0.5) * bandHeight * roughness * 1.5;
+                    ctx.lineTo(x, topY + n);
+                }
+                ctx.lineTo(w, botY);
+                for (let x = w; x >= 0; x -= step) {
+                    const n = (noise2D(rng, x * 0.0015 + seed + 100, botY * 0.001, 1.5) - 0.5) * bandHeight * roughness * 1.5;
+                    ctx.lineTo(x, botY + n);
+                }
+                ctx.closePath();
+                const t = (i % 2) === 0 ? (1 - contrast) * 0.5 : 0.5 + contrast * 0.5;
+                ctx.fillStyle = gray(t);
+                ctx.fill();
+                if (y >= h) break;
+            }
+        }
+
+        function drawDiagonal(ctx, w, h, layerCount, roughness, contrast) {
+            const angle = Math.PI * 0.35;
+            const cosA = Math.cos(angle);
+            const sinA = Math.sin(angle);
+            const perpX = -sinA;
+            const perpY = cosA;
+            const bandStep = (w + h) / layerCount;
+            const extent = Math.max(w, h) * 1.5;
+            const rng = new SeededRandom(seed);
+            for (let i = 0; i <= layerCount; i++) {
+                const baseAlong = (i - layerCount * 0.5) * bandStep;
+                ctx.beginPath();
+                const steps = 500;
+                for (let s = 0; s <= steps; s++) {
+                    const along = (s / steps - 0.5) * 2 * extent;
+                    const n = (noise2D(rng, (baseAlong + along * 0.3) * 0.003 + seed, i * 0.15, 2) - 0.5) * bandStep * roughness * 1.2;
+                    const x = w * 0.5 + along * cosA + (baseAlong + n) * perpX;
+                    const y = h * 0.5 + along * sinA + (baseAlong + n) * perpY;
+                    if (s === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                for (let s = steps; s >= 0; s--) {
+                    const along = (s / steps - 0.5) * 2 * extent;
+                    const n = (noise2D(rng, (baseAlong + bandStep + along * 0.3) * 0.003 + seed + 7, (i + 1) * 0.15, 2) - 0.5) * bandStep * roughness * 1.2;
+                    const x = w * 0.5 + along * cosA + (baseAlong + bandStep + n) * perpX;
+                    const y = h * 0.5 + along * sinA + (baseAlong + bandStep + n) * perpY;
+                    ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                const t = (i % 2) === 0 ? (1 - contrast) * 0.5 : 0.5 + contrast * 0.5;
+                ctx.fillStyle = gray(t);
+                ctx.fill();
+            }
+        }
+
+        function drawWavy(ctx, w, h, layerCount, roughness, contrast) {
+            const bandHeight = h / layerCount;
+            const rng = new SeededRandom(seed);
+            const waveAmp1 = bandHeight * 3 * (0.4 + roughness * 0.8);
+            const waveAmp2 = bandHeight * 1.2 * (0.2 + roughness * 0.5);
+            const freq1 = 0.006;
+            const freq2 = 0.018;
+            const step = 5;
+            for (let i = 0; i < layerCount; i++) {
+                const topY = (i / layerCount) * h;
+                const botY = ((i + 1) / layerCount) * h;
+                ctx.beginPath();
+                ctx.moveTo(0, topY);
+                for (let x = 0; x <= w; x += step) {
+                    const wave = Math.sin(x * freq1 + i * 0.5) * waveAmp1 + Math.sin(x * freq2 + i * 0.3) * waveAmp2;
+                    const n = (noise2D(rng, x * 0.002 + seed, topY * 0.002, 2) - 0.5) * bandHeight * roughness;
+                    ctx.lineTo(x, topY + wave + n);
+                }
+                ctx.lineTo(w, botY);
+                for (let x = w; x >= 0; x -= step) {
+                    const wave = Math.sin(x * freq1 + (i + 1) * 0.5) * waveAmp1 + Math.sin(x * freq2 + (i + 1) * 0.3) * waveAmp2;
+                    const n = (noise2D(rng, x * 0.002 + seed + 1, botY * 0.002, 2) - 0.5) * bandHeight * roughness;
+                    ctx.lineTo(x, botY + wave + n);
+                }
+                ctx.closePath();
+                const t = (i % 2) === 0 ? (1 - contrast) * 0.5 : 0.5 + contrast * 0.5;
+                ctx.fillStyle = gray(t);
+                ctx.fill();
+            }
+        }
+
+        function drawFoliation(ctx, w, h, layerCount, roughness, contrast) {
+            const bands = layerCount * 4;
+            const bandHeight = h / bands;
+            const rng = new SeededRandom(seed);
+            const step = 3;
+            for (let i = 0; i < bands; i++) {
+                const topY = (i / bands) * h;
+                const botY = ((i + 1) / bands) * h;
+                ctx.beginPath();
+                ctx.moveTo(0, topY);
+                for (let x = 0; x <= w; x += step) {
+                    const n = (noise2D(rng, x * 0.008 + seed, topY * 0.008, 2.5) - 0.5) * bandHeight * roughness * 0.8;
+                    ctx.lineTo(x, topY + n);
+                }
+                ctx.lineTo(w, botY);
+                for (let x = w; x >= 0; x -= step) {
+                    const n = (noise2D(rng, x * 0.008 + seed + 1, botY * 0.008, 2.5) - 0.5) * bandHeight * roughness * 0.8;
+                    ctx.lineTo(x, botY + n);
+                }
+                ctx.closePath();
+                const t = (i % 2) === 0 ? (1 - contrast) * 0.5 : 0.5 + contrast * 0.5;
+                ctx.fillStyle = gray(t);
+                ctx.fill();
+            }
+        }
+
+        function drawOneCrossBedFan(ctx, w, h, centerX, centerY, arcLayers, maxR, roughness, contrast, fanSeed, rng) {
+            for (let i = 0; i < arcLayers; i++) {
+                const t = (i + 1) / arcLayers;
+                const radius = t * t * maxR + 15;
+                const startAngle = -Math.PI * 0.5 + rng.range(-0.5, 0.5);
+                const sweep = Math.PI * 0.7 + rng.range(0.2, 0.7);
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                for (let a = 0; a <= 1; a += 0.015) {
+                    const angle = startAngle + a * sweep;
+                    const n = (noise2D(rng, angle * 3 + fanSeed + i * 11, i * 0.2, 2) - 0.5) * radius * roughness * 0.4;
+                    const r = radius + n;
+                    ctx.lineTo(centerX + Math.cos(angle) * r, centerY + Math.sin(angle) * r);
+                }
+                ctx.closePath();
+                const grayT = (i % 2) === 0 ? (1 - contrast) * 0.5 : 0.5 + contrast * 0.5;
+                ctx.fillStyle = gray(grayT);
+                ctx.fill();
+            }
+        }
+
+        function drawCrossBed(ctx, w, h, layerCount, roughness, contrast) {
+            const rng = new SeededRandom(seed);
+            const fanCount = 2 + Math.floor(rng.next() * 3);
+            const maxR = Math.min(w, h) * 0.45;
+            for (let f = 0; f < fanCount; f++) {
+                const centerX = rng.range(w * 0.2, w * 0.8);
+                const centerY = rng.range(h * 0.2, h * 0.8);
+                const arcLayers = Math.max(10, Math.floor(layerCount * (0.5 + rng.next() * 0.5)));
+                drawOneCrossBedFan(ctx, w, h, centerX, centerY, arcLayers, maxR, roughness, contrast, seed + f * 1000, rng);
+            }
+        }
+
+        function drawVein(ctx, w, h, layerCount, roughness, contrast) {
+            ctx.fillStyle = gray((1 - contrast) * 0.4);
+            ctx.fillRect(0, 0, w, h);
+            const rng = new SeededRandom(seed);
+            const crackCount = 25 + Math.floor(layerCount * 0.8);
+            const jitter = 12 + roughness * 25;
+            const lineW = 0.8 + roughness * 1.5;
+            ctx.strokeStyle = gray(0.5 + contrast * 0.5);
+            ctx.lineWidth = lineW;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            for (let c = 0; c < crackCount; c++) {
+                const len = 40 + rng.next() * 180;
+                let x = rng.range(0, w);
+                let y = rng.range(0, h);
+                const angle = rng.range(0, Math.PI * 2);
+                let vx = Math.cos(angle);
+                let vy = Math.sin(angle);
+                const steps = 8 + Math.floor(len * 0.08);
+                const stepLen = len / steps;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                for (let s = 0; s < steps; s++) {
+                    x += vx * stepLen + (rng.next() - 0.5) * jitter;
+                    y += vy * stepLen + (rng.next() - 0.5) * jitter;
+                    const turn = (rng.next() - 0.5) * 0.6;
+                    const vxNew = vx * Math.cos(turn) - vy * Math.sin(turn);
+                    const vyNew = vx * Math.sin(turn) + vy * Math.cos(turn);
+                    vx = vxNew;
+                    vy = vyNew;
+                    ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+            const majorCracks = 4 + Math.floor(roughness * 6);
+            ctx.lineWidth = lineW * 2.5;
+            ctx.strokeStyle = gray(0.85);
+            for (let m = 0; m < majorCracks; m++) {
+                const fromEdge = rng.next() > 0.5;
+                let x = fromEdge ? (rng.next() > 0.5 ? 0 : w) : rng.range(0, w);
+                let y = fromEdge ? rng.range(0, h) : (rng.next() > 0.5 ? 0 : h);
+                const steps = 25 + Math.floor(rng.next() * 35);
+                const stepLen = 15 + rng.next() * 22;
+                let vx = (rng.next() - 0.5) * 2;
+                let vy = (rng.next() - 0.5) * 2;
+                const mag = Math.hypot(vx, vy) || 1;
+                vx /= mag;
+                vy /= mag;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                for (let s = 0; s < steps && x >= -20 && x <= w + 20 && y >= -20 && y <= h + 20; s++) {
+                    x += vx * stepLen + (rng.next() - 0.5) * jitter * 1.2;
+                    y += vy * stepLen + (rng.next() - 0.5) * jitter * 1.2;
+                    const turn = (rng.next() - 0.5) * 0.4;
+                    const vxNew = vx * Math.cos(turn) - vy * Math.sin(turn);
+                    const vyNew = vx * Math.sin(turn) + vy * Math.cos(turn);
+                    vx = vxNew;
+                    vy = vyNew;
+                    ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+        }
+
+        function drawBanded(ctx, w, h, layerCount, roughness, contrast) {
+            const thickBands = Math.max(4, Math.floor(layerCount * 0.4));
+            const bandHeight = h / thickBands;
+            const rng = new SeededRandom(seed);
+            const step = 5;
+            for (let i = 0; i < thickBands; i++) {
+                const topY = (i / thickBands) * h;
+                const botY = ((i + 1) / thickBands) * h;
+                const t = (i % 2) === 0 ? (1 - contrast) * 0.5 : 0.5 + contrast * 0.5;
+                ctx.fillStyle = gray(t);
+                ctx.beginPath();
+                ctx.moveTo(0, topY);
+                for (let x = 0; x <= w; x += step) {
+                    const n = (noise2D(rng, x * 0.0015 + seed, topY * 0.001, 2) - 0.5) * bandHeight * roughness * 0.6;
+                    ctx.lineTo(x, topY + n);
+                }
+                ctx.lineTo(w, botY);
+                for (let x = w; x >= 0; x -= step) {
+                    const n = (noise2D(rng, x * 0.0015 + seed + 1, botY * 0.001, 2) - 0.5) * bandHeight * roughness * 0.6;
+                    ctx.lineTo(x, botY + n);
+                }
+                ctx.closePath();
+                ctx.fill();
+                const microBands = 12 + Math.floor(rng.next() * 8);
+                const microH = bandHeight / microBands;
+                for (let k = 1; k < microBands; k++) {
+                    const my = topY + k * microH + (noise2D(rng, seed + k * 3, topY * 0.01, 1) - 0.5) * microH * roughness;
+                    ctx.strokeStyle = gray(t + (k % 2 === 0 ? 0.06 : -0.06));
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(0, my);
+                    for (let x = 4; x < w; x += 4) {
+                        const ny = (noise2D(rng, x * 0.015 + seed, my * 0.01, 2) - 0.5) * 2;
+                        ctx.lineTo(x, my + ny);
+                    }
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function render() {
+            const w = canvas.width;
+            const h = canvas.height;
+            const layerCount = parseInt(layerSlider.value);
+            const roughness = parseFloat(roughSlider.value);
+            const contrast = parseFloat(contrastSlider.value);
+
+            ctx.fillStyle = gray(0);
+            ctx.fillRect(0, 0, w, h);
+
+            const pattern = patternSelect.value;
+            if (pattern === 'horizontal') drawHorizontal(ctx, w, h, layerCount, roughness, contrast);
+            else if (pattern === 'diagonal') drawDiagonal(ctx, w, h, layerCount, roughness, contrast);
+            else if (pattern === 'wavy') drawWavy(ctx, w, h, layerCount, roughness, contrast);
+            else if (pattern === 'foliation') drawFoliation(ctx, w, h, layerCount, roughness, contrast);
+            else if (pattern === 'crossBed') drawCrossBed(ctx, w, h, layerCount, roughness, contrast);
+            else if (pattern === 'vein') drawVein(ctx, w, h, layerCount, roughness, contrast);
+            else if (pattern === 'banded') drawBanded(ctx, w, h, layerCount, roughness, contrast);
+
+            applyPostProcessing(ctx, w, h);
+        }
+
+        regenerateBtn.addEventListener('click', () => {
+            render();
+        });
+
+        randomSeedBtn.addEventListener('click', () => {
+            seed = Math.floor(Math.random() * 2147483647);
+            render();
+        });
+
+        patternSelect.addEventListener('change', render);
+        layerSlider.addEventListener('input', render);
+        roughSlider.addEventListener('input', render);
+        contrastSlider.addEventListener('input', render);
+        grainSlider.addEventListener('input', render);
+        distortSlider.addEventListener('input', render);
+
+        render();
+    </script>
+</body>
+</html>

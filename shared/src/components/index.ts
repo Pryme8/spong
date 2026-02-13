@@ -27,6 +27,7 @@ export const TAG_COLLECTABLE = 'Collectable';
 export const TAG_PICKUP = 'Pickup';
 export const TAG_CLOUD = 'Cloud';
 export const TAG_LADDER = 'Ladder';
+export const TAG_DUMMY = 'Dummy';
 
 // ── Component data interfaces ─────────────────────────────────
 
@@ -84,10 +85,11 @@ export interface ShootableComponent {
   fireRate: number;     // shots per second
   projectileSpeed: number;  // speed of fired projectiles
   lastFireTime: number; // timestamp of last shot (for rate limiting)
-  accuracy: number;     // cone of fire half-angle in radians (0 = perfect)
+  accuracy: number;     // cone of fire half-angle in radians (0 = perfect) - base min accuracy
   gravityStartDistance: number; // distance before gravity starts affecting projectile
   pelletsPerShot: number; // number of projectiles fired per shot (1 for most weapons, 6+ for shotgun)
   proximityRadius?: number; // optional: radius for AOE/splash damage (0 or undefined = no splash)
+  currentBloom: number; // current bloom value (0 = min accuracy, increases with shots, decays over time)
 }
 
 export interface CollectedComponent {
@@ -106,7 +108,7 @@ export interface PhysicsComponent {
 }
 
 export interface WeaponTypeComponent {
-  type: 'pistol' | 'smg' | 'shotgun' | 'lmg' | 'sniper' | 'assault' | 'rocket' | 'hammer' | 'ladder';  // Identifies the visual mesh type
+  type: 'pistol' | 'smg' | 'shotgun' | 'doublebarrel' | 'lmg' | 'sniper' | 'assault' | 'dmr' | 'rocket' | 'hammer' | 'ladder';  // Identifies the visual mesh type
 }
 
 export interface ZoomableComponent {
@@ -149,6 +151,11 @@ export interface ActiveBuffsComponent {
 export interface ArmorComponent {
   current: number;  // Current armor (0-50)
   max: number;      // Maximum armor (50)
+}
+
+export interface MaterialsComponent {
+  current: number;  // Current building materials
+  max: number;      // Maximum materials (e.g. 500)
 }
 
 export interface HelmetComponent {

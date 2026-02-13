@@ -35,10 +35,11 @@ function createWeaponFromStats(type: WeaponType, entity: Entity): Entity {
     fireRate: stats.fireRate,
     projectileSpeed: stats.projectileSpeed,
     lastFireTime: 0,
-    accuracy: stats.accuracy,
+    accuracy: stats.minAccuracy,
     gravityStartDistance: stats.gravityStartDistance,
     pelletsPerShot: stats.pelletsPerShot,
-    proximityRadius: stats.proximityRadius
+    proximityRadius: stats.proximityRadius,
+    currentBloom: 0
   };
 
   const weaponType: WeaponTypeComponent = { type };
@@ -359,7 +360,9 @@ export function copyWeaponComponents(shootable: ShootableComponent, ammo: AmmoCo
       lastFireTime: shootable.lastFireTime,
       accuracy: shootable.accuracy,
       gravityStartDistance: shootable.gravityStartDistance,
-      pelletsPerShot: shootable.pelletsPerShot
+      pelletsPerShot: shootable.pelletsPerShot,
+      proximityRadius: shootable.proximityRadius,
+      currentBloom: shootable.currentBloom
     },
     ammo: {
       current: ammo.current,

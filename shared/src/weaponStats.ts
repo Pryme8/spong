@@ -18,9 +18,13 @@ export interface WeaponStats {
   damage: number;
   fireRate: number;      // shots per second
   projectileSpeed: number;
-  accuracy: number;
+  minAccuracy: number;   // Best accuracy (smallest spread cone)
+  maxAccuracy: number;   // Worst accuracy (largest spread cone)
   gravityStartDistance: number;
   pelletsPerShot: number;
+  weight: number;        // Weapon weight (affects recoil)
+  stability: number;     // 0-1: How much each shot increases bloom (0=none, 1=instant max bloom, 0.1=10 shots to max)
+  finesse: number;       // 0-1: Bloom recovery rate per tick (0=no recovery, 0.5=half per tick, 0.9=90% recovery)
   proximityRadius?: number;
   zoomFactor?: number;
   holdTransform?: HoldTransform; // First-person hold position/rotation
@@ -31,12 +35,16 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     ammo: 12,
     capacity: 12,
     reloadTime: 1.5,
-    damage: 15,
-    fireRate: 3.0,
-    projectileSpeed: 260,
-    accuracy: 0.008,
-    gravityStartDistance: 50,
+    damage: 30,
+    fireRate: 6.0,
+    projectileSpeed: 165,
+    minAccuracy: 0.008,
+    maxAccuracy: 0.025,
+    gravityStartDistance: 30,
     pelletsPerShot: 1,
+    weight: 2.0,
+    stability: 0.15,
+    finesse: 0.05,
     holdTransform: {
       position: { x: 0.370, y: -0.470, z: -0.860 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -46,13 +54,17 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
   smg: {
     ammo: 30,
     capacity: 30,
-    reloadTime: 2.2,
-    damage: 12,
-    fireRate: 20.0,
-    projectileSpeed: 240,
-    accuracy: 0.015,
-    gravityStartDistance: 50,
+    reloadTime: 1.5,
+    damage: 16,
+    fireRate: 9.5,
+    projectileSpeed: 160,
+    minAccuracy: 0.015,
+    maxAccuracy: 0.06,
+    gravityStartDistance: 30,
     pelletsPerShot: 1,
+    weight: 3.0,
+    stability: 0.20,
+    finesse: 0.03,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.730 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -62,13 +74,17 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
   lmg: {
     ammo: 60,
     capacity: 60,
-    reloadTime: 3.5,
-    damage: 18,
-    fireRate: 15.0,
-    projectileSpeed: 280,
-    accuracy: 0.011,
-    gravityStartDistance: 35,
+    reloadTime: 4.0,
+    damage: 22.5,
+    fireRate: 8.5,
+    projectileSpeed: 160,
+    minAccuracy: 0.011,
+    maxAccuracy: 0.045,
+    gravityStartDistance: 25,
     pelletsPerShot: 1,
+    weight: 8.0,
+    stability: 0.12,
+    finesse: 0.02,
     holdTransform: {
       position: { x: 0.300, y: -0.240, z: -0.760 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -80,11 +96,15 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     capacity: 8,
     reloadTime: 3.0,
     damage: 8,
-    fireRate: 0.8,
-    projectileSpeed: 220,
-    accuracy: 0.08,
+    fireRate: 3.0,
+    projectileSpeed: 140,
+    minAccuracy: 0.08,
+    maxAccuracy: 0.15,
     gravityStartDistance: 15,
     pelletsPerShot: 6,
+    weight: 6.0,
+    stability: 0.40,
+    finesse: 0.10,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.730 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -92,15 +112,19 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     }
   },
   doublebarrel: {
-    ammo: 2,
-    capacity: 2,
-    reloadTime: 1.5,
+    ammo: 1,
+    capacity: 1,
+    reloadTime: 1.2,
     damage: 8,
-    fireRate: 0.8,
-    projectileSpeed: 220,
-    accuracy: 0.10,
+    fireRate: 1.0,
+    projectileSpeed: 140,
+    minAccuracy: 0.10,
+    maxAccuracy: 0.18,
     gravityStartDistance: 15,
     pelletsPerShot: 12,
+    weight: 5.0,
+    stability: 0.50,
+    finesse: 0.10,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.730 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -110,25 +134,38 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
   sniper: {
     ammo: 1,
     capacity: 1,
-    reloadTime: 2.0,
-    damage: 75,
+    reloadTime: 0.5,
+    damage: 80,
     fireRate: 0.4,
-    projectileSpeed: 600,
-    accuracy: 0.001,
-    gravityStartDistance: 280,
+    projectileSpeed: 240,
+    minAccuracy: 0.001,
+    maxAccuracy: 0.005,
+    gravityStartDistance: 90,
     pelletsPerShot: 1,
-    zoomFactor: 3
+    weight: 7.0,
+    stability: 0.30,
+    finesse: 0.08,
+    zoomFactor: 3,
+    holdTransform: {
+      position: { x: 0.270, y: -0.240, z: -0.980 },
+      rotation: { x: 0.000, y: 3.140, z: 0.000 },
+      barrelTipOffset: { x: 0.0, y: 0.02667, z: 0.725 } // Barrel tip (center 0.375 + length/2 0.35 = 0.725)
+    }
   },
   assault: {
     ammo: 30,
     capacity: 30,
-    reloadTime: 2.5,
-    damage: 12,
-    fireRate: 17.0,
-    projectileSpeed: 280,
-    accuracy: 0.008,
-    gravityStartDistance: 42,
+    reloadTime: 1.8,
+    damage: 25,
+    fireRate: 7.5,
+    projectileSpeed: 180,
+    minAccuracy: 0.008,
+    maxAccuracy: 0.035,
+    gravityStartDistance: 40,
     pelletsPerShot: 1,
+    weight: 4.5,
+    stability: 0.15,
+    finesse: 0.04,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.760 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -138,13 +175,17 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
   dmr: {
     ammo: 15,
     capacity: 15,
-    reloadTime: 2.8,
-    damage: 35,
-    fireRate: 4.0,
-    projectileSpeed: 600,
-    accuracy: 0.002,
-    gravityStartDistance: 110,
+    reloadTime: 1.8,
+    damage: 40,
+    fireRate: 6.0,
+    projectileSpeed: 200,
+    minAccuracy: 0.002,
+    maxAccuracy: 0.010,
+    gravityStartDistance: 70,
     pelletsPerShot: 1,
+    weight: 6.0,
+    stability: 0.20,
+    finesse: 0.06,
     zoomFactor: 2.5,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.960 },
@@ -158,13 +199,17 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     reloadTime: 6.0,
     damage: 100,
     fireRate: 0.15,
-    projectileSpeed: 160,
-    accuracy: 0.005,
-    gravityStartDistance: 60,
+    projectileSpeed: 120,
+    minAccuracy: 0.005,
+    maxAccuracy: 0.015,
+    gravityStartDistance: 50,
     pelletsPerShot: 1,
+    weight: 10.0,
+    stability: 0.30,
+    finesse: 0.08,
     proximityRadius: 5,
     holdTransform: {
-      position: { x: 0.300, y: -0.240, z: -0.760 },
+      position: { x: 0.270, y: -0.240, z: -0.980 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
       barrelTipOffset: { x: 0.0, y: 0.0, z: 0.9 } // Front of tube (center 0.25 + length/2 0.65 = 0.9)
     }
@@ -314,7 +359,6 @@ export function calculateBarrelTipFromYawPitch(
   //       = (1*Fz - 0*Fy, 0*Fx - 0*Fz, 0*Fy - 1*Fx)
   //       = (Fz, 0, -Fx)
   const rightX = forwardZ;
-  const rightY = 0;
   const rightZ = -forwardX;
   const rightLen = Math.sqrt(rightX * rightX + rightZ * rightZ);
   const rightXNorm = (rightLen > 0.001) ? (rightX / rightLen) : 1;
@@ -345,4 +389,65 @@ export function calculateBarrelTipFromYawPitch(
   const worldZ = c20 * barrelInCameraX + c21 * barrelInCameraY + c22 * barrelInCameraZ + cameraPosition.z;
 
   return { x: worldX, y: worldY, z: worldZ };
+}
+
+/**
+ * Bloom system constants
+ */
+export const BLOOM_EPSILON = 0.001; // Threshold to clamp bloom back to 0
+
+/**
+ * Calculate recoil kick amount for a weapon
+ * Kick is based on projectile momentum (speed * pellets) relative to weapon weight
+ * @param weaponType The weapon type
+ * @returns Kick amount in radians (upward camera pitch change)
+ */
+export function calculateRecoilKick(weaponType: WeaponType): number {
+  const stats = WEAPON_STATS[weaponType];
+  const momentum = stats.projectileSpeed * stats.pelletsPerShot;
+  const kick = momentum / (stats.weight * 1000);
+  return kick;
+}
+
+/**
+ * Get the bloom increment per shot based on weapon stability
+ * @param weaponType The weapon type
+ * @returns Amount to increase bloom by on each shot
+ */
+export function getBloomIncrement(weaponType: WeaponType): number {
+  const stats = WEAPON_STATS[weaponType];
+  const bloomRange = stats.maxAccuracy - stats.minAccuracy;
+  return bloomRange * stats.stability;
+}
+
+/**
+ * Apply finesse-based bloom decay (call each tick)
+ * @param currentBloom Current bloom value
+ * @param weaponType The weapon type
+ * @returns New bloom value after decay
+ */
+export function applyBloomDecay(currentBloom: number, weaponType: WeaponType): number {
+  const stats = WEAPON_STATS[weaponType];
+  const decayedBloom = currentBloom * (1 - stats.finesse);
+  
+  // Clamp to 0 if below epsilon
+  if (decayedBloom < BLOOM_EPSILON) {
+    return 0;
+  }
+  
+  return decayedBloom;
+}
+
+/**
+ * Get current accuracy value based on bloom state
+ * @param weaponType The weapon type
+ * @param currentBloom Current bloom value (0 = no bloom)
+ * @returns Current accuracy spread cone value
+ */
+export function getCurrentAccuracy(weaponType: WeaponType, currentBloom: number): number {
+  const stats = WEAPON_STATS[weaponType];
+  const accuracy = stats.minAccuracy + currentBloom;
+  
+  // Clamp to maxAccuracy
+  return Math.min(accuracy, stats.maxAccuracy);
 }

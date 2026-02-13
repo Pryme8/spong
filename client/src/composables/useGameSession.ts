@@ -9,40 +9,43 @@ import {
   VoxelGrid,
   GreedyMesher,
   Octree,
-  type OctreeEntry
+  type OctreeEntry,
+  type DummySpawnMessage,
+  type TransformData
 } from '@spong/shared';
-import { NetworkClient } from '../network/NetworkClient';
+import { NetworkClient, getSimulatedLatencyMs } from '../network/NetworkClient';
 import { useRoom } from './useRoom';
 import { useTransformSync } from './useTransformSync';
 import { useRoundState } from './useRoundState';
-import { createEngine, createGameScene, createPlayerInstance, hexToColor3 } from '../engine/setupScene';
+import { createEngine, createGameScene, createPlayerInstance, hexToColor3 } from '../engine/setup/setupScene';
 import { generateSunConfig } from '@spong/shared';
-import { InputManager } from '../engine/InputManager';
-import { CameraController } from '../engine/CameraController';
-import { ProjectileManager } from '../engine/ProjectileManager';
-import { LevelMesh } from '../engine/LevelMesh';
-import { LevelTreeManager } from '../engine/LevelTreeManager';
-import { LevelRockManager } from '../engine/LevelRockManager';
-import { LevelBushManager } from '../engine/LevelBushManager';
-import { LevelWaterManager } from '../engine/LevelWaterManager';
-import { TimeManager } from '../engine/TimeManager';
-import { CloudPostProcess } from '../engine/CloudPostProcess';
-import { LevelCloudManager } from '../engine/LevelCloudManager';
-import { FinalPostProcess } from '../engine/FinalPostProcess';
-import { SkyPickSphere } from '../engine/SkyPickSphere';
-import { AudioManager } from '../engine/AudioManager';
-import { SOUND_MANIFEST } from '../engine/soundManifest';
-import { playSFX, playSFX3D } from '../engine/audioHelpers';
-import { WeaponSystem } from '../engine/WeaponSystem';
-import { ItemSystem } from '../engine/ItemSystem';
-import { GameLoop } from '../engine/GameLoop';
-import { BushLeafEffect } from '../engine/BushLeafEffect';
-import { BloodSplatterEffect } from '../engine/BloodSplatterEffect';
-import { BuildingCollisionManager } from '../engine/BuildingCollisionManager';
-import { BuildSystem } from '../engine/BuildSystem';
-import { LadderPlacementSystem } from '../engine/LadderPlacementSystem';
-import { createLadderSegmentMesh, disposeLadderMesh } from '../engine/LadderMesh';
-import { FootstepManager } from '../engine/FootstepManager';
+import { InputManager } from '../engine/input/InputManager';
+import { CameraController } from '../engine/camera/CameraController';
+import { ProjectileManager } from '../engine/systems/ProjectileManager';
+import { LevelMesh } from '../engine/setup/LevelMesh';
+import { LevelTreeManager } from '../engine/managers/LevelTreeManager';
+import { LevelRockManager } from '../engine/managers/LevelRockManager';
+import { LevelBushManager } from '../engine/managers/LevelBushManager';
+import { LevelWaterManager } from '../engine/managers/LevelWaterManager';
+import { TimeManager } from '../engine/core/TimeManager';
+import { CloudPostProcess } from '../engine/rendering/postprocess/CloudPostProcess';
+import { LevelCloudManager } from '../engine/managers/LevelCloudManager';
+import { FinalPostProcess } from '../engine/rendering/postprocess/FinalPostProcess';
+import { SkyPickSphere } from '../engine/setup/SkyPickSphere';
+import { AudioManager } from '../engine/audio/AudioManager';
+import { SOUND_MANIFEST } from '../engine/audio/soundManifest';
+import { playSFX, playSFX3D } from '../engine/audio/audioHelpers';
+import { WeaponSystem } from '../engine/systems/WeaponSystem';
+import { ItemSystem } from '../engine/systems/ItemSystem';
+import { GameLoop } from '../engine/core/GameLoop';
+import { BushLeafEffect } from '../engine/rendering/effects/BushLeafEffect';
+import { BloodSplatterEffect } from '../engine/rendering/effects/BloodSplatterEffect';
+import { DamagePopupSystem } from '../engine/rendering/effects/DamagePopupSystem';
+import { BuildingCollisionManager } from '../engine/building/BuildingCollisionManager';
+import { BuildSystem } from '../engine/building/BuildSystem';
+import { LadderPlacementSystem } from '../engine/building/LadderPlacementSystem';
+import { createLadderSegmentMesh, disposeLadderMesh } from '../engine/entities/props/LadderMesh';
+import { FootstepManager } from '../engine/audio/FootstepManager';
 import type { 
   BuildingInitialStateMessage, 
   BuildingCreatedMessage,
@@ -117,6 +120,7 @@ export function useGameSession() {
   // Latency tracking
   const latency = ref(0);
   const latencySamples: number[] = [];
+  const simulatedLatencyMs = ref(0);
   const MAX_LATENCY_SAMPLES = 20;
   let lastInputSendTime = 0;
   
@@ -151,6 +155,7 @@ export function useGameSession() {
   let leafTriggerPost: PostProcess | null = null;
   let bloodSplatterEffect: BloodSplatterEffect | null = null;
   let bloodSplatterPost: PostProcess | null = null;
+  let damagePopupSystem: DamagePopupSystem | null = null;
   let currentTreeIndex = -1;
   let currentBushIndex = -1;
   let wasInLeavesLastFrame = false;
@@ -239,6 +244,7 @@ export function useGameSession() {
     TimeManager.Initialize(scene);
     
     cameraController = new CameraController(scene);
+    damagePopupSystem = new DamagePopupSystem(scene);
     
     // Create invisible sky pick sphere for catching sky shots
     skyPickSphere = new SkyPickSphere(scene);
@@ -279,9 +285,15 @@ export function useGameSession() {
         console.log('[GameSession] Water manager initialized');
         
         // Update water ripples every frame (time comes from TimeManager)
+        let mirrorRefreshFrames = 0;
         scene.onBeforeRenderObservable.add(() => {
           if (waterManager) {
             waterManager.update();
+            mirrorRefreshFrames++;
+            if (mirrorRefreshFrames >= 120) {
+              mirrorRefreshFrames = 0;
+              waterManager.refreshMirrorRenderList();
+            }
           }
         });
       } catch (error) {
@@ -418,6 +430,7 @@ export function useGameSession() {
       : `ws://${window.location.hostname}:3000/ws`;
     
     networkClient = new NetworkClient(wsUrl);
+    simulatedLatencyMs.value = getSimulatedLatencyMs();
     const room = useRoom(networkClient);
     buildingCollisionManager = new BuildingCollisionManager();
     transformSync = useTransformSync(
@@ -564,6 +577,11 @@ export function useGameSession() {
       if (payload.attackerId === myEntityId.value && payload.entityId !== myEntityId.value) {
         hitMarkerTimer.value = 0.25; // Show for 0.25 seconds
         playSFX('bullet_impact', 0.5); // Play 2D sound locally
+
+        const targetTransform = transformSync?.getTransform(payload.entityId);
+        if (targetTransform && damagePopupSystem && payload.damage > 0) {
+          damagePopupSystem.spawn(payload.damage, targetTransform.getPosition());
+        }
       }
     });
 
@@ -804,6 +822,25 @@ export function useGameSession() {
       }
     });
 
+    // Handle dummy target spawns
+    networkClient.onLowFrequency(Opcode.DummySpawn, (payload: DummySpawnMessage) => {
+      if (!scene || !transformSync) return;
+      if (transformSync.getTransform(payload.entityId)) return;
+
+      const transform = transformSync.createTransform(payload.entityId, false);
+      // Dummy visuals are already provided by LocalTransform head/body meshes.
+
+      const initialState: TransformData = {
+        entityId: payload.entityId,
+        position: { x: payload.posX, y: payload.posY, z: payload.posZ },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        velocity: { x: 0, y: 0, z: 0 },
+        headPitch: 0
+      };
+
+      transform.applyServerState(initialState);
+    });
+
     // Handle explosion spawns from server (visual effects)
     networkClient.onLowFrequency(Opcode.ExplosionSpawn, (payload: { posX: number; posY: number; posZ: number; radius: number }) => {
       console.log('[GameSession] Explosion received:', payload);
@@ -912,6 +949,7 @@ export function useGameSession() {
       
       // Build/rebuild octree
       buildOctreeFromManagers();
+      waterManager?.refreshMirrorRenderList();
     });
     
     // Handle rock spawns from server (level rooms only)
@@ -929,6 +967,7 @@ export function useGameSession() {
       
       // Build/rebuild octree
       buildOctreeFromManagers();
+      waterManager?.refreshMirrorRenderList();
     });
     
     // Handle bush spawns from server (level rooms only)
@@ -948,6 +987,7 @@ export function useGameSession() {
       
       // Build/rebuild octree
       buildOctreeFromManagers();
+      waterManager?.refreshMirrorRenderList();
     });
     
     // Helper: Build octree from manager collision data
@@ -1015,6 +1055,7 @@ export function useGameSession() {
       if (shadowManager) {
         shadowManager.addShadowCaster(cube, true);
       }
+      waterManager?.refreshMirrorRenderList();
     });
     
     // Handle players leaving
@@ -1091,7 +1132,6 @@ export function useGameSession() {
       const cube = createPlayerInstance(`cube_${entityId}`, scene, playerColor);
       cube.parent = myTransform.value.getNode();
       cube.position.y = 0;
-      cube.isVisible = false; // Hide local player's body in first-person
       
       // Register body cube for shadows
       if (shadowManager) {
@@ -1337,6 +1377,7 @@ export function useGameSession() {
           },
           // Per-frame updates (timers, UI, etc.)
           onVariableTick: (deltaTime) => {
+            damagePopupSystem?.update(deltaTime);
             // Update blood splatter timer
             if (bloodSplatterTimer.value > 0) {
               bloodSplatterTimer.value = Math.max(0, bloodSplatterTimer.value - deltaTime);
@@ -1448,6 +1489,8 @@ export function useGameSession() {
     window.removeEventListener('resize', handleResize);
     gameLoop.stop();
     inputManager?.dispose();
+    cameraController?.dispose();
+    weaponSystem.dispose();
     projectileManager?.dispose();
     transformSync?.cleanup();
     if (scene) itemSystem.dispose(scene);
@@ -1465,9 +1508,11 @@ export function useGameSession() {
     bloodSplatterPost?.dispose();
     bloodSplatterEffect?.dispose();
     bloodSplatterEffect = null;
+    damagePopupSystem?.dispose();
+    damagePopupSystem = null;
     skyPickSphere?.dispose();
     shadowManager?.dispose();
-    buildingCollisionManager?.clear();
+    buildingCollisionManager?.dispose();
     buildSystem?.dispose();
     ladderPlacementSystem?.dispose();
     // Stop heartbeat sound if playing
@@ -1996,8 +2041,10 @@ export function useGameSession() {
     maxCapacity: weaponSystem.maxCapacity,
     isReloading: weaponSystem.isReloading,
     reloadProgress: weaponSystem.reloadProgress,
+    bloomPercent: weaponSystem.bloomPercent,
     latency,
     pingColorClass,
+    simulatedLatencyMs,
     // Build system
     hasHammer,
     buildMode,

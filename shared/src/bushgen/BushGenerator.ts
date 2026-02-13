@@ -17,15 +17,24 @@
 import { SeededRandom } from '../rng.js';
 import { BushVoxelGrid, BUSH_GRID_W, BUSH_GRID_H, BUSH_GRID_D, BUSH_FLOOR_Y } from './BushVoxelGrid.js';
 
-// Sphere placement parameters
-const MIN_SPHERES = 3;
-const MAX_SPHERES = 6;
-const MIN_RADIUS = 2;
-const MAX_RADIUS = 4;
+const DEFAULT_MIN_SPHERES = 3;
+const DEFAULT_MAX_SPHERES = 6;
+const DEFAULT_MIN_RADIUS = 2;
+const DEFAULT_MAX_RADIUS = 4;
+const DEFAULT_SPREAD_FACTOR = 0.25;
+const DEFAULT_BLUR_PASSES = 2;
+const DEFAULT_SURFACE_THRESHOLD = 0.15;
 
-// Blur parameters
-const BLUR_PASSES = 2;
-const SURFACE_THRESHOLD = 0.15;
+/** Optional overrides for level variety (same seed + params = same bush). */
+export interface BushParams {
+  minSpheres?: number;
+  maxSpheres?: number;
+  minRadius?: number;
+  maxRadius?: number;
+  spreadFactor?: number;
+  blurPasses?: number;
+  surfaceThreshold?: number;
+}
 
 interface SpherePoint {
   cx: number;
@@ -36,20 +45,26 @@ interface SpherePoint {
 
 /**
  * Generate a bush voxel grid from a seed string.
+ * Optional params add variety (e.g. level gen uses seed-derived params).
  */
-export function generateBush(seed: string): BushVoxelGrid {
+export function generateBush(seed: string, params?: BushParams): BushVoxelGrid {
   const rng = new SeededRandom(seed);
   const grid = new BushVoxelGrid();
+  const minSpheres = params?.minSpheres ?? DEFAULT_MIN_SPHERES;
+  const maxSpheres = params?.maxSpheres ?? DEFAULT_MAX_SPHERES;
+  const minRadius = params?.minRadius ?? DEFAULT_MIN_RADIUS;
+  const maxRadius = params?.maxRadius ?? DEFAULT_MAX_RADIUS;
+  const spreadFactor = params?.spreadFactor ?? DEFAULT_SPREAD_FACTOR;
+  const blurPasses = params?.blurPasses ?? DEFAULT_BLUR_PASSES;
+  const surfaceThreshold = params?.surfaceThreshold ?? DEFAULT_SURFACE_THRESHOLD;
 
-  // Center of grid
   const centerX = BUSH_GRID_W * 0.5;
   const centerZ = BUSH_GRID_D * 0.5;
 
   // ── Step 1: Place random spheres clustered near center ─────
-  // Each sphere must overlap with at least one previously placed sphere
-  // to ensure all voxels are connected.
-  const sphereCount = rng.int(MIN_SPHERES, MAX_SPHERES);
+  const sphereCount = rng.int(minSpheres, maxSpheres);
   const spheres: SpherePoint[] = [];
+  const spread = BUSH_GRID_W * spreadFactor;
 
   for (let i = 0; i < sphereCount; i++) {
     let attempts = 0;
@@ -57,14 +72,11 @@ export function generateBush(seed: string): BushVoxelGrid {
     let validSphere = false;
 
     while (attempts < maxAttempts && !validSphere) {
-      const radius = rng.range(MIN_RADIUS, MAX_RADIUS);
+      const radius = rng.range(minRadius, maxRadius);
 
-      // Cluster spheres near center with some spread
-      const spread = BUSH_GRID_W * 0.25;
       const cx = centerX + rng.range(-spread, spread);
       const cz = centerZ + rng.range(-spread, spread);
 
-      // Randomize sphere Y position upward from ground
       const cy = rng.range(0, BUSH_GRID_H * 0.5);
 
       // Clamp within bounds (allow spheres to sit flat on bottom, Y=0 is OK)
@@ -167,10 +179,10 @@ export function generateBush(seed: string): BushVoxelGrid {
   console.log(`[BushGen] Blur region: ${modifiedCells.size} cells`);
 
   // ── Step 5: Blur pass over all solid cells ─────────────────
-  blurModifiedCells(grid, modifiedCells, BLUR_PASSES);
+  blurModifiedCells(grid, modifiedCells, blurPasses);
 
   // ── Step 6: Threshold pass ─────────────────────────────────
-  thresholdGrid(grid, SURFACE_THRESHOLD);
+  thresholdGrid(grid, surfaceThreshold);
 
   const solidCount = grid.getSolidCount();
   console.log(`[BushGen] Final solid voxels: ${solidCount}`);

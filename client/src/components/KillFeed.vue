@@ -28,8 +28,6 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps } from 'vue';
-
 export interface KillFeedEntry {
   id: number;
   killerEntityId: number;

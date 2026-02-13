@@ -12,9 +12,19 @@ import {
   RockMeshBuilder,
   RockMeshDecimator,
   type RockMesh,
-  type RockColliderMesh
+  type RockColliderMesh,
+  type RockParams
 } from '../rockgen/index.js';
 import { SeededRandom } from '../rng.js';
+
+/** Ranges give level rocks variety in roughness/shape; editor uses defaults when no params. */
+function randomRockParamsForSeed(rockSeed: string): RockParams {
+  const r = new SeededRandom(rockSeed);
+  return {
+    noiseAmplitude: r.range(0.5, 1.5),
+    surfaceThreshold: r.range(0.1, 0.25),
+  };
+}
 
 export interface RockVariation {
   /** Unique ID for this rock variation */
@@ -65,7 +75,8 @@ export function generateRockVariations(
 
   for (let i = 0; i < count; i++) {
     const rockSeed = `${baseSeed}_rock_${i}`;
-    const grid = generateRock(rockSeed);
+    const params = randomRockParamsForSeed(rockSeed);
+    const grid = generateRock(rockSeed, params);
     
     // Greedy mesh it
     const mesher = new RockGreedyMesher(grid);

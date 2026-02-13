@@ -160,8 +160,8 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { LevelWaterManager } from '../engine/LevelWaterManager';
-import { World } from '../engine/World';
+import { LevelWaterManager } from '../engine/managers/LevelWaterManager';
+import { World } from '../engine/core/World';
 
 const visible = ref(true);
 

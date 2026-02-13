@@ -250,7 +250,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { ShadowManager } from '../engine/ShadowManager';
+import { ShadowManager } from '../engine/systems/ShadowManager';
 import { CascadedShadowGenerator } from '@babylonjs/core';
 
 const visible = ref(true);

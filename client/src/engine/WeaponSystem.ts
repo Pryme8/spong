@@ -54,13 +54,22 @@ export class WeaponSystem {
    * Equip a weapon and initialize its stats (from shared cannonical stats)
    */
   equipWeapon(type: WeaponType): void {
+    this.equipWeaponWithAmmo(type);
+  }
+
+  /**
+   * Equip a weapon with server-provided ammo state when available.
+   */
+  equipWeaponWithAmmo(type: WeaponType, ammoCurrent?: number, ammoCapacity?: number): void {
     this.internalWeaponType = type;
     this.weaponType.value = type;
     this.hasWeapon.value = true;
 
     const stats = WEAPON_STATS[type];
-    this.weaponAmmo = stats.ammo;
-    this.weaponCapacity = stats.capacity;
+    const capacity = ammoCapacity ?? stats.capacity;
+    const current = ammoCurrent ?? stats.ammo;
+    this.weaponCapacity = capacity;
+    this.weaponAmmo = Math.min(Math.max(current, 0), capacity);
     this.weaponReloadTime = stats.reloadTime;
     this.weaponAccuracy = stats.accuracy;
     this.weaponProjectileSpeed = stats.projectileSpeed;
@@ -68,8 +77,8 @@ export class WeaponSystem {
     this.weaponFireRateCooldown = getFireRateCooldownMs(type);
     this.weaponZoomFactor = stats.zoomFactor ?? 1;
 
-    this.currentAmmo.value = stats.ammo;
-    this.maxCapacity.value = stats.capacity;
+    this.currentAmmo.value = this.weaponAmmo;
+    this.maxCapacity.value = this.weaponCapacity;
     this.isReloading.value = false;
     this.weaponIsReloading = false;
     this.reloadProgress.value = 0;
@@ -177,16 +186,9 @@ export class WeaponSystem {
 
     playSFX3D(soundName, playerState.posX, playerState.posY + PLAYER_HITBOX_CENTER_Y, playerState.posZ, volume);
 
-    // Get camera's forward ray and offset it forward to avoid hitting own head
+    // Get camera's forward ray from screen center
     const camera = cameraController.getCamera();
     const ray = camera.getForwardRay(1000);
-
-    // First-person: small offset to clear the head hitbox (~0.8 units)
-    // Third-person: larger offset to avoid backfaces (6 units)
-    const rayOffset = 0.8; // Just outside the head in first-person
-    ray.origin.x += ray.direction.x * rayOffset;
-    ray.origin.y += ray.direction.y * rayOffset;
-    ray.origin.z += ray.direction.z * rayOffset;
 
     // Pick with the offset ray
     const pick = scene.pickWithRay(
@@ -385,10 +387,12 @@ export class WeaponSystem {
   }
 
   /**
-   * Check if current weapon is automatic (SMG or LMG)
+   * Check if current weapon is automatic (SMG, LMG, Assault)
    */
   isAutoFireWeapon(): boolean {
-    return this.internalWeaponType === 'smg' || this.internalWeaponType === 'lmg';
+    return this.internalWeaponType === 'smg'
+      || this.internalWeaponType === 'lmg'
+      || this.internalWeaponType === 'assault';
   }
 
   /**

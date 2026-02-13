@@ -1,0 +1,30 @@
+# Dependencies and build output (rebuilt in image)
+node_modules
+client/dist
+server/dist
+shared/dist
+
+# Git and IDE
+.git
+.gitignore
+.cursor
+.vscode
+# Dev and docs (keep image small)
+docs
+*.md
+TODO.md
+AGENT_*.md
+*_PLAN.md
+*_SUMMARY.md
+*_COMPLETE.md
+*_STATUS.md
+*_GUIDE.md
+DISPOSE_*
+ARCHITECTURE.md
+rock-striation-demo.html
+
+# Misc
+*.log
+.env
+.env.*
+.dockerignore

@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import { World } from '../engine/World';
+import { World } from '../engine/core/World';
 
 const visible = ref(true);
 

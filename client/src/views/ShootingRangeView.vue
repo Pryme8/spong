@@ -1,6 +1,24 @@
 <template>
   <div class="game-view">
     <canvas ref="canvasRef" class="game-canvas"></canvas>
+
+    <!-- Crosshair overlay (always visible, even during pointer lock) -->
+    <div class="crosshair">
+      <!-- Top pip -->
+      <div class="pip pip-top" :style="{ transform: `translateY(-${crosshairSpread}px)` }"></div>
+      <!-- Bottom pip -->
+      <div class="pip pip-bottom" :style="{ transform: `translateY(${crosshairSpread}px)` }"></div>
+      <!-- Left pip -->
+      <div class="pip pip-left" :style="{ transform: `translateX(-${crosshairSpread}px)` }"></div>
+      <!-- Right pip -->
+      <div class="pip pip-right" :style="{ transform: `translateX(${crosshairSpread}px)` }"></div>
+    </div>
+
+    <!-- Bloom Debug Display -->
+    <div class="bloom-debug">
+      <div>Bloom: {{ (bloomPercent * 100).toFixed(0) }}%</div>
+      <div>Spread: {{ crosshairSpread.toFixed(1) }}px</div>
+    </div>
     
     <!-- Game HUD -->
     <GameHud
@@ -85,6 +103,7 @@ const {
   maxCapacity,
   isReloading,
   reloadProgress,
+  bloomPercent,
   latency,
   pingColorClass,
   killFeedEntries,
@@ -101,6 +120,14 @@ const healthBarClass = computed(() => {
   if (percent > 70) return 'health-high';
   if (percent > 40) return 'health-medium';
   return 'health-low';
+});
+
+// Crosshair bloom spread (0-1 mapped to pip distance)
+const crosshairSpread = computed(() => {
+  const minSpread = 0; // No additional offset at 0 bloom
+  const maxSpread = 40; // Max additional offset at 1.0 bloom (increased for visibility)
+  const spread = minSpread + (bloomPercent.value * maxSpread);
+  return spread;
 });
 
 // Weapon debug panel state
@@ -354,43 +381,58 @@ onUnmounted(() => {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
+  width: 0;
+  height: 0;
   pointer-events: none;
-  z-index: 10;
+  z-index: 999;
 }
 
-.crosshair-h {
+/* Individual pips */
+.pip {
   position: absolute;
-  width: 20px;
-  height: 2px;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(255, 255, 255, 0.9);
+  background-color: rgba(255, 255, 255, 0.9);
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  transition: transform 0.1s ease-out;
 }
 
-.crosshair-v {
-  position: absolute;
-  width: 2px;
-  height: 20px;
-  top: 50%;
+/* Top pip */
+.pip-top {
   left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  bottom: 50%;
+  width: 1px;
+  height: 8px;
+  margin-left: -0.5px;
+  margin-bottom: 4px;
 }
 
-.crosshair-dot {
-  position: absolute;
-  width: 4px;
-  height: 4px;
+/* Bottom pip */
+.pip-bottom {
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 8px;
+  margin-left: -0.5px;
+  margin-top: 4px;
+}
+
+/* Left pip */
+.pip-left {
+  top: 50%;
+  right: 50%;
+  height: 1px;
+  width: 8px;
+  margin-top: -0.5px;
+  margin-right: 4px;
+}
+
+/* Right pip */
+.pip-right {
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(255, 60, 60, 0.9);
-  border-radius: 50%;
-  box-shadow: 0 0 3px rgba(255, 60, 60, 0.6);
+  height: 1px;
+  width: 8px;
+  margin-top: -0.5px;
+  margin-left: 4px;
 }
 
 /* Ping Indicator */
@@ -449,5 +491,24 @@ onUnmounted(() => {
 
 .back-button:hover {
   background: rgba(20, 20, 50, 0.95);
+}
+
+/* Bloom Debug Display */
+.bloom-debug {
+  position: absolute;
+  top: 100px;
+  left: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #00ff88;
+  padding: 10px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.bloom-debug div {
+  margin: 2px 0;
 }
 </style>

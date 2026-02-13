@@ -41,6 +41,7 @@ export enum Opcode {
   TreeSpawn = 0x40,
   RockSpawn = 0x41,
   BushSpawn = 0x42,
+  DummySpawn = 0x80,
   BlockPlace = 0x50,
   BlockRemove = 0x51,
   BlockPlaced = 0x52,
@@ -205,6 +206,15 @@ export interface ItemSpawnMessage {
   posZ: number;
 }
 
+/** Server -> Clients: a dummy target was spawned. */
+export interface DummySpawnMessage {
+  entityId: number;
+  posX: number;
+  posY: number;
+  posZ: number;
+  color?: string;
+}
+
 /** Server -> Clients: an item position update. */
 export interface ItemUpdateMessage {
   entityId: number;
@@ -219,6 +229,8 @@ export interface ItemPickupMessage {
   entityId: number;      // item entity ID (being removed)
   playerId: number;      // player entity ID who picked it up
   itemType: string;      // 'pistol', etc.
+  ammoCurrent?: number;  // current magazine ammo (weapons only)
+  ammoCapacity?: number; // magazine capacity (weapons only)
 }
 
 /** Client -> Server: player wants to drop held item. */

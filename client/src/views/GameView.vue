@@ -3,7 +3,16 @@
     <canvas ref="canvasRef" class="game-canvas"></canvas>
     
     <!-- Crosshair overlay (always visible, even during pointer lock) -->
-    <div class="crosshair"></div>
+    <div class="crosshair">
+      <!-- Top pip -->
+      <div class="pip pip-top" :style="{ transform: `translateY(-${crosshairSpread}px)` }"></div>
+      <!-- Bottom pip -->
+      <div class="pip pip-bottom" :style="{ transform: `translateY(${crosshairSpread}px)` }"></div>
+      <!-- Left pip -->
+      <div class="pip pip-left" :style="{ transform: `translateX(-${crosshairSpread}px)` }"></div>
+      <!-- Right pip -->
+      <div class="pip pip-right" :style="{ transform: `translateX(${crosshairSpread}px)` }"></div>
+    </div>
     
     <!-- Game HUD -->
     <GameHud
@@ -33,6 +42,7 @@
       :reload-progress="reloadProgress"
       :latency="latency"
       :ping-color-class="pingColorClass"
+      :simulated-latency-ms="simulatedLatencyMs"
       :hit-marker-visible="hitMarkerVisible"
       :has-hammer="hasHammer"
       :has-ladder="hasLadder"
@@ -292,8 +302,10 @@ const {
   maxCapacity,
   isReloading,
   reloadProgress,
+  bloomPercent,
   latency,
   pingColorClass,
+  simulatedLatencyMs,
   hasHammer,
   buildMode,
   buildSelectedGridId,
@@ -326,6 +338,14 @@ const healthBarClass = computed(() => {
   if (percent > 70) return 'health-high';
   if (percent > 40) return 'health-medium';
   return 'health-low';
+});
+
+// Crosshair bloom spread (0-1 mapped to pip distance)
+const crosshairSpread = computed(() => {
+  const minSpread = 0; // No additional offset at 0 bloom
+  const maxSpread = 20; // Max additional offset at 1.0 bloom
+  const spread = minSpread + (bloomPercent.value * maxSpread);
+  return spread;
 });
 
 // Mobile input state (unused - TouchController handles this)
@@ -487,48 +507,57 @@ onUnmounted(() => {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 30px;
-  height: 30px;
-  margin-left: -15px;
-  margin-top: -15px;
+  width: 0;
+  height: 0;
   pointer-events: none;
   z-index: 999;
 }
 
-/* Create 4 pips with gaps instead of continuous lines */
-.crosshair::before,
-.crosshair::after {
-  content: '';
+/* Individual pips */
+.pip {
   position: absolute;
   background-color: rgba(255, 255, 255, 0.9);
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  transition: transform 0.1s ease-out;
 }
 
 /* Top pip */
-.crosshair::before {
+.pip-top {
   left: 50%;
-  top: 0;
+  bottom: 50%;
   width: 1px;
   height: 8px;
   margin-left: -0.5px;
-  box-shadow: 
-    0 0 2px rgba(0, 0, 0, 0.8),
-    /* Bottom pip */
-    0 22px 0 0 rgba(255, 255, 255, 0.9),
-    0 22px 2px 0 rgba(0, 0, 0, 0.8);
+  margin-bottom: 4px;
+}
+
+/* Bottom pip */
+.pip-bottom {
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 8px;
+  margin-left: -0.5px;
+  margin-top: 4px;
 }
 
 /* Left pip */
-.crosshair::after {
+.pip-left {
   top: 50%;
-  left: 0;
+  right: 50%;
   height: 1px;
   width: 8px;
   margin-top: -0.5px;
-  box-shadow: 
-    0 0 2px rgba(0, 0, 0, 0.8),
-    /* Right pip */
-    22px 0 0 0 rgba(255, 255, 255, 0.9),
-    22px 0 2px 0 rgba(0, 0, 0, 0.8);
+  margin-right: 4px;
+}
+
+/* Right pip */
+.pip-right {
+  top: 50%;
+  left: 50%;
+  height: 1px;
+  width: 8px;
+  margin-top: -0.5px;
+  margin-left: 4px;
 }
 </style>

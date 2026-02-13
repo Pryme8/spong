@@ -2,14 +2,17 @@
  * Shared spatial hash builder for level collision.
  * Both server and client call this with the same variations + instances
  * to build identical SpatialHashGrid instances.
+ * Variations may optionally provide collisionGrid (voxel grid); when absent, instances are skipped.
  */
 
 import { SpatialHashGrid } from './SpatialHashGrid.js';
-import { COLLIDER_SOLID, COLLIDER_TRIGGER, type ObjectCollider } from './CollisionVoxelGrid.js';
+import { COLLIDER_SOLID, COLLIDER_TRIGGER, type ObjectCollider, type CollisionVoxelGrid } from './CollisionVoxelGrid.js';
 import type { TreeVariation, TreeInstance } from './levelgen/LevelTreeGenerator.js';
 import type { RockVariation, RockInstance } from './levelgen/LevelRockGenerator.js';
 import type { BushVariation } from './bushgen/BushVariationGenerator.js';
 import type { BushInstance } from './bushgen/BushPlacement.js';
+
+type VariationWithOptionalGrid = { collisionGrid?: CollisionVoxelGrid };
 
 /**
  * Build a spatial hash grid from level object data.
@@ -40,13 +43,15 @@ export function buildLevelSpatialHash(
   // Trees block movement and fire collision triggers when touched
   const TREE_SCALE = 0.4;
   for (const instance of treeInstances) {
-    const variation = treeVariations[instance.variationId];
+    const variation = treeVariations[instance.variationId] as TreeVariation & VariationWithOptionalGrid;
+    const grid = variation.collisionGrid;
+    if (!grid) continue;
     const collider: ObjectCollider = {
       id: nextId++,
       variationId: instance.variationId,
       type: 'tree',
       flags: COLLIDER_SOLID | COLLIDER_TRIGGER,
-      grid: variation.collisionGrid,
+      grid,
       transform: {
         posX: instance.worldX,
         posY: instance.worldY + 0.4,  // Match rendering offset
@@ -54,7 +59,6 @@ export function buildLevelSpatialHash(
         rotY: instance.rotationY,
         scale: TREE_SCALE
       },
-      // World bounds computed by spatial hash insert
       worldMinX: 0, worldMinY: 0, worldMinZ: 0,
       worldMaxX: 0, worldMaxY: 0, worldMaxZ: 0
     };
@@ -65,13 +69,15 @@ export function buildLevelSpatialHash(
   // Rocks block movement but don't trigger events
   const ROCK_SCALE = 0.5;
   for (const instance of rockInstances) {
-    const variation = rockVariations[instance.variationId];
+    const variation = rockVariations[instance.variationId] as RockVariation & VariationWithOptionalGrid;
+    const grid = variation.collisionGrid;
+    if (!grid) continue;
     const collider: ObjectCollider = {
       id: nextId++,
       variationId: instance.variationId,
       type: 'rock',
       flags: COLLIDER_SOLID,
-      grid: variation.collisionGrid,
+      grid,
       transform: {
         posX: instance.worldX,
         posY: instance.worldY,
@@ -89,13 +95,15 @@ export function buildLevelSpatialHash(
   // Bushes are walk-through volume triggers
   const BUSH_SCALE = 0.25;
   for (const instance of bushInstances) {
-    const variation = bushVariations[instance.variationId];
+    const variation = bushVariations[instance.variationId] as BushVariation & VariationWithOptionalGrid;
+    const grid = variation.collisionGrid;
+    if (!grid) continue;
     const collider: ObjectCollider = {
       id: nextId++,
       variationId: instance.variationId,
       type: 'bush',
       flags: COLLIDER_TRIGGER,
-      grid: variation.collisionGrid,
+      grid,
       transform: {
         posX: instance.worldX,
         posY: instance.worldY,

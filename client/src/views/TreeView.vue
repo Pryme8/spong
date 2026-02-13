@@ -550,9 +550,9 @@ import { Scene, Vector3, Color3, MeshBuilder, StandardMaterial, LinesBuilder, Me
 import { useGameSession } from '../composables/useGameSession';
 import { PLAYER_MAX_HEALTH } from '@spong/shared';
 import GameHud from '../components/GameHud.vue';
-import { TreeMesh } from '../engine/TreeMesh';
-import { AudioManager } from '../engine/AudioManager';
-import { BushLeafEffect } from '../engine/BushLeafEffect';
+import { TreeMesh } from '../engine/entities/props/TreeMesh';
+import { AudioManager } from '../engine/audio/AudioManager';
+import { BushLeafEffect } from '../engine/rendering/effects/BushLeafEffect';
 import { generateTree, TreeGreedyMesher, TreeMeshBuilder, TreeLeafMeshBuilder, TreeMeshDecimator, TREE_GRID_SIZE, TREE_GRID_H, TREE_VOXEL_SIZE, type DebugSegment, type TreeColliderMesh } from '@spong/shared';
 
 const route = useRoute();

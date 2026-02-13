@@ -8,12 +8,9 @@
     "lib": ["ES2020"],
     "types": ["node"],
     "allowImportingTsExtensions": false,
-    "paths": {
-      "@spong/shared": ["../shared/src"]
-    }
+    "paths": { "@spong/shared": ["../shared/src"] }
   },
   "include": ["src/**/*"],
-  "references": [
-    { "path": "../shared" }
-  ]
+  "exclude": ["src/**/*.test.ts"],
+  "references": [{ "path": "../shared" }]
 }

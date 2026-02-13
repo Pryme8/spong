@@ -147,6 +147,12 @@
       </svg>
     </div>
 
+    <!-- Lag simulation indicator (debug URL param ?latency= or ?lag=) -->
+    <div v-if="(simulatedLatencyMs ?? 0) > 0" class="lag-sim-overlay">
+      <span class="lag-sim-label">Lag sim:</span>
+      <span class="lag-sim-value">{{ simulatedLatencyMs }} ms</span>
+    </div>
+
     <!-- Ammo Counter -->
     <div v-if="isInRoom && hasWeapon" class="ammo-overlay">
       <v-card class="ammo-card" variant="flat">
@@ -171,7 +177,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineProps } from 'vue';
+import { computed } from 'vue';
 import KillFeed from './KillFeed.vue';
 import type { KillFeedEntry } from './KillFeed.vue';
 
@@ -202,6 +208,8 @@ interface Props {
   reloadProgress: number;
   latency: number;
   pingColorClass: string;
+  /** Simulated one-way latency in ms from URL (?latency= or ?lag=). 0 = off. */
+  simulatedLatencyMs?: number;
   hitMarkerVisible?: boolean;
   // Build system props
   hasHammer?: boolean;
@@ -293,6 +301,20 @@ const materialsPercent = computed(() => {
   pointer-events: none;
   z-index: 1000;
 }
+
+/* Lag simulation indicator */
+.lag-sim-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #ffaa00;
+}
+.lag-sim-label { margin-right: 6px; }
+.lag-sim-value { font-weight: 600; }
 
 /* Hit Marker */
 .hit-marker {

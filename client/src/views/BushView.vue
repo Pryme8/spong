@@ -171,8 +171,8 @@ import { useRoute, useRouter } from 'vue-router';
 import { Scene, Vector3, Color3, Color4, MeshBuilder, StandardMaterial, Mesh, VertexData, PostProcess, Effect, Ray } from '@babylonjs/core';
 import { useGameSession } from '../composables/useGameSession';
 import { PLAYER_MAX_HEALTH } from '@spong/shared';
-import { BushLeafEffect } from '../engine/BushLeafEffect';
-import { AudioManager } from '../engine/AudioManager';
+import { BushLeafEffect } from '../engine/rendering/effects/BushLeafEffect';
+import { AudioManager } from '../engine/audio/AudioManager';
 import GameHud from '../components/GameHud.vue';
 import {
   generateBush, BushGreedyMesher, BushMeshBuilder, BushMeshDecimator,

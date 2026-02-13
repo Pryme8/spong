@@ -39,10 +39,10 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Engine, Scene, ArcRotateCamera, Vector3, HemisphericLight,
-  Color4, Color3, MeshBuilder, StandardMaterial, Mesh, VertexData
+  Color4, Color3, StandardMaterial, Mesh, VertexData
 } from '@babylonjs/core';
-import { createEngine } from '../engine/setupScene';
-import { CloudPostProcess } from '../engine/CloudPostProcess';
+import { createEngine } from '../engine/setup/setupScene';
+import { CloudPostProcess } from '../engine/rendering/postprocess/CloudPostProcess';
 import {
   generateCloud, CloudGreedyMesher,
   CLOUD_GRID_W, CLOUD_GRID_H, CLOUD_GRID_D, CLOUD_VOXEL_SIZE,
@@ -104,8 +104,6 @@ async function initializeScene() {
   light.diffuse = new Color3(1, 0.98, 0.95);
   light.groundColor = new Color3(0.6, 0.7, 0.85);
 
-  // Bounding box wireframe
-  createBoundingBox();
 
   seed.value = (route.query.seed as string) || 'cumulus';
   generateAndDisplay();
@@ -316,28 +314,6 @@ function generateQuadGeometry(quad: CloudQuad): {
   return { positions, normals, uvs };
 }
 
-function createBoundingBox() {
-  if (!scene) return;
-
-  const box = MeshBuilder.CreateBox('gridBoundingBox', {
-    width: gridW,
-    height: gridH,
-    depth: gridD,
-  }, scene);
-
-  // Scale by 3x
-  box.scaling.setAll(3.0);
-
-  // Center at origin (matching cloud mesh)
-  // Box is centered by default, so just offset Y to sit on the floor
-  box.position.set(0, gridH * 1.5, 0); // Y = half of scaled height
-
-  const mat = new StandardMaterial('gridBoxMat', scene);
-  mat.emissiveColor = new Color3(0.4, 0.5, 0.7);
-  mat.wireframe = true;
-  mat.alpha = 0.2;
-  box.material = mat;
-}
 
 function regenerateCloud() {
   generateAndDisplay();

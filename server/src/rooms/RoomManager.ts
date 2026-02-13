@@ -19,7 +19,6 @@ import {
   LobbyConfigPayload,
   LobbyConfigUpdatePayload,
   LobbyStartMessage,
-  LobbyStartingPayload,
   decodeInput,
   decodeShoot,
   encodeProjectileSpawn,

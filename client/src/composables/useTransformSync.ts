@@ -1,9 +1,9 @@
 import { ref } from 'vue';
 import { Scene } from '@babylonjs/core';
 import { NetworkClient } from '../network/NetworkClient';
-import { LocalTransform } from '../engine/LocalTransform';
+import { LocalTransform } from '../engine/core/LocalTransform';
 import { Opcode, TransformData, VoxelGrid, type RockColliderMesh, type RockTransform, type WaterLevelProvider } from '@spong/shared';
-import type { BuildingCollisionManager } from '../engine/BuildingCollisionManager';
+import type { BuildingCollisionManager } from '../engine/building/BuildingCollisionManager';
 import type { TreeColliderMesh } from '@spong/shared/dist/src/treegen/TreeMesh';
 import type { TreeTransform } from '@spong/shared/dist/src/treegen/TreeMeshTransform';
 

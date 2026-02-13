@@ -177,7 +177,11 @@ export class ItemSystem {
         }
       } else {
         // It's a weapon, equip it
-        weaponSystem.equipWeapon(payload.itemType as WeaponType);
+        weaponSystem.equipWeaponWithAmmo(
+          payload.itemType as WeaponType,
+          payload.ammoCurrent,
+          payload.ammoCapacity
+        );
         console.log(`[ItemSystem] We picked up a ${payload.itemType}! Shooting enabled.`);
         // Also equip visual weapon on player transform
         if (playerTransform) {

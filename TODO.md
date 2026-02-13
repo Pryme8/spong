@@ -24,23 +24,32 @@ These make the codebase sustainable. A well-structured project means any new fea
 
 ### Server Decomposition *(highest priority — blocks everything server-side)*
 
-Room.ts is 800+ lines with physics, projectiles, building, items, and round logic all interleaved. Every new server feature (inventory, water sync, ladder climbing, spectator) piles onto it. Decompose first.
+Room.ts was ~4.5k lines; now ~908 after extracting Physics, Projectile, Building, Item, Round, Ladder, Level, Combat, GameStart, PlayerState, TransformBroadcast, JoinSync, RoomInitializer systems. Every new server feature (inventory, water sync, ladder climbing, spectator) piles onto it. Decompose first.
 
-- [ ] **Extract PhysicsSystem from Room.ts**
-  - [ ] Move character stepping, collision resolution, and ground detection into `server/src/engine/PhysicsSystem.ts`
-  - [ ] PhysicsSystem takes a CollisionWorld + entity list, returns updated states
-  - [ ] Room.ts calls `physicsSystem.tick(dt)` — no physics logic remains in Room
-- [ ] **Extract ProjectileSystem from Room.ts**
-  - [ ] Move projectile lifecycle (spawn, step, hit detection, destroy) into `server/src/engine/ProjectileSystem.ts`
-  - [ ] System emits events (hit, destroy) that Room wires to damage/death/network
-- [ ] **Extract BuildingSystem from Room.ts**
-  - [ ] Move block placement, removal, transformation, finalization into `server/src/engine/BuildingSystem.ts`
-  - [ ] System owns building state; Room delegates opcode handling to it
-- [ ] **Extract ItemSystem from Room.ts**
-  - [ ] Move item spawning, pickup, drop logic into `server/src/engine/ItemSystem.ts`
-  - [ ] Clean interface for inventory integration later
+- [x] ~~**Extract PhysicsSystem from Room.ts**~~ (Completed: character + collectable physics in PhysicsSystem, Room calls tick/tickCollectables)
+  - [x] ~~Move character stepping, collision resolution, and ground detection into `server/src/engine/PhysicsSystem.ts`~~
+  - [x] ~~PhysicsSystem takes a CollisionWorld + entity list, returns updated states~~
+  - [x] ~~Room.ts calls `physicsSystem.tick(dt)` — no physics logic remains in Room~~
+- [x] ~~**Extract ProjectileSystem from Room.ts**~~ (Completed: spawn + step + hit in ProjectileSystem, Room wires hits/destroy to damage/network)
+  - [x] ~~Move projectile lifecycle (spawn, step, hit detection, destroy) into `server/src/engine/ProjectileSystem.ts`~~
+  - [x] ~~System emits events (hit, destroy) that Room wires to damage/death/network~~
+- [x] ~~**Extract BuildingSystem from Room.ts**~~ (Completed: BuildingSystem.ts owns state, block physics, colliders; Room delegates opcodes)
+  - [x] ~~Move block placement, removal, transformation, finalization into `server/src/engine/BuildingSystem.ts`~~
+  - [x] ~~System owns building state; Room delegates opcode handling to it~~
+- [x] ~~**Extract ItemSystem from Room.ts**~~ (Completed: ItemSystem.ts owns pickup grid, spawn/drop/pickup, getInitialState; Room delegates)
+  - [x] ~~Move item spawning, pickup, drop logic into `server/src/engine/ItemSystem.ts`~~
+  - [x] ~~Clean interface for inventory integration later~~
 - [ ] **Room.ts becomes orchestrator only**
-  - [ ] Target: ~200 lines — lifecycle management, system wiring, network dispatch
+  - [x] ~~Extract RoundSystem~~ (RoundSystem.ts: round state, countdown, scores, win condition)
+  - [x] ~~Extract LadderSystem~~ (LadderSystem.ts: ladder place/destroy, Room delegates)
+  - [x] ~~Extract LevelSystem~~ (LevelSystem.ts: shared generators only; rocks/trees/bushes/octree; level items via ItemSystem)
+  - [x] ~~Extract CombatSystem~~ (CombatSystem.ts: proximity damage, projectile hit, applyDamage, respawn, findValidSpawn; uses shared raycast)
+  - [x] ~~Extract GameStartSystem~~ (GameStartSystem.ts: lobby → countdown → loading → playing; Room does level gen in callback)
+  - [x] ~~Extract PlayerStateSystem~~ (PlayerStateSystem.ts: buff expiry, stamina, input dequeue; shared STAMINA/WATER)
+  - [x] ~~Extract TransformBroadcastSystem~~ (TransformBroadcastSystem.ts: transform + delta stamina/armor/helmet; owns cache)
+  - [x] ~~Extract JoinSyncSystem~~ (JoinSyncSystem.ts: send items, level, dummies, armor/helmet/materials, building to new conn)
+  - [x] ~~Extract RoomInitializer~~ (RoomInitializer.ts: level terrain, shooting range, builder room, editor rooms)
+  - [ ] Target: ~200 lines — remaining wiring, system init order, network dispatch
   - [ ] Each system is independently testable
 
 ### Shared Type & Protocol Hygiene
@@ -56,21 +65,21 @@ Room.ts is 800+ lines with physics, projectiles, building, items, and round logi
 
 ### Client Architecture
 
-- [ ] **Audit composable boundaries**
-  - [ ] Verify `useGameSession`, `useTransformSync`, `useRoundState` have clean separation of concerns
-  - [ ] No composable should directly reach into another's internals
-  - [ ] Document the data flow: network → composable → engine system → renderer
-- [ ] **Standardize engine system lifecycle**
-  - [ ] Every engine system (BuildSystem, LadderPlacementSystem, WeaponSystem, ItemSystem, etc.) should follow the same init/update/dispose pattern
-  - [ ] Create a lightweight `GameSystem` interface or base that new systems implement
-  - [ ] Audit dispose paths — confirm no leaked meshes, observers, or event listeners on scene teardown
+- [x] ~~**Audit composable boundaries**~~ (Completed: Client engine reorganized into modular folders)
+  - [x] ~~Verify `useGameSession`, `useTransformSync`, `useRoundState` have clean separation of concerns~~
+  - [x] ~~No composable should directly reach into another's internals~~
+  - [x] ~~Document the data flow: network → composable → engine system → renderer~~
+- [x] ~~**Standardize engine system lifecycle**~~ (Completed: Systems organized into audio/, building/, core/, managers/, systems/ folders)
+  - [x] ~~Every engine system (BuildSystem, LadderPlacementSystem, WeaponSystem, ItemSystem, etc.) should follow the same init/update/dispose pattern~~
+  - [x] ~~Create a lightweight `GameSystem` interface or base that new systems implement~~
+  - [x] ~~Audit dispose paths — confirm no leaked meshes, observers, or event listeners on scene teardown~~ (Completed: Fixed critical leaks in CameraController & InputManager, added dispose to WeaponSystem & BuildingCollisionManager)
 
 ### Documentation & Repo Cleanup
 
-- [ ] **Clean up root markdown files** — 19 `.md` files at root, most are completed plan artifacts
-  - [ ] Keep: README.md, QUICKSTART.md, TODO.md
-  - [ ] Move to `docs/`: AUDIO_SETUP_GUIDE.md, LADDER_SYSTEM_PLAN.md (has Phase 2 spec)
-  - [ ] Delete the rest (13 files) — completed implementation summaries belong in git history, not root
+- [x] ~~**Clean up root markdown files**~~ (Completed: Removed 14 completed plan/summary files, moved 2 to docs/)
+  - [x] ~~Keep: README.md, QUICKSTART.md, TODO.md~~
+  - [x] ~~Move to `docs/`: AUDIO_SETUP_GUIDE.md, LADDER_SYSTEM_PLAN.md (has Phase 2 spec)~~
+  - [x] ~~Delete the rest (13 files) — completed implementation summaries belong in git history, not root~~
 - [ ] **Add ARCHITECTURE.md** documenting system boundaries, data flow, and extension patterns
 
 ---
@@ -155,6 +164,10 @@ Finish what's already built. Each section groups the remaining work for a system
 - [ ] **Screen-edge vignette flash** on taking damage
 - [ ] **Directional damage indicator** (red arc pointing toward attacker)
 - [ ] **Damage numbers** on hit (optional — style-dependent)
+
+### Item UX
+
+- [ ] **Item hover UI** — show weapon name + ammo/capacity before pickup
 
 ### Weapon Scopes & Zoom *(nothing implemented)*
 
@@ -270,6 +283,19 @@ New systems to add. Before starting any of these, make sure the systems they int
 - [x] Pre-lobby system — chat, seed config, room owner controls
 - [x] Level route (direct-to-game) — /level with seed+room, Quick Play
 - [x] Seed-based sun position — deterministic sun config from seed
+- [x] Extract PhysicsSystem from Room — character + collectable physics in PhysicsSystem.ts
+- [x] Extract ProjectileSystem from Room — spawn, step, hit in ProjectileSystem.ts; Room wires damage/network
+- [x] Extract BuildingSystem from Room — BuildingSystem.ts owns state, physics, colliders; Room delegates
+- [x] Extract ItemSystem from Room — ItemSystem.ts owns pickup grid, spawn/drop/pickup; Room delegates
+- [x] Extract RoundSystem from Room — RoundSystem.ts owns round state, countdown, scores, win condition
+- [x] Extract LadderSystem from Room — LadderSystem.ts owns ladder entities, place/destroy
+- [x] Extract LevelSystem from Room — LevelSystem uses shared levelgen/bushgen/rockgen; delegates item spawns to ItemSystem (no duplication)
+- [x] Extract CombatSystem from Room — damage, proximity/AOE, LoS (shared rayVs*), respawn, findValidSpawn
+- [x] Extract GameStartSystem from Room — countdown, loading, ready, startGame; Room runs level gen in onCountdownComplete
+- [x] Extract PlayerStateSystem from Room — buff expiry, stamina (shared constants), input dequeue
+- [x] Extract TransformBroadcastSystem from Room — transform broadcast, delta stamina/armor/helmet, cache
+- [x] Extract JoinSyncSystem from Room — initial state for new player (items, level, dummies, armor/helmet/materials, building)
+- [x] Extract RoomInitializer from Room — level/shooting range/builder/editor setup; Room passes setters and LevelSystem
 
 </details>
 

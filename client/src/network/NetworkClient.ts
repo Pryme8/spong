@@ -19,13 +19,30 @@ export type ProjectileSpawnBatchHandler = (data: ProjectileSpawnData[]) => void;
 export type ProjectileDestroyHandler = (data: ProjectileDestroyData) => void;
 export type InputHandler = (data: InputData) => void;
 
+const MAX_SIMULATED_LATENCY_MS = 5000;
+
+/**
+ * Read simulated latency from URL (e.g. ?latency=100 or ?lag=100).
+ * One-way delay in ms; applied to both incoming and outgoing (RTT = 2 * value).
+ */
+export function getSimulatedLatencyMs(): number {
+  if (typeof window === 'undefined') return 0;
+  const params = new URLSearchParams(window.location.search);
+  const v = params.get('latency') ?? params.get('lag');
+  if (v == null) return 0;
+  const n = parseInt(v, 10);
+  return isNaN(n) || n < 0 ? 0 : Math.min(n, MAX_SIMULATED_LATENCY_MS);
+}
+
 export class NetworkClient {
   private ws: WebSocket | null = null;
   private url: string;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
-  
+  /** One-way simulated latency in ms (incoming and outgoing). RTT = 2 * this. */
+  private simulatedLatencyMs = 0;
+
   private lowFreqHandlers = new Map<Opcode, LowFrequencyHandler[]>();
   private highFreqHandlers = new Map<Opcode, HighFrequencyHandler[]>();
   private projectileSpawnHandlers: ProjectileSpawnHandler[] = [];
@@ -36,6 +53,10 @@ export class NetworkClient {
 
   constructor(url: string) {
     this.url = url;
+    this.simulatedLatencyMs = getSimulatedLatencyMs();
+    if (this.simulatedLatencyMs > 0) {
+      console.log(`[NetworkClient] Simulating latency: ${this.simulatedLatencyMs} ms one-way (RTT ≈ ${2 * this.simulatedLatencyMs} ms). Use ?latency= or ?lag= in URL.`);
+    }
   }
 
   connect(): Promise<void> {
@@ -53,7 +74,13 @@ export class NetworkClient {
         };
 
         this.ws.onmessage = (event) => {
-          this.handleMessage(event.data);
+          const data = event.data;
+          if (this.simulatedLatencyMs > 0) {
+            const copy = data instanceof ArrayBuffer ? data.slice(0) : data;
+            setTimeout(() => this.handleMessage(copy), this.simulatedLatencyMs);
+          } else {
+            this.handleMessage(data);
+          }
         };
 
         this.ws.onerror = (error) => {
@@ -155,6 +182,11 @@ export class NetworkClient {
     }
   }
 
+  private doSend(buffer: ArrayBuffer): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(buffer);
+  }
+
   sendLow(opcode: Opcode, payload: any) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn('Cannot send message: WebSocket not connected');
@@ -167,11 +199,15 @@ export class NetworkClient {
     const jsonBytes = encoder.encode(json);
     const buffer = new ArrayBuffer(1 + jsonBytes.length);
     const view = new DataView(buffer);
-    
+
     view.setUint8(0, opcode);
     new Uint8Array(buffer, 1).set(jsonBytes);
-    
-    this.ws.send(buffer);
+
+    if (this.simulatedLatencyMs > 0) {
+      setTimeout(() => this.doSend(buffer), this.simulatedLatencyMs);
+    } else {
+      this.doSend(buffer);
+    }
   }
 
   sendBinary(data: ArrayBuffer) {
@@ -180,7 +216,11 @@ export class NetworkClient {
       return;
     }
 
-    this.ws.send(data);
+    if (this.simulatedLatencyMs > 0) {
+      setTimeout(() => this.doSend(data), this.simulatedLatencyMs);
+    } else {
+      this.doSend(data);
+    }
   }
   
   sendInput(input: InputData) {
@@ -252,5 +292,10 @@ export class NetworkClient {
 
   get isConnected(): boolean {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  /** Simulated one-way latency in ms (0 = disabled). RTT ≈ 2 * this when active. */
+  get simulatedLatency(): number {
+    return this.simulatedLatencyMs;
   }
 }

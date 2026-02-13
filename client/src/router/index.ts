@@ -47,6 +47,11 @@ const router = createRouter({
       path: '/builder',
       name: 'builder',
       component: () => import('../views/BuilderView.vue')
+    },
+    {
+      path: '/armory',
+      name: 'armory',
+      component: () => import('../views/ArmoryView.vue')
     }
   ]
 });
