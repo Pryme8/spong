@@ -71,8 +71,9 @@ if (config.publicDir) {
     root: path.resolve(config.publicDir),
     index: false
   });
-  fastify.get('*', (_req, reply) => {
-    reply.sendFile('index.html', path.resolve(config.publicDir!));
+  fastify.setNotFoundHandler((request, reply) => {
+    if (request.method !== 'GET') return reply.code(404).send();
+    return reply.sendFile('index.html', path.resolve(config.publicDir!));
   });
 }
 

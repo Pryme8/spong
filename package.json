@@ -9,14 +9,22 @@
     "shared"
   ],
   "scripts": {
+    "dev": "concurrently -n s,c \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "npm run dev --workspace=client",
+    "start:client": "npm run start --workspace=client",
+    "prod:client": "npm run prod --workspace=client",
     "dev:server": "npm run dev --workspace=server",
     "build:client": "npm run build --workspace=client",
     "build:server": "npm run build --workspace=server",
     "build:shared": "npm run build --workspace=shared",
-    "build": "npm run build:shared && npm run build:client && npm run build:server"
+    "build": "npm run build:shared && npm run build:client && npm run build:server",
+    "start": "cross-env PUBLIC_DIR=./client/dist node server/dist/index.js",
+    "prod": "npm run build && npm run start",
+    "test": "npm run test --workspace=server"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
     "typescript": "^5.3.3"
   },
   "overrides": {

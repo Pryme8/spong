@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "build:check": "vue-tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "vite preview",
+    "prod": "npm run build && vite preview"
   },
   "dependencies": {
     "@babylonjs/core": "^8.50.2",

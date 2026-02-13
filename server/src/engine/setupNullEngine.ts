@@ -1,8 +1,8 @@
 import { NullEngine, Scene, FreeCamera, Vector3, MeshBuilder } from '@babylonjs/core';
-import { PhysicsAggregate } from '@babylonjs/core/Physics/v2/physicsAggregate';
-import { PhysicsShapeType } from '@babylonjs/core/Physics/v2/IPhysicsEnginePlugin';
+import { PhysicsAggregate } from '@babylonjs/core/Physics/v2/physicsAggregate.js';
+import { PhysicsShapeType } from '@babylonjs/core/Physics/v2/IPhysicsEnginePlugin.js';
 import HavokPhysics from '@babylonjs/havok';
-import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin';
+import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';

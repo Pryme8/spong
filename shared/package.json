@@ -2,13 +2,13 @@
   "name": "@spong/shared",
   "version": "0.1.0",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/src/index.js",
   "types": "./src/index.ts",
   "exports": {
     ".": {
       "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
     }
   },
   "scripts": {
