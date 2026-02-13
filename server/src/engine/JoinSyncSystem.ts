@@ -10,12 +10,17 @@ import {
   COMP_ARMOR,
   COMP_HELMET,
   COMP_MATERIALS,
+  COMP_WEAPON_TYPE,
+  COMP_AMMO,
   type ArmorComponent,
   type HelmetComponent,
   type MaterialsComponent,
+  type WeaponTypeComponent,
+  type AmmoComponent,
   type ArmorUpdateMessage,
   type HelmetUpdateMessage,
   type MaterialsUpdateMessage,
+  type EquippedWeaponSyncMessage,
 } from '@spong/shared';
 
 export interface JoinSyncSystemOptions {
@@ -81,6 +86,16 @@ export class JoinSyncSystem {
       const materials = playerEntity.get<MaterialsComponent>(COMP_MATERIALS);
       if (materials) {
         this.sendToConn(conn, Opcode.MaterialsUpdate, { entityId: playerEntity.id, materials: materials.current } satisfies MaterialsUpdateMessage);
+      }
+      const weaponType = playerEntity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
+      const ammo = playerEntity.get<AmmoComponent>(COMP_AMMO);
+      if (weaponType && ammo) {
+        this.sendToConn(conn, Opcode.EquippedWeaponSync, {
+          entityId: playerEntity.id,
+          itemType: weaponType.type,
+          ammoCurrent: ammo.current,
+          ammoCapacity: ammo.capacity
+        } satisfies EquippedWeaponSyncMessage);
       }
     }
 

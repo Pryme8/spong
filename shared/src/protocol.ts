@@ -43,6 +43,7 @@ export enum Opcode {
   RockSpawn = 0x41,
   BushSpawn = 0x42,
   FootstepSound = 0x43,
+  EquippedWeaponSync = 0x44,
   DummySpawn = 0x80,
   BlockPlace = 0x50,
   BlockRemove = 0x51,
@@ -350,6 +351,14 @@ export interface HelmetUpdateMessage {
 export interface MaterialsUpdateMessage {
   entityId: number;
   materials: number;       // Current materials
+}
+
+/** Server -> Clients: sync equipped weapon (e.g. on join so new client sees others' weapons). */
+export interface EquippedWeaponSyncMessage {
+  entityId: number;        // Player entity ID
+  itemType: string;       // Weapon type
+  ammoCurrent?: number;
+  ammoCapacity?: number;
 }
 
 export interface BlockPlaceMessage {

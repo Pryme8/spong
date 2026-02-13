@@ -138,6 +138,7 @@ export function useLobbySession() {
       Opcode.ArmorUpdate,
       Opcode.HelmetUpdate,
       Opcode.MaterialsUpdate,
+      Opcode.EquippedWeaponSync,
       Opcode.TreeSpawn,
       Opcode.RockSpawn,
       Opcode.BushSpawn,

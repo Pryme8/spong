@@ -11,7 +11,8 @@ import {
   Octree,
   type OctreeEntry,
   type DummySpawnMessage,
-  type TransformData
+  type TransformData,
+  type WeaponType
 } from '@spong/shared';
 import { NetworkClient, getSimulatedLatencyMs, getWebSocketUrl } from '../network/NetworkClient';
 import { useRoom } from './useRoom';
@@ -171,6 +172,7 @@ export function useGameSession() {
   let isInLoadingPhase = false;
   let pendingEntityId: number | null = null;
   let spawnPlayerFn: ((entityId: number) => void) | null = null;
+  let pendingEquippedWeapon: { itemType: string; ammoCurrent?: number; ammoCapacity?: number } | null = null;
   const loadingSecondsRemaining = ref(0);
   const loadingReadyPlayers = ref<string[]>([]);
   const loadingTotalPlayers = ref(0);
@@ -678,7 +680,30 @@ export function useGameSession() {
         playerMaterials.value = payload.materials;
       }
     });
-    
+
+    networkClient.onLowFrequency(Opcode.EquippedWeaponSync, (payload: { entityId: number; itemType: string; ammoCurrent?: number; ammoCapacity?: number }) => {
+      if (scene && transformSync) {
+        const transform = transformSync.getTransform(payload.entityId);
+        if (transform) {
+          transform.equipWeapon(payload.itemType as WeaponType);
+        }
+        if (payload.entityId === myEntityId.value) {
+          weaponSystem.equipWeaponWithAmmo(
+            payload.itemType as WeaponType,
+            payload.ammoCurrent,
+            payload.ammoCapacity
+          );
+          if (myTransform.value) {
+            myTransform.value.equipWeapon(payload.itemType as WeaponType);
+          } else {
+            pendingEquippedWeapon = { itemType: payload.itemType, ammoCurrent: payload.ammoCurrent, ammoCapacity: payload.ammoCapacity };
+          }
+        } else {
+          remotePlayerWeapons.set(payload.entityId, payload.itemType);
+        }
+      }
+    });
+
     // Handle building network messages for collision
     // Building system network handlers
     networkClient.onLowFrequency(Opcode.BuildingInitialState, (payload: BuildingInitialStateMessage) => {
@@ -1116,6 +1141,17 @@ export function useGameSession() {
       myTransform.value.registerPlayerCube(cube);
       if (shadowManager) {
         shadowManager.addShadowCaster(cube, true);
+      }
+      myTransform.value.setArmor(playerArmor.value > 0);
+      myTransform.value.setHelmet(playerHelmetHealth.value > 0);
+      if (pendingEquippedWeapon) {
+        weaponSystem.equipWeaponWithAmmo(
+          pendingEquippedWeapon.itemType as WeaponType,
+          pendingEquippedWeapon.ammoCurrent,
+          pendingEquippedWeapon.ammoCapacity
+        );
+        myTransform.value.equipWeapon(pendingEquippedWeapon.itemType as WeaponType);
+        pendingEquippedWeapon = null;
       }
       // Set up input manager
       inputManager = new InputManager(scene, config.isMobile || false);
