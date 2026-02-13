@@ -1,6 +1,6 @@
 import { ref, readonly, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { NetworkClient } from '../network/NetworkClient';
+import { NetworkClient, getWebSocketUrl } from '../network/NetworkClient';
 import { useRoom } from './useRoom';
 import {
   Opcode,
@@ -41,12 +41,7 @@ export function useLobbySession() {
   let room: ReturnType<typeof useRoom> | null = null;
 
   async function init(targetRoomId: string): Promise<void> {
-    // Use Vite proxy in development, direct connection in production
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = import.meta.env.DEV 
-      ? `${wsProtocol}//${window.location.host}/ws`
-      : `${wsProtocol}//${window.location.hostname}:3000/ws`;
-    networkClient = new NetworkClient(wsUrl);
+    networkClient = new NetworkClient(getWebSocketUrl());
     room = useRoom(networkClient);
 
     // Sync room state to our local refs

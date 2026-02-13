@@ -13,7 +13,7 @@ import {
   type DummySpawnMessage,
   type TransformData
 } from '@spong/shared';
-import { NetworkClient, getSimulatedLatencyMs } from '../network/NetworkClient';
+import { NetworkClient, getSimulatedLatencyMs, getWebSocketUrl } from '../network/NetworkClient';
 import { useRoom } from './useRoom';
 import { useTransformSync } from './useTransformSync';
 import { useRoundState } from './useRoundState';
@@ -385,14 +385,8 @@ export function useGameSession() {
     
     window.addEventListener('resize', handleResize);
     
-    // 3. Connect to server
-    // Use Vite proxy in development, direct connection in production
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = import.meta.env.DEV 
-      ? `${wsProtocol}//${window.location.host}/ws`
-      : `${wsProtocol}//${window.location.hostname}:3000/ws`;
-    
-    networkClient = new NetworkClient(wsUrl);
+    // 3. Connect to server (wss when page is HTTPS; same host in production so reverse proxy works)
+    networkClient = new NetworkClient(getWebSocketUrl());
     simulatedLatencyMs.value = getSimulatedLatencyMs();
     const room = useRoom(networkClient);
     buildingCollisionManager = new BuildingCollisionManager();

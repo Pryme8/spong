@@ -34,6 +34,22 @@ export function getSimulatedLatencyMs(): number {
   return isNaN(n) || n < 0 ? 0 : Math.min(n, MAX_SIMULATED_LATENCY_MS);
 }
 
+/** Build WebSocket URL. Always uses wss when page is HTTPS (required by browser). */
+export function getWebSocketUrl(): string {
+  if (typeof window === 'undefined') return 'ws://localhost:3000/ws';
+  const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
+  if (envUrl) {
+    const secure = window.location.protocol === 'https:';
+    if (secure && envUrl.startsWith('ws://')) return envUrl.replace(/^ws:\/\//, 'wss://');
+    return envUrl;
+  }
+  const secure = window.location.protocol === 'https:';
+  const protocol = secure ? 'wss:' : 'ws:';
+  if (import.meta.env.DEV) return `${protocol}//${window.location.host}/ws`;
+  if (secure) return `${protocol}//${window.location.host}/ws`;
+  return `${protocol}//${window.location.hostname}:3000/ws`;
+}
+
 export class NetworkClient {
   private ws: WebSocket | null = null;
   private url: string;
