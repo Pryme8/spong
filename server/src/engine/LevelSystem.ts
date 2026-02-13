@@ -166,7 +166,7 @@ export class LevelSystem {
     rng: () => number,
     opts: { voxelGrid: VoxelGrid; waterLevelProvider?: { isValidSpawnPosition(x: number, y: number, z: number): boolean } },
     occupiedCells: Set<string>,
-    label: string
+    _label: string
   ): void {
     let n = 0;
     const maxAttempts = count * 3;
@@ -217,7 +217,6 @@ export class LevelSystem {
         }
       };
     });
-    const totalTris = this.rockColliderMeshes.reduce((s, d) => s + d.mesh.triangleCount, 0);
   }
 
   private spawnLevelTrees(
@@ -252,7 +251,6 @@ export class LevelSystem {
         }
       };
     });
-    const totalTris = this.treeColliderMeshes.reduce((s, tm) => s + tm.mesh.triangleCount, 0);
   }
 
   private spawnLevelBushes(

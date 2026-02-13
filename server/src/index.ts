@@ -84,7 +84,7 @@ await killPort(config.port);
 await new Promise(resolve => setTimeout(resolve, 500));
 
 // Cleanup function for graceful shutdown
-async function cleanup(signal: string) {
+async function cleanup(_signal: string) {
   // Set a very short timeout for hot reload scenarios
   const forceExitTimeout = setTimeout(() => {
     process.exit(0); // Exit 0 for hot reload, not an error
@@ -97,14 +97,14 @@ async function cleanup(signal: string) {
     setImmediate(() => {
       try {
         roomManager.dispose();
-      } catch (err) {
+      } catch (_err) {
         // Ignore errors during hot reload cleanup
       }
     });
     
     clearTimeout(forceExitTimeout);
     process.exit(0);
-  } catch (err) {
+  } catch (_err) {
     clearTimeout(forceExitTimeout);
     process.exit(0); // Still exit cleanly for hot reload
   }
@@ -133,11 +133,11 @@ process.on('SIGHUP', () => {
 });
 
 // Handle uncaught errors
-process.on('uncaughtException', (err) => {
+process.on('uncaughtException', (_err) => {
   cleanup('uncaughtException');
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (_reason, _promise) => {
   cleanup('unhandledRejection');
 });
 

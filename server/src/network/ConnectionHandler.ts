@@ -62,7 +62,7 @@ export class ConnectionHandler {
       this.handleDisconnect(conn);
     });
 
-    ws.on('error', (err) => {
+    ws.on('error', (_err) => {
 
     });
 
@@ -94,9 +94,7 @@ export class ConnectionHandler {
 
           const payload = JSON.parse(json);
           await handler(conn, payload);
-        } catch (err) {
-          const json = data.slice(1).toString('utf-8');
-
+        } catch (_err) {
           this.sendError(conn, 'PARSE_ERROR', 'Invalid JSON payload');
         }
       } else {

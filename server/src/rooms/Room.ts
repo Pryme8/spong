@@ -106,7 +106,7 @@ export class Room {
   }
 
   private spawnDummyAtPosition(worldX: number, worldY: number, worldZ: number, color: string = '#ff6b3d'): void {
-    const { entity, spawnMsg } = createDummyEntity(this.world, worldX, worldY, worldZ, color);
+    const { entity: _entity, spawnMsg } = createDummyEntity(this.world, worldX, worldY, worldZ, color);
     this.dummyEntities.push(spawnMsg);
     this.broadcastLow(Opcode.DummySpawn, spawnMsg);
   }

@@ -50,28 +50,17 @@ export class JoinSyncSystem {
     this.getBuildingInitialMessages = options.getBuildingInitialMessages;
   }
 
-  sendInitialState(conn: unknown, connIdForLog?: string): void {
-    const logId = connIdForLog ?? 'player';
+  sendInitialState(conn: unknown, _connIdForLog?: string): void {
     const itemMessages = this.getItemInitialMessages();
     for (const msg of itemMessages) {
       this.sendToConn(conn, Opcode.ItemSpawn, msg);
     }
     const treeMsg = this.getTreeSpawnMessage();
-    if (treeMsg) {
-      this.sendToConn(conn, Opcode.TreeSpawn, treeMsg);
-      const t = treeMsg as { trees: unknown[] };
-    }
+    if (treeMsg) this.sendToConn(conn, Opcode.TreeSpawn, treeMsg);
     const rockMsg = this.getRockSpawnMessage();
-    if (rockMsg) {
-      this.sendToConn(conn, Opcode.RockSpawn, rockMsg);
-      const r = rockMsg as { rocks: unknown[] };
-    }
+    if (rockMsg) this.sendToConn(conn, Opcode.RockSpawn, rockMsg);
     const bushMsg = this.getBushSpawnMessage();
-    if (bushMsg) {
-      this.sendToConn(conn, Opcode.BushSpawn, bushMsg);
-      const b = bushMsg as { bushes: unknown[] };
-    } else {
-    }
+    if (bushMsg) this.sendToConn(conn, Opcode.BushSpawn, bushMsg);
 
     this.sendDummySpawns(conn);
 
@@ -98,7 +87,6 @@ export class JoinSyncSystem {
     const buildingMessages = this.getBuildingInitialMessages();
     for (const buildingMsg of buildingMessages) {
       this.sendToConn(conn, Opcode.BuildingInitialState, buildingMsg);
-      const b = buildingMsg as { blocks: unknown[]; buildingEntityId: number };
     }
   }
 }
