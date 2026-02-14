@@ -8,7 +8,6 @@ import {
   PLAYER_MAX_HEALTH,
   VoxelGrid,
   GreedyMesher,
-  generateMultiTileTerrain,
   Octree,
   WATER,
   type OctreeEntry,
@@ -270,27 +269,15 @@ export function useGameSession() {
     
     // 2. Generate level if seed is provided, otherwise create flat ground
     if (config.levelSeed && scene) {
-      const multiTile = generateMultiTileTerrain(config.levelSeed);
-      voxelGrid = multiTile;
-      const allQuads: import('@spong/shared').Quad[] = [];
-      const tiles = multiTile.getTiles();
-      const TILE_VOXELS = 100;
-      for (let tx = 0; tx < 3; tx++) {
-        for (let tz = 0; tz < 3; tz++) {
-          const mesher = new GreedyMesher(tiles[tx][tz]);
-          const quads = mesher.generateMesh();
-          const offsetX = tx * TILE_VOXELS;
-          const offsetZ = tz * TILE_VOXELS;
-          for (const q of quads) {
-            allQuads.push({ ...q, x: q.x + offsetX, z: q.z + offsetZ });
-          }
-        }
-      }
+      voxelGrid = new VoxelGrid();
+      voxelGrid.generateFromNoise(config.levelSeed);
+      const mesher = new GreedyMesher(voxelGrid);
+      const allQuads = mesher.generateMesh();
       levelMesh = new LevelMesh(scene);
-      levelMesh.createFromQuads(allQuads, { x: -300, y: -25, z: -300 });
+      levelMesh.createFromQuads(allQuads);
       try {
         waterManager = new LevelWaterManager(scene);
-        await waterManager.initialize(multiTile);
+        await waterManager.initialize(voxelGrid);
         // Update water ripples every frame (time comes from TimeManager)
         scene.onBeforeRenderObservable.add(() => {
           waterManager?.update();
@@ -829,6 +816,11 @@ export function useGameSession() {
       if (payload.entityId === myEntityId.value) {
         playerHealth.value = PLAYER_MAX_HEALTH;
         weaponSystem.clearWeapon();
+        myTransform.value?.clearWeapon();
+      }
+      const deathTransform = transformSync?.getTransform(payload.entityId);
+      if (deathTransform) {
+        deathTransform.clearWeapon();
       }
       // Clear weapon tracking on death (player drops weapon)
       remotePlayerWeapons.delete(payload.entityId);
@@ -1333,6 +1325,7 @@ export function useGameSession() {
       // Pickup handler (F key)
       inputManager.onPickup(() => {
         if (!networkClient || !scene || !cameraController || !myTransform.value) return;
+        if (!weaponSystem.hasWeapon.value) return;
 
         const itemId = hoveredItemId.value;
           if (itemId === null) return;

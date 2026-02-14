@@ -14,6 +14,10 @@ import {
   COMP_PICKUP_EFFECT,
   TAG_COLLECTABLE,
   Opcode,
+  LEVEL_OFFSET_X,
+  LEVEL_OFFSET_Z,
+  VOXEL_WIDTH,
+  VOXEL_DEPTH,
   type PlayerComponent,
   type PhysicsComponent,
   type HealthComponent,
@@ -27,6 +31,7 @@ import {
   type WeaponTypeComponent,
   type CollectedComponent,
   type PickupEffectComponent,
+  type TerrainCollisionGrid,
   type ItemSpawnMessage,
   type ItemUpdateMessage,
   type EntityDamageMessage,
@@ -107,10 +112,24 @@ export class ItemSystem {
   private readonly broadcast: (opcode: number, msg: unknown) => void;
   private readonly pickupGrid = new Map<string, Set<number>>();
   private readonly pickupGridCells = new Map<number, string>();
+  private spawnContext: { voxelGrid: TerrainCollisionGrid; waterLevelProvider?: SpawnTerrainOptions['waterLevelProvider'] } | null = null;
+
+  private static readonly RESPAWNABLE_CONSUMABLES = new Set<ItemType>([
+    'medic_pack',
+    'large_medic_pack',
+    'apple',
+    'pill_bottle',
+    'kevlar',
+    'helmet'
+  ]);
 
   constructor(options: ItemSystemOptions) {
     this.world = options.world;
     this.broadcast = options.broadcast;
+  }
+
+  setSpawnContext(context: { voxelGrid: TerrainCollisionGrid; waterLevelProvider?: SpawnTerrainOptions['waterLevelProvider'] } | null): void {
+    this.spawnContext = context;
   }
 
   spawnOnTerrain(itemType: ItemType, worldX: number, worldZ: number, options?: SpawnTerrainOptions): boolean {
@@ -348,7 +367,11 @@ export class ItemSystem {
         const itemEntity = this.world.getEntity(itemId);
         if (!itemEntity) continue;
         const pickupEffect = itemEntity.get<PickupEffectComponent>(COMP_PICKUP_EFFECT);
-        if (!pickupEffect && collected && collected.items.length > 0) continue;
+        if (pickupEffect) {
+          if (!this.shouldAutoPickupEffect(playerEntity, pickupEffect, now)) continue;
+        } else if (collected && collected.items.length > 0) {
+          continue;
+        }
         const physics = itemEntity.get<PhysicsComponent>(COMP_PHYSICS);
         if (!physics) continue;
         const dx = pc.state.posX - physics.posX;
@@ -430,9 +453,11 @@ export class ItemSystem {
       }
     }
 
-    this.broadcast(Opcode.ItemPickup, { entityId: pickup.itemId, playerId: pickup.playerId, itemType: 'medic_pack' });
+    const itemType = this.getConsumableItemType(pickupEffect) ?? 'medic_pack';
+    this.broadcast(Opcode.ItemPickup, { entityId: pickup.itemId, playerId: pickup.playerId, itemType });
     this.removePickupFromGrid(pickup.itemId);
     this.world.destroyEntity(pickup.itemId);
+    this.scheduleConsumableRespawn(itemType);
   }
 
   private applyWeaponPickup(playerEntity: Entity, itemEntity: Entity, pickup: { itemId: number; playerId: number }): void {
@@ -587,5 +612,82 @@ export class ItemSystem {
       }
     }
     return results;
+  }
+
+  private shouldAutoPickupEffect(playerEntity: Entity, pickupEffect: PickupEffectComponent, now: number): boolean {
+    if (pickupEffect.type === 'health') {
+      const health = playerEntity.get<HealthComponent>(COMP_HEALTH);
+      return !health || health.current < health.max;
+    }
+    if (pickupEffect.type === 'stamina') {
+      const stamina = playerEntity.get<StaminaComponent>(COMP_STAMINA);
+      return !stamina || stamina.current < stamina.max || stamina.isExhausted;
+    }
+    if (pickupEffect.type === 'buff') {
+      const buffs = playerEntity.get<ActiveBuffsComponent>(COMP_ACTIVE_BUFFS);
+      if (!pickupEffect.buffType || !buffs) return true;
+      return !buffs.buffs.some(buff => buff.type === pickupEffect.buffType && (now - buff.startTime) < buff.duration);
+    }
+    if (pickupEffect.type === 'armor_pickup') {
+      const armor = playerEntity.get<ArmorComponent>(COMP_ARMOR);
+      return !armor || armor.current < armor.max;
+    }
+    if (pickupEffect.type === 'helmet_pickup') {
+      const helmet = playerEntity.get<HelmetComponent>(COMP_HELMET);
+      return !helmet || !helmet.hasHelmet || helmet.helmetHealth < helmet.maxHelmetHealth;
+    }
+    return true;
+  }
+
+  private getConsumableItemType(pickupEffect: PickupEffectComponent): ItemType | null {
+    if (pickupEffect.type === 'health') {
+      return pickupEffect.value >= 100 ? 'large_medic_pack' : 'medic_pack';
+    }
+    if (pickupEffect.type === 'stamina') {
+      return 'apple';
+    }
+    if (pickupEffect.type === 'buff') {
+      return 'pill_bottle';
+    }
+    if (pickupEffect.type === 'armor_pickup') {
+      return 'kevlar';
+    }
+    if (pickupEffect.type === 'helmet_pickup') {
+      return 'helmet';
+    }
+    return null;
+  }
+
+  private scheduleConsumableRespawn(itemType: ItemType): void {
+    if (!ItemSystem.RESPAWNABLE_CONSUMABLES.has(itemType)) return;
+    if (!this.spawnContext) return;
+    setTimeout(() => {
+      this.spawnConsumableAtRandom(itemType);
+    }, 10000);
+  }
+
+  private spawnConsumableAtRandom(itemType: ItemType): void {
+    if (!this.spawnContext) return;
+    const { voxelGrid, waterLevelProvider } = this.spawnContext;
+    const bounds = this.getTerrainBounds(voxelGrid);
+    const attempts = 30;
+    for (let i = 0; i < attempts; i++) {
+      const worldX = bounds.minX + Math.random() * (bounds.maxX - bounds.minX);
+      const worldZ = bounds.minZ + Math.random() * (bounds.maxZ - bounds.minZ);
+      const spawned = this.spawnOnTerrain(itemType, worldX, worldZ, { voxelGrid, waterLevelProvider });
+      if (spawned) return;
+    }
+  }
+
+  private getTerrainBounds(voxelGrid: TerrainCollisionGrid): { minX: number; maxX: number; minZ: number; maxZ: number } {
+    const offset = (voxelGrid as { getOffset?: () => { offsetX: number; offsetZ: number } }).getOffset?.() ?? {
+      offsetX: LEVEL_OFFSET_X,
+      offsetZ: LEVEL_OFFSET_Z
+    };
+    const minX = offset.offsetX;
+    const minZ = offset.offsetZ;
+    const maxX = offset.offsetX + voxelGrid.width * VOXEL_WIDTH;
+    const maxZ = offset.offsetZ + voxelGrid.depth * VOXEL_DEPTH;
+    return { minX, maxX, minZ, maxZ };
   }
 }

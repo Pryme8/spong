@@ -42,11 +42,12 @@ import {
   LadderDestroyMessage,
   ProjectileSpawnData,
   FIXED_TIMESTEP,
-  generateMultiTileTerrain,
+  VoxelGrid,
   DummySpawnMessage,
   COMP_COLLECTED,
   CollectedComponent,
   StatsComponent,
+  TAG_COLLECTABLE,
 } from '@spong/shared';
 import { ServerWaterLevelProvider } from '../WaterLevelProvider.js';
 
@@ -227,11 +228,16 @@ export class Room {
       broadcast: (opcode, msg) => this.broadcastLow(opcode, msg)
     });
 
+    const syncItemSpawnContext = () => {
+      if (!this.voxelGrid) return;
+      this.itemSystem.setSpawnContext({ voxelGrid: this.voxelGrid, waterLevelProvider: this.waterLevelProvider });
+    };
+
     const roomInitializer = new RoomInitializer({
       getRoomId: () => this.id,
       getLobbyConfig: () => this.lobbyConfig,
-      setVoxelGrid: (v) => { this.voxelGrid = v; },
-      setWaterLevelProvider: (p) => { this.waterLevelProvider = p; },
+      setVoxelGrid: (v) => { this.voxelGrid = v; syncItemSpawnContext(); },
+      setWaterLevelProvider: (p) => { this.waterLevelProvider = p; syncItemSpawnContext(); },
       getLevelSystem: () => this.levelSystem,
       spawnWeaponAtPosition: (type, x, y, z) => this.spawnWeaponAtPosition(type as Parameters<Room['spawnWeaponAtPosition']>[0], x, y, z),
       spawnPickupAtPosition: (type, x, y, z) => this.spawnPickupAtPosition(type as Parameters<Room['spawnPickupAtPosition']>[0], x, y, z),
@@ -560,8 +566,11 @@ export class Room {
     this.gameStartSystem.enterLoadingPhase(finalSeed);
 
     if (!this.voxelGrid) {
-      this.voxelGrid = generateMultiTileTerrain(finalSeed);
+      const grid = new VoxelGrid();
+      grid.generateFromNoise(finalSeed);
+      this.voxelGrid = grid;
       this.waterLevelProvider = new ServerWaterLevelProvider(this.voxelGrid);
+      this.itemSystem.setSpawnContext({ voxelGrid: this.voxelGrid, waterLevelProvider: this.waterLevelProvider });
       const occupiedCells = new Set<string>();
       this.levelSystem.generateLevel({
         seed: finalSeed,
@@ -676,6 +685,8 @@ export class Room {
     };
     const { justSettledIds } = this.physicsSystem.tickCollectables(collectableEntities, collectableCtx);
     this.itemSystem.broadcastPositionUpdates(collectableEntities, justSettledIds);
+    const pickupEntities = this.world.queryTag(TAG_COLLECTABLE);
+    this.itemSystem.processPickups(pickupEntities, activePlayers, now);
 
     // 5. Step Havok scene for future environment physics
     this.scene.render();
@@ -703,9 +714,7 @@ export class Room {
       voxelGrid: this.voxelGrid,
       rockColliderMeshes: this.levelSystem.getRockColliderMeshes(),
       octree: this.levelSystem.getOctree() ?? undefined,
-      groundY: GROUND_HEIGHT,
-      getRewindPosition: (entityId: number, timeMs: number) => this.playerHistory.getPosition(entityId, timeMs),
-      rewindTimeMs: shotServerTimeMs
+      groundY: GROUND_HEIGHT
     };
 
     const stepMs = FIXED_TIMESTEP * 1000;
@@ -713,7 +722,6 @@ export class Room {
     let currentTimeMs = shotServerTimeMs;
 
     while (remainingMs >= stepMs && projectileEntities.length > 0) {
-      ctx.rewindTimeMs = currentTimeMs;
       const result = this.projectileSystem.tick(projectileEntities, killableEntities, ctx);
 
       if (result.hits.length > 0) {

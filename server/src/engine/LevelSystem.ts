@@ -23,11 +23,13 @@ import {
   type TreeTransform,
   type RockColliderMesh,
   type RockTransform,
+  GRID_WIDTH,
+  VOXEL_WIDTH,
 } from '@spong/shared';
 import type { ItemSystem, ItemType } from './ItemSystem.js';
 
 const CELL_SIZE = 2.0;
-const HALF_EXTENT = 270; // 9-tile world: -270 to 270 in X/Z
+const HALF_EXTENT = (GRID_WIDTH * VOXEL_WIDTH) * 0.5; // Single-tile world bounds
 const TREE_SCALE = 0.4;
 const ROCK_SCALE = 0.5;
 

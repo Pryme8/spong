@@ -3,7 +3,7 @@
  * Uses shared VoxelGrid / MultiTileVoxelGrid. Room passes setters and LevelSystem so initializer stays decoupled.
  */
 
-import { VoxelGrid, generateMultiTileTerrain, type TerrainCollisionGrid } from '@spong/shared';
+import { VoxelGrid, type TerrainCollisionGrid } from '@spong/shared';
 import { ServerWaterLevelProvider } from '../WaterLevelProvider.js';
 import type { LevelSystem } from './LevelSystem.js';
 
@@ -39,7 +39,8 @@ export class RoomInitializer {
     const levelSystem = this.options.getLevelSystem();
     if (roomId.startsWith('level_')) {
       const seed = roomId.substring(6);
-      const voxelGrid = generateMultiTileTerrain(seed);
+      const voxelGrid = new VoxelGrid();
+      voxelGrid.generateFromNoise(seed);
       this.options.setVoxelGrid(voxelGrid);
       const waterLevelProvider = new ServerWaterLevelProvider(voxelGrid);
       this.options.setWaterLevelProvider(waterLevelProvider);

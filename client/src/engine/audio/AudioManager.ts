@@ -93,6 +93,14 @@ export class AudioManager {
   private listenerY = 0;
   private listenerZ = 0;
 
+  private toAudioPosition(x: number, y: number, z: number): { x: number; y: number; z: number } {
+    return { x, y, z: -z };
+  }
+
+  private toAudioDirection(x: number, y: number, z: number): { x: number; y: number; z: number } {
+    return { x, y, z: -z };
+  }
+
   private constructor() {
     this.ctx = new AudioContext();
     this.masterGain = this.ctx.createGain();
@@ -316,9 +324,10 @@ export class AudioManager {
     // This allows spatial sounds to be played as direct 2D (e.g. own hurt sound)
     // by simply omitting the position option.
     if (instance.pannerNode && options.position) {
-      instance.pannerNode.positionX.value = options.position.x;
-      instance.pannerNode.positionY.value = options.position.y;
-      instance.pannerNode.positionZ.value = options.position.z;
+      const pos = this.toAudioPosition(options.position.x, options.position.y, options.position.z);
+      instance.pannerNode.positionX.value = pos.x;
+      instance.pannerNode.positionY.value = pos.y;
+      instance.pannerNode.positionZ.value = pos.z;
       source.connect(instance.pannerNode);
     } else {
       source.connect(instance.gainNode);
@@ -370,15 +379,17 @@ export class AudioManager {
 
     const listener = this.ctx.listener;
     if (listener.positionX) {
-      listener.positionX.value = x;
-      listener.positionY.value = y;
-      listener.positionZ.value = z;
+      const pos = this.toAudioPosition(x, y, z);
+      listener.positionX.value = pos.x;
+      listener.positionY.value = pos.y;
+      listener.positionZ.value = pos.z;
     }
 
     if (forwardX !== undefined && listener.forwardX) {
-      listener.forwardX.value = forwardX;
-      listener.forwardY.value = forwardY || 0;
-      listener.forwardZ.value = forwardZ || 0;
+      const dir = this.toAudioDirection(forwardX, forwardY || 0, forwardZ || 0);
+      listener.forwardX.value = dir.x;
+      listener.forwardY.value = dir.y;
+      listener.forwardZ.value = dir.z;
     }
 
     if (listener.upX) {
@@ -484,9 +495,10 @@ export class AudioManager {
     for (const soundDef of this.sounds.values()) {
       for (const instance of soundDef.instances) {
         if (instance.instanceId === instanceId && instance.inUse && instance.pannerNode) {
-          instance.pannerNode.positionX.value = x;
-          instance.pannerNode.positionY.value = y;
-          instance.pannerNode.positionZ.value = z;
+          const pos = this.toAudioPosition(x, y, z);
+          instance.pannerNode.positionX.value = pos.x;
+          instance.pannerNode.positionY.value = pos.y;
+          instance.pannerNode.positionZ.value = pos.z;
           return;
         }
       }
