@@ -1,5 +1,5 @@
 import { ref, computed, Ref, watch } from 'vue';
-import type { Engine, Scene } from '@babylonjs/core';
+import type { AbstractMesh, Engine, Scene } from '@babylonjs/core';
 import { MeshBuilder, StandardMaterial, Color3, Vector3, PostProcess, Effect, DirectionalLight, HemisphericLight } from '@babylonjs/core';
 import {
   FIXED_TIMESTEP,
@@ -32,6 +32,7 @@ import { LevelBushManager } from '../engine/managers/LevelBushManager';
 import { LevelWaterManager } from '../engine/managers/LevelWaterManager';
 import { TimeManager } from '../engine/core/TimeManager';
 import { CloudPostProcess } from '../engine/rendering/postprocess/CloudPostProcess';
+import { ItemHoverMask } from '../engine/rendering/ItemHoverMask';
 import { LevelCloudManager } from '../engine/managers/LevelCloudManager';
 import { FinalPostProcess } from '../engine/rendering/postprocess/FinalPostProcess';
 import { SkyPickSphere } from '../engine/setup/SkyPickSphere';
@@ -160,6 +161,7 @@ export function useGameSession() {
   let bloodSplatterEffect: BloodSplatterEffect | null = null;
   let bloodSplatterPost: PostProcess | null = null;
   let damagePopupSystem: DamagePopupSystem | null = null;
+  let hoverMask: ItemHoverMask | null = null;
   let currentTreeIndex = -1;
   let currentBushIndex = -1;
   let wasInLeavesLastFrame = false;
@@ -176,6 +178,8 @@ export function useGameSession() {
   let pendingEntityId: number | null = null;
   let spawnPlayerFn: ((entityId: number) => void) | null = null;
   let pendingEquippedWeapon: { itemType: string; ammoCurrent?: number; ammoCapacity?: number } | null = null;
+  const hoveredItemId = ref<number | null>(null);
+  let hoveredItemMesh: import('@babylonjs/core').AbstractMesh | null = null;
   const loadingSecondsRemaining = ref(0);
   const loadingReadyPlayers = ref<string[]>([]);
   const loadingTotalPlayers = ref(0);
@@ -334,6 +338,9 @@ export function useGameSession() {
         await cloudManager.initialize();
       } catch (error) {
       }
+
+      hoverMask = new ItemHoverMask(scene, cameraController.getCamera());
+      cloudPostProcess?.setHoverMaskTexture(hoverMask.getTexture());
       
       // Blood splatter + camera-in-leaves check only (no leaf overlay effect; foliage uses backFaceCulling on materials)
       await setupGamePostProcesses(scene, cameraController.getCamera());
@@ -1322,6 +1329,22 @@ export function useGameSession() {
           }
         }
       });
+
+      // Pickup handler (F key)
+      inputManager.onPickup(() => {
+        if (!networkClient || !scene || !cameraController || !myTransform.value) return;
+
+        const itemId = hoveredItemId.value;
+          if (itemId === null) return;
+
+        const node = itemSystem.getItemNode(itemId);
+        if (!node) {
+          console.log('[pickup] blocked: node missing', { itemId });
+          return;
+        }        
+ 
+        networkClient.sendItemPickupRequest(itemId);
+      });
       
       // Reload handler
       inputManager.onReload(() => {
@@ -1392,6 +1415,31 @@ export function useGameSession() {
           },
           // Per-frame updates (timers, UI, etc.)
           onVariableTick: (deltaTime) => {
+            if (scene && cameraController && myTransform.value) {
+              const camera = cameraController.getCamera();
+              const ray = camera.getForwardRay(3);
+              const pick = scene.pickWithRay(ray, (mesh) => itemSystem.isItemMesh(mesh));
+
+              let nextHovered: number | null = null;
+              let nextHoveredMesh: AbstractMesh | null = null;
+              if (pick?.hit && pick.pickedMesh) {
+                const itemId = itemSystem.getItemIdFromMesh(pick.pickedMesh);
+                nextHoveredMesh = pick.pickedMesh;
+                const node = itemId !== null ? itemSystem.getItemNode(itemId) : null;
+                if (itemId !== null && node) {   
+                  nextHovered = itemId;
+                }
+              }
+
+              if (hoveredItemId.value !== nextHovered) {
+                hoveredItemId.value = nextHovered;
+              }
+              if (hoveredItemMesh !== nextHoveredMesh) {
+                hoveredItemMesh = nextHoveredMesh;
+                hoverMask?.setHoveredMesh(nextHoveredMesh);
+              }
+            }
+
             if (footstepManager && myEntityId.value !== null && myTransform.value) {
               const state = myTransform.value.getState();
               footstepManager.updateLocal(
@@ -1535,6 +1583,7 @@ export function useGameSession() {
     cloudPostProcess?.dispose();
     finalPostProcess?.dispose();
     leafTriggerPost?.dispose();
+    hoverMask?.dispose();
     leafEffect = null;
     bloodSplatterPost?.dispose();
     bloodSplatterEffect?.dispose();

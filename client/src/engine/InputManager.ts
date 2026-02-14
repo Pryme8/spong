@@ -50,7 +50,7 @@ export class InputManager {
           this.onDropCallback?.();
           return;
         }
-        if (key === 'e') {
+        if (key === 'f') {
           kbInfo.event.preventDefault();
           this.onPickupCallback?.();
           return;

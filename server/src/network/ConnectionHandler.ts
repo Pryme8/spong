@@ -7,6 +7,8 @@ export interface ConnectionState {
   roomId?: string;
   entityId?: number;
   isAlive: boolean;
+  clientTimeOffsetMs?: number;
+  lastClientTimestampMs?: number;
 }
 
 export type MessageHandler = (conn: ConnectionState, data: any) => void | Promise<void>;
@@ -86,7 +88,6 @@ export class ConnectionHandler {
     if (data.length === 0) return;
 
     const opcode = data[0];
-
     // Check if it's a binary message (high-frequency)
     if (opcode <= 0x0f) {
       const handler = this.binaryHandlers.get(opcode);

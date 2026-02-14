@@ -22,6 +22,7 @@ import {
   Scene,
   Camera,
   RenderTargetTexture,
+  DynamicTexture,
   PostProcess,
   Effect,
   AbstractMesh,
@@ -40,6 +41,8 @@ export class CloudPostProcess {
   private originalClearColor: Color4;
   private originalAmbientColor: Color3;
   private blackMat: StandardMaterial;
+  private hoverMaskTexture: RenderTargetTexture | null = null;
+  private hoverMaskFallback: DynamicTexture;
   private meshAddedObserver: Observer<AbstractMesh> | null = null;
   private meshRemovedObserver: Observer<AbstractMesh> | null = null;
   private overscan: number;
@@ -69,6 +72,12 @@ export class CloudPostProcess {
     this.blackMat.emissiveColor = new Color3(0, 0, 0);
     this.blackMat.freeze();
 
+    this.hoverMaskFallback = new DynamicTexture('hoverMaskFallback', { width: 1, height: 1 }, scene, false);
+    const fallbackCtx = this.hoverMaskFallback.getContext();
+    fallbackCtx.fillStyle = '#000000';
+    fallbackCtx.fillRect(0, 0, 1, 1);
+    this.hoverMaskFallback.update();
+
     // ── 1. Mask RTT ─────────────────────────────────────────
     this.maskRT = new RenderTargetTexture('maskRT', size, scene);
     this.maskRT.activeCamera = camera;
@@ -86,6 +95,9 @@ export class CloudPostProcess {
 
     // White clear = sky; black ambient so geometry is solid black in mask
     this.maskRT.onBeforeRenderObservable.add(() => {
+      if (this.maskRT.renderList) {
+        this.maskRT.renderList = this.maskRT.renderList.filter(mesh => !mesh.isDisposed());
+      }
       scene.clearColor = new Color4(1, 1, 1, 1);
       scene.ambientColor = new Color3(0, 0, 0);
     });
@@ -122,6 +134,8 @@ export class CloudPostProcess {
       uniform sampler2D textureSampler;
       uniform sampler2D cloudSampler;
       uniform sampler2D maskSampler;
+      uniform sampler2D hoverMaskSampler;
+      uniform vec2 hoverMaskTexel;
       uniform float blurAmount;
       uniform float cloudAlpha;
       uniform float time;
@@ -253,8 +267,21 @@ export class CloudPostProcess {
 
         // Cloud alpha modulated by mask and global alpha
         float alpha = cloudCol.a * mask * cloudAlpha;
+        vec3 cloudMix = mix(sceneCol.rgb, cloudCol.rgb, alpha);
 
-        gl_FragColor = vec4(mix(sceneCol.rgb, cloudCol.rgb, alpha), 1.0);
+        float hoverMask = 0.0;
+        if (hoverMaskTexel.x > 0.0 && hoverMaskTexel.y > 0.0) {
+          vec2 o = hoverMaskTexel * 1.5;
+          hoverMask = texture2D(hoverMaskSampler, vUV).r * 0.4;
+          hoverMask += texture2D(hoverMaskSampler, vUV + vec2( o.x, 0.0)).r * 0.15;
+          hoverMask += texture2D(hoverMaskSampler, vUV + vec2(-o.x, 0.0)).r * 0.15;
+          hoverMask += texture2D(hoverMaskSampler, vUV + vec2(0.0,  o.y)).r * 0.15;
+          hoverMask += texture2D(hoverMaskSampler, vUV + vec2(0.0, -o.y)).r * 0.15;
+        }
+
+        vec3 hoverColor = vec3(1.0, 0.9, 0.2);
+        vec3 finalCol = mix(cloudMix, hoverColor, clamp(hoverMask * 0.2, 0.0, 1.0));
+        gl_FragColor = vec4(finalCol, 1.0);
       }
     `;
 
@@ -262,7 +289,7 @@ export class CloudPostProcess {
       'cloudComposite',
       'cloudComposite',
       ['blurAmount', 'cloudAlpha', 'time', 'windDirection', 'cloudUVScale', 'cloudUVOffset'],
-      ['cloudSampler', 'maskSampler'],
+      ['cloudSampler', 'maskSampler', 'hoverMaskSampler'],
       1.0,
       camera
     );
@@ -282,7 +309,18 @@ export class CloudPostProcess {
       const offsetY = (this.overscan / 2) / this.cloudHeight;
       effect.setFloat2('cloudUVScale', scaleX, scaleY);
       effect.setFloat2('cloudUVOffset', offsetX, offsetY);
+
+      const hoverTex = this.hoverMaskTexture ?? this.hoverMaskFallback;
+      effect.setTexture('hoverMaskSampler', hoverTex);
+      const size = hoverTex.getSize();
+      const texelX = size.width > 0 ? 1 / size.width : 0;
+      const texelY = size.height > 0 ? 1 / size.height : 0;
+      effect.setFloat2('hoverMaskTexel', texelX, texelY);
     };
+  }
+
+  setHoverMaskTexture(texture: RenderTargetTexture | null): void {
+    this.hoverMaskTexture = texture;
   }
 
   /** Add a mesh to the mask RTT with the black override material. */
@@ -348,5 +386,6 @@ export class CloudPostProcess {
     this.cloudRT.dispose();
     this.compositePass.dispose();
     this.blackMat.dispose();
+    this.hoverMaskFallback.dispose();
   }
 }

@@ -1,4 +1,4 @@
-import type { Scene, TransformNode } from '@babylonjs/core';
+import type { AbstractMesh, Scene, TransformNode } from '@babylonjs/core';
 import type { ItemSpawnMessage, ItemUpdateMessage, ItemPickupMessage, VoxelGrid } from '@spong/shared';
 import type { WeaponSystem, WeaponType } from './WeaponSystem';
 import type { LocalTransform } from './LocalTransform';
@@ -25,6 +25,20 @@ export class ItemSystem {
   private itemNodes = new Map<number, TransformNode>(); // Tracks spawned items
   private isTossingItem = false;
   private tossingItemNode: TransformNode | null = null;
+
+  getItemNode(entityId: number): TransformNode | null {
+    return this.itemNodes.get(entityId) ?? null;
+  }
+
+  isItemMesh(mesh: AbstractMesh): boolean {
+    let n: TransformNode | null = mesh as TransformNode;
+  
+    return mesh.metadata?.itemEntityId !== undefined || mesh.name  === 'tossingItem' || mesh.parent?.metadata?.itemEntityId !== undefined;
+  }
+
+  getItemIdFromMesh(mesh: AbstractMesh): number | null {
+    return mesh.parent?.metadata?.itemEntityId ?? mesh.metadata?.itemEntityId;
+  }
 
   /**
    * Handle item spawn from server
@@ -77,6 +91,10 @@ export class ItemSystem {
     node.position.set(payload.posX, payload.posY, payload.posZ);
     this.itemNodes.set(payload.entityId, node);
 
+    node.getChildMeshes().forEach(m => {
+      m.isPickable = true;
+    });
+
     // Bobbing animation - float up and down so it's easy to spot
     const baseY = payload.posY;
     const bobObserver = scene.onBeforeRenderObservable.add(() => {
@@ -94,7 +112,7 @@ export class ItemSystem {
       // Rotating animation: constant spin
       node.rotation.y = time * 1.5; // Full rotation every ~4 seconds
     });
-    node.metadata = { bobObserver, settled: false, settledY: baseY };
+    node.metadata = { bobObserver, settled: false, settledY: baseY, itemEntityId: payload.entityId };
   }
 
   /**

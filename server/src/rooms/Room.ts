@@ -11,6 +11,7 @@ import { CombatSystem } from '../engine/CombatSystem.js';
 import { GameStartSystem } from '../engine/GameStartSystem.js';
 import { PlayerStateSystem } from '../engine/PlayerStateSystem.js';
 import { TransformBroadcastSystem } from '../engine/TransformBroadcastSystem.js';
+import { PlayerHistory } from '../engine/PlayerHistory.js';
 import { JoinSyncSystem } from '../engine/JoinSyncSystem.js';
 import { RoomInitializer } from '../engine/RoomInitializer.js';
 import { ShootSystem } from '../engine/ShootSystem.js';
@@ -40,6 +41,7 @@ import {
   LadderPlaceMessage,
   LadderDestroyMessage,
   ProjectileSpawnData,
+  FIXED_TIMESTEP,
   generateMultiTileTerrain,
   DummySpawnMessage,
   COMP_COLLECTED,
@@ -85,6 +87,8 @@ export class Room {
   private playerStateSystem!: PlayerStateSystem;
   private transformBroadcastSystem!: TransformBroadcastSystem;
   private joinSyncSystem!: JoinSyncSystem;
+  private readonly playerHistory = new PlayerHistory(250);
+  private readonly maxRewindMs = 150;
 
   private physicsRate = 60;
   private broadcastRate = 30;
@@ -379,9 +383,15 @@ export class Room {
     aimDirZ: number,
     clientSpawnX: number,
     clientSpawnY: number,
-    clientSpawnZ: number
+    clientSpawnZ: number,
+    shotServerTimeMs: number
   ): ProjectileSpawnData | ProjectileSpawnData[] | null {
-    return this.shootSystem.handleShootRequest(connectionId, aimDirX, aimDirY, aimDirZ, clientSpawnX, clientSpawnY, clientSpawnZ);
+    const result = this.shootSystem.handleShootRequest(connectionId, aimDirX, aimDirY, aimDirZ, clientSpawnX, clientSpawnY, clientSpawnZ);
+    if (!result) return null;
+
+    this.catchUpProjectiles(result, shotServerTimeMs);
+
+    return result;
   }
 
   handleReloadRequest(connectionId: string): void {
@@ -403,6 +413,28 @@ export class Room {
 
     // Player is initiating drop - client will animate and send ItemTossLand when done
     // For now, just mark that a drop is pending (client handles visual)
+  }
+
+  /** Handle explicit item pickup request from player. */
+  handleItemPickupRequest(connectionId: string, itemId?: number | string): void {
+    let resolvedId: number | null = null;
+    if (typeof itemId === 'number') {
+      resolvedId = itemId;
+    } else if (typeof itemId === 'string') {
+      const parsed = Number.parseInt(itemId, 10);
+      if (!Number.isNaN(parsed)) resolvedId = parsed;
+    }
+
+    if (resolvedId === null) return;
+
+    const player = this.players.get(connectionId);
+    if (!player) return;
+
+    const playerEntity = this.world.getEntity(player.entityId);
+    if (!playerEntity) return;
+
+    const now = Date.now() * 0.001;
+    this.itemSystem.handlePickupRequest(playerEntity, resolvedId, now);
   }
 
   /** Handle item toss landing (called when client animation completes). */
@@ -593,6 +625,7 @@ export class Room {
 
   private physicsTick() {
     const now = Date.now() * 0.001;
+    const nowMs = Date.now();
     const playerEntities = this.world.query(COMP_PLAYER);
     const activePlayers = playerEntities.filter(entity => !entity.hasTag(TAG_DUMMY));
 
@@ -615,8 +648,10 @@ export class Room {
     this.combatSystem.tickDrowning(activePlayers, now);
     this.playerStateSystem.tickReload(activePlayers, now);
 
-    const projectileEntities = this.world.query(COMP_PROJECTILE);
     const killableEntities = this.world.queryTag(TAG_KILLABLE);
+    this.playerHistory.record(killableEntities, nowMs);
+
+    const projectileEntities = this.world.query(COMP_PROJECTILE);
     const projectileResult = this.projectileSystem.tick(projectileEntities, killableEntities, {
       voxelGrid: this.voxelGrid,
       rockColliderMeshes: this.levelSystem.getRockColliderMeshes(),
@@ -641,10 +676,68 @@ export class Room {
     };
     const { justSettledIds } = this.physicsSystem.tickCollectables(collectableEntities, collectableCtx);
     this.itemSystem.broadcastPositionUpdates(collectableEntities, justSettledIds);
-    this.itemSystem.processPickups(collectableEntities, playerEntities, now);
 
     // 5. Step Havok scene for future environment physics
     this.scene.render();
+  }
+
+  private catchUpProjectiles(
+    spawnData: ProjectileSpawnData | ProjectileSpawnData[],
+    shotServerTimeMs: number
+  ): void {
+    const nowMs = Date.now();
+    const lagMs = Math.min(this.maxRewindMs, Math.max(0, nowMs - shotServerTimeMs));
+    if (lagMs <= 0) return;
+
+    const spawnArray = Array.isArray(spawnData) ? spawnData : [spawnData];
+    const projectileEntities: Entity[] = [];
+    for (const data of spawnArray) {
+      const entity = this.world.getEntity(data.entityId);
+      if (entity) projectileEntities.push(entity);
+    }
+
+    if (projectileEntities.length === 0) return;
+
+    const killableEntities = this.world.queryTag(TAG_KILLABLE);
+    const ctx = {
+      voxelGrid: this.voxelGrid,
+      rockColliderMeshes: this.levelSystem.getRockColliderMeshes(),
+      octree: this.levelSystem.getOctree() ?? undefined,
+      groundY: GROUND_HEIGHT,
+      getRewindPosition: (entityId: number, timeMs: number) => this.playerHistory.getPosition(entityId, timeMs),
+      rewindTimeMs: shotServerTimeMs
+    };
+
+    const stepMs = FIXED_TIMESTEP * 1000;
+    let remainingMs = lagMs;
+    let currentTimeMs = shotServerTimeMs;
+
+    while (remainingMs >= stepMs && projectileEntities.length > 0) {
+      ctx.rewindTimeMs = currentTimeMs;
+      const result = this.projectileSystem.tick(projectileEntities, killableEntities, ctx);
+
+      if (result.hits.length > 0) {
+        this.combatSystem.processProjectileHits(result.hits, killableEntities);
+      }
+
+      if (result.toDestroy.length > 0) {
+        for (const id of result.toDestroy) {
+          const buffer = encodeProjectileDestroy(Opcode.ProjectileDestroy, { entityId: id });
+          this.connectionHandler.broadcast(this.getAllConnections(), buffer);
+          this.world.destroyEntity(id);
+        }
+
+        for (let i = projectileEntities.length - 1; i >= 0; i--) {
+          const entity = projectileEntities[i];
+          if (result.toDestroy.includes(entity.id)) {
+            projectileEntities.splice(i, 1);
+          }
+        }
+      }
+
+      currentTimeMs += stepMs;
+      remainingMs -= stepMs;
+    }
   }
 
   private broadcastTransforms(): void {

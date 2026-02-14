@@ -25,6 +25,7 @@ export enum Opcode {
   PlayerLeft = 0x21,
   EntityDamage = 0x22,
   EntityDeath = 0x23,
+  ItemPickupRequest = 0x2F,
   ItemSpawn = 0x30,
   ItemUpdate = 0x31,
   ItemPickup = 0x32,
@@ -228,6 +229,11 @@ export interface ItemUpdateMessage {
   posY: number;
   posZ: number;
   settled: boolean; // true = on ground, no more updates
+}
+
+/** Client -> Server: request to pick up a specific item. */
+export interface ItemPickupRequestMessage {
+  entityId: number;
 }
 
 /** Server -> Clients: a player picked up an item. */

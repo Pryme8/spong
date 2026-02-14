@@ -51,7 +51,7 @@ import {
 } from '@spong/shared';
 
 const PICKUP_GRID_CELL_SIZE = 2.0;
-const PICKUP_RANGE = 1.5;
+const PICKUP_RANGE = 0.75;
 
 export type ItemType = 'pistol' | 'smg' | 'lmg' | 'shotgun' | 'doublebarrel' | 'sniper' | 'assault' | 'dmr' | 'rocket' | 'hammer' |
   'medic_pack' | 'large_medic_pack' | 'apple' | 'pill_bottle' | 'kevlar' | 'helmet';
@@ -295,6 +295,33 @@ export class ItemSystem {
 
   upsertItemPosition(entityId: number, worldX: number, worldZ: number): void {
     this.upsertPickupGrid(entityId, worldX, worldZ);
+  }
+
+  handlePickupRequest(playerEntity: Entity, itemId: number, now: number): void {
+    const pc = playerEntity.get<PlayerComponent>(COMP_PLAYER);
+    if (!pc) return;
+
+    const itemEntity = this.world.getEntity(itemId);
+    if (!itemEntity || !itemEntity.hasTag(TAG_COLLECTABLE)) return;
+
+    const itemPhysics = itemEntity.get<PhysicsComponent>(COMP_PHYSICS);
+    if (!itemPhysics) return;
+
+    const pickupEffect = itemEntity.get<PickupEffectComponent>(COMP_PICKUP_EFFECT);
+    const collected = playerEntity.get<CollectedComponent>(COMP_COLLECTED);
+
+    if (!pickupEffect && collected && collected.items.length > 0) {
+      const playerPhysics = playerEntity.get<PhysicsComponent>(COMP_PHYSICS);
+      if (playerPhysics) {
+        this.dropWeaponAtPosition(playerEntity, playerPhysics.posX, playerPhysics.posY, playerPhysics.posZ);
+      }
+    }
+
+    if (pickupEffect) {
+      this.applyConsumablePickup(playerEntity, { itemId, playerId: playerEntity.id }, pickupEffect, now);
+    } else {
+      this.applyWeaponPickup(playerEntity, itemEntity, { itemId, playerId: playerEntity.id });
+    }
   }
 
   processPickups(

@@ -286,6 +286,14 @@ export class NetworkClient {
     this.sendLow(Opcode.ItemDrop, {});
   }
 
+  sendItemPickupRequest(entityId: number) {
+    console.log('[client] sendItemPickupRequest', { entityId, ready: this.isConnected });
+    if (!this.isConnected) {
+      return;
+    }
+    this.sendLow(Opcode.ItemPickupRequest, { entityId });
+  }
+
   sendItemTossLand(posX: number, posY: number, posZ: number) {
     this.sendLow(Opcode.ItemTossLand, { posX, posY, posZ });
   }

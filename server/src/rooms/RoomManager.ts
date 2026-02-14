@@ -49,6 +49,10 @@ export class RoomManager {
       this.handleItemDrop(conn, _data);
     });
 
+    this.connectionHandler.registerMessageHandler(Opcode.ItemPickupRequest, (conn, data) => {
+      this.handleItemPickupRequest(conn, data);
+    });
+
     this.connectionHandler.registerMessageHandler(Opcode.ItemTossLand, (conn, data) => {
       this.handleItemTossLand(conn, data);
     });
@@ -211,6 +215,18 @@ export class RoomManager {
     if (!room) return;
     
     const input = decodeInput(buffer);
+    if (input.timestamp > 0) {
+      const nowMs = Date.now();
+      const offset = nowMs - input.timestamp;
+      if (Number.isFinite(offset)) {
+        if (conn.clientTimeOffsetMs === undefined) {
+          conn.clientTimeOffsetMs = offset;
+        } else {
+          conn.clientTimeOffsetMs = conn.clientTimeOffsetMs * 0.9 + offset * 0.1;
+        }
+        conn.lastClientTimestampMs = input.timestamp;
+      }
+    }
     room.applyInput(conn.id, input);
   }
 
@@ -222,12 +238,17 @@ export class RoomManager {
 
     // Decode the aim direction and spawn position from the shoot packet
     const shootData = decodeShoot(buffer);
+    const nowMs = Date.now();
+    const clientShotTimeMs = shootData.timestamp;
+    const offsetMs = conn.clientTimeOffsetMs;
+    const shotServerTimeMs = offsetMs !== undefined ? clientShotTimeMs + offsetMs : nowMs;
 
     // Spawn projectile(s) using the client-provided aim direction and spawn position
     const spawnData = room.spawnProjectile(
       conn.id, 
       shootData.dirX, shootData.dirY, shootData.dirZ,
-      shootData.spawnX, shootData.spawnY, shootData.spawnZ
+      shootData.spawnX, shootData.spawnY, shootData.spawnZ,
+      shotServerTimeMs
     );
     if (!spawnData) return;
 
@@ -259,6 +280,15 @@ export class RoomManager {
     if (!room) return;
 
     room.handleItemDrop(conn.id);
+  }
+
+  private handleItemPickupRequest(conn: ConnectionState, data: any) {
+    if (!conn.roomId || conn.entityId === undefined) return;
+
+    const room = this.rooms.get(conn.roomId);
+    if (!room) return;
+
+    room.handleItemPickupRequest(conn.id, data?.entityId);
   }
 
   private handleItemTossLand(conn: ConnectionState, data: any) {

@@ -48,6 +48,8 @@ export interface ProjectileCollisionContext {
     queryRay(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, len: number): Array<{ type: string; data: unknown }>;
   };
   groundY?: number;
+  getRewindPosition?: (entityId: number, timeMs: number) => { x: number; y: number; z: number } | null;
+  rewindTimeMs?: number;
 }
 
 export interface ProjectileTerrainHit {
@@ -320,13 +322,17 @@ export class ProjectileSystem {
           const pc = targetEntity.get<PlayerComponent>(COMP_PLAYER);
           if (!pc) continue;
 
-          const distX = proj.posX - pc.state.posX;
-          const distZ = proj.posZ - pc.state.posZ;
-          if (distX * distX + distZ * distZ > PLAYER_CHECK_DISTANCE * PLAYER_CHECK_DISTANCE) continue;
+          let posOverride: { x: number; y: number; z: number } | null = null;
+          if (ctx.getRewindPosition && typeof ctx.rewindTimeMs === 'number') {
+            posOverride = ctx.getRewindPosition(targetEntity.id, ctx.rewindTimeMs);
+          }
 
-          const bx = pc.state.posX;
-          const by = pc.state.posY;
-          const bz = pc.state.posZ;
+          const bx = posOverride ? posOverride.x : pc.state.posX;
+          const by = posOverride ? posOverride.y : pc.state.posY;
+          const bz = posOverride ? posOverride.z : pc.state.posZ;
+          const distX = proj.posX - bx;
+          const distZ = proj.posZ - bz;
+          if (distX * distX + distZ * distZ > PLAYER_CHECK_DISTANCE * PLAYER_CHECK_DISTANCE) continue;
           const isDummyTarget = targetEntity.hasTag(TAG_DUMMY);
           const bodyCenterY = isDummyTarget ? by + PLAYER_HITBOX_CENTER_Y : by;
           const headCenterY = isDummyTarget ? by + PLAYER_HITBOX_CENTER_Y + 0.8 : by + 0.8;
@@ -346,16 +352,6 @@ export class ProjectileSystem {
             bx, bodyCenterY, bz,
             PLAYER_HITBOX_HALF
           );
-          console.log('[raycast]', {
-            targetEntityId: targetEntity.id,
-            rayOrigin: [stepStartX, stepStartY, stepStartZ],
-            rayDir: [rayDirNormX, rayDirNormY, rayDirNormZ],
-            rayLength,
-            headCenter: [bx, headCenterY, bz],
-            bodyCenter: [bx, bodyCenterY, bz],
-            head: { hit: headResult.hit, distance: headResult.distance },
-            body: { hit: bodyResult.hit, distance: bodyResult.distance }
-          });
           if (headResult.hit) {
             hits.push({
               kind: 'entity',

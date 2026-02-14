@@ -19,7 +19,6 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     connectionHandler.handleConnection(socket);
   });
 
-  fastify.log.info('WebSocket plugin registered');
 };
 
 export const websocketPlugin = fp(plugin);

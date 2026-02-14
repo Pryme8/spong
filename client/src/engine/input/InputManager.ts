@@ -53,8 +53,9 @@ export class InputManager {
           this.onDropCallback?.();
           return;
         }
-        if (key === 'e') {
+        if (key === 'f') {
           kbInfo.event.preventDefault();
+          console.log('[input] pickup keydown', { hasHandler: !!this.onPickupCallback });
           this.onPickupCallback?.();
           return;
         }
@@ -168,6 +169,7 @@ export class InputManager {
   }
 
   onPickup(callback: PickupCallback) {
+    console.log('[input] pickup handler set');
     this.onPickupCallback = callback;
   }
 
