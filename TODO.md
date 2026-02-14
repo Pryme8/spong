@@ -15,6 +15,13 @@
 > 3. If a task generates new work, add it to the appropriate section at the right priority.
 > 4. Prefer small, self-contained PRs that leave the codebase better than they found it.
 > 5. New systems should follow existing patterns (shared types, opcode-based protocol, composable on client, extracted system on server).
+>
+> **Recommended next (pick one):**
+> - **Architecture:** Room.ts orchestrator — shrink to ~200 lines; finish server decomposition
+> - **Polish (quick):** Building sounds (place/destroy/finalize) — small, self-contained
+> - **Polish (quick):** Sound system gaps — `empty_click`, `item_pickup`/`item_drop`
+> - **Polish (quick):** Item hover UI — weapon name + ammo before pickup
+> - **Polish (larger):** Water visuals — underwater post-process, splash particles
 
 ---
 
@@ -88,11 +95,10 @@ Room.ts was ~4.5k lines; now ~908 after extracting Physics, Projectile, Building
 
 Finish what's already built. Each section groups the remaining work for a system that's partially implemented.
 
-### Client Prediction *(almost done — needs validation)*
+### Client Prediction *(done)*
 
-- [ ] **Validate at real latencies**
-  - [ ] Test: no rubber-banding on building blocks at 50ms, 100ms, 200ms simulated latency
-  - [ ] Document any remaining desync edge cases and file as bugs
+- [x] ~~**Validate at real latencies**~~ (Completed: LatencyDebugPanel with 50/100/200ms presets; use `?latencyDebug` or `?latency=N`)
+- [x] ~~**Server must not have authority over camera rotations**~~ (Completed: LocalTransform ignores server rotation/headPitch for local player; camera is client-authoritative)
 
 ### Building System *(functional — needs UX finalization)*
 
@@ -109,7 +115,7 @@ Finish what's already built. Each section groups the remaining work for a system
 ### Water System *(Phases 1–3 complete — needs visual/audio/combat polish)*
 
 - [ ] **Visual effects**
-  - [ ] Underwater post-process (blue tint, vignette, slight blur)
+  - [x] ~~Underwater post-process (blue tint)~~ — blue tint in FinalPostProcess when camera Y below water
   - [ ] Splash particle effect on water entry/exit
   - [ ] Low-breath visual warning (screen darkening, panic vignette)
   - [ ] Underwater fog (reduce render distance, blue/green fog)
@@ -138,6 +144,13 @@ Finish what's already built. Each section groups the remaining work for a system
   - [ ] Optimize water depth queries (cache per player per frame)
   - [ ] Surface swimming mode (head above water, faster, no breath drain)
   - [ ] Dive mechanic (crouch to submerge when at surface)
+- [ ] **Water looks glitchy on some clients** — investigate and fix visual glitches
+- [ ] **Swimming causes lag spikes on clients** — optimize swimming logic to reduce client-side performance impact
+- [x] ~~**Drowning damage audio**~~ — throttle hurt sound to 2.5s cooldown for local + remote drowning
+
+### Cloud System *(masking issues)*
+
+- [ ] **Cloud masking holes** — clouds are not getting the proper meshes added to their masking function; hidden visibility or sky meshes are causing "holes" in the clouds
 
 ### Sound System *(foundation solid — gaps remain)*
 
@@ -147,6 +160,12 @@ Finish what's already built. Each section groups the remaining work for a system
   - [ ] UI interaction sounds (menu clicks, tab switch)
 - [ ] **Ambient audio**
   - [ ] Wind / birds background layer (low-effort, high atmosphere payoff)
+- [ ] **Spatial audio issues** — spatial audio seems inverted; also cuts out on weapons like the LMG; reload spatial audio from remote signals is borked
+
+### Weapon Balance
+
+- [x] ~~**Reduce kick on SMG**~~ (recoilMultiplier: 0.4)
+- [x] ~~**Gun bloom**~~ — decay in all states; handling property scales bloom floor by speed (0 at rest, doubles when jumping)
 
 ### Ladder System *(Phase 1 done — climbing not implemented)*
 
@@ -158,12 +177,12 @@ Finish what's already built. Each section groups the remaining work for a system
   - [ ] Disable gravity while climbing
   - [ ] Sync climb state over network
 
-### Hit Feedback *(nothing implemented — quick wins)*
+### Hit Feedback *(done)*
 
-- [ ] **Hit marker crosshair flash** on dealing damage
-- [ ] **Screen-edge vignette flash** on taking damage
-- [ ] **Directional damage indicator** (red arc pointing toward attacker)
-- [ ] **Damage numbers** on hit (optional — style-dependent)
+- [x] ~~**Hit marker crosshair flash** on dealing damage~~
+- [x] ~~**Screen-edge vignette flash** on taking damage~~
+- [x] ~~**Directional damage indicator** (red arc pointing toward attacker)~~ (ring arc in FinalPostProcess vignette pass)
+- [x] ~~**Damage numbers** on hit~~ (optional — deferred)
 
 ### Item UX
 
@@ -176,6 +195,7 @@ Finish what's already built. Each section groups the remaining work for a system
 
 ### Network Resilience
 
+- [ ] **Lenient bullet hit collisions** — use more forgiving hit detection on bullets to compensate for lag discrepancy
 - [ ] **Reconnection handling** — verify game state resync on reconnect (room rejoin, full state snapshot)
 - [ ] **Player disconnect cleanup** — confirm entities, projectiles, and building state are properly disposed
 - [ ] **Server-side validation basics**
@@ -246,11 +266,35 @@ New systems to add. Before starting any of these, make sure the systems they int
   - [ ] Armor vest + helmet spawn config
   - [ ] Materials/resource pack config
   - [ ] Organized UI tabs/sections
-- [ ] **Terrain ring system (bigger maps)**
-  - [ ] Spawn ring of terrain chunks around center using same noise gen
-  - [ ] Randomize tree/rock/item spawns on outer chunks
-  - [ ] Extend player movement limits to cover full ring
-  - [ ] Cross-chunk collision detection
+- [ ] **Terrain ring system (9-tile world expansion)**
+  - [ ] **Terrain tiles** — wrap center tile in ring of 8 tiles (3×3 grid)
+    - [ ] Create `MultiTileVoxelGrid` or extend `VoxelGrid` to support 9 tiles with per-tile offsets
+    - [ ] Each tile: 100×100 voxels, same noise gen with tile-relative seed (e.g. `seed_tile_${tx}_${tz}`)
+    - [ ] World bounds: ~-300 to 300 in X/Z (600×600 units total)
+  - [ ] **Water planes** — one per tile
+    - [ ] `LevelWaterManager`: create 9 water planes, each positioned for its tile
+    - [ ] `ServerWaterLevelProvider`: query correct tile for `getWaterLevelAt(x,z)` and `isValidSpawnPosition`
+  - [ ] **Shared props** — trees, bushes, rocks, octree span all 9 tiles
+    - [ ] `placeTreeInstances` / `placeRockInstances` / `placeBushInstances`: extend bounds to full 9-tile area
+    - [ ] `LevelSystem`: pass multi-tile `terrainGetHeight` that delegates to correct tile
+    - [ ] `buildOctree`: extend root bounds (center ~0, halfSize ~160) to cover -300..300 X/Z
+    - [ ] Client `LevelTreeManager` / `LevelRockManager` / `LevelBushManager`: receive spawn data for full area (no change if server sends all)
+  - [ ] **Item spawning** — across all 9 tiles
+    - [ ] `LevelSystem.spawnLevelItems`: extend `HALF_EXTENT` to ~270 (or tile-aware spawn distribution)
+    - [ ] `ItemSystem.spawnOnTerrain`: ensure `getWorldSurfaceY` works for multi-tile (via multi-tile voxel lookup)
+    - [ ] `occupiedCells` key format: include tile or use global cell coords for 9-tile grid
+  - [ ] **Physics & collision**
+    - [ ] `aabbVsVoxelGrid` / `getWorldSurfaceY`: support multi-tile lookup (which tile contains world XZ?)
+    - [ ] `stepCharacter` / `stepCollectable`: pass multi-tile voxel provider
+    - [ ] Octree: already used for tree/rock culling — verify query radius (8) is sufficient; consider increasing maxDepth if node density grows
+    - [ ] `BuildingSystem.collectBlockCollidersNear`: building blocks span tiles — ensure spatial hash covers full world
+  - [ ] **Client rendering**
+    - [ ] `LevelMesh`: create mesh from 9 greedy-mesh quads (one per tile) or single merged mesh
+    - [ ] `useGameSession` / `RoomInitializer`: generate 9 voxel grids, merge or pass to multi-tile systems
+  - [ ] **Physics optimizations** (9× area)
+    - [ ] Profile physics tick with 9× trees/rocks — octree should keep per-player queries O(log n)
+    - [ ] `BuildingSystem.collectBlockCollidersNear`: currently O(n) over all blocks; consider spatial hash if block count grows
+    - [ ] Projectile raycast: octree used for tree/rock — confirm ray queries scale with world size
 - [ ] **Building save/load with URL hashes**
   - [ ] Serialize building state → server hash → URL
   - [ ] On page load with hash, restore building state
@@ -296,6 +340,7 @@ New systems to add. Before starting any of these, make sure the systems they int
 - [x] Extract TransformBroadcastSystem from Room — transform broadcast, delta stamina/armor/helmet, cache
 - [x] Extract JoinSyncSystem from Room — initial state for new player (items, level, dummies, armor/helmet/materials, building)
 - [x] Extract RoomInitializer from Room — level/shooting range/builder/editor setup; Room passes setters and LevelSystem
+- [x] Directional damage indicator — red ring arc at screen edge in FinalPostProcess, points toward attacker
 
 </details>
 

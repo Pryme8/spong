@@ -7,10 +7,10 @@ import { TransformData, InputData, ShootData, ProjectileSpawnData, ProjectileDes
 export const TRANSFORM_PACKET_SIZE = 64;
 
 // Binary codec for input updates
-// Format: [opcode:1][sequence:4][deltaTime:4][forward:1][right:1][cameraYaw:4][cameraPitch:4][jump:1][sprint:1][timestamp:8]
-// Total: 29 bytes
+// Format: [opcode:1][sequence:4][deltaTime:4][forward:1][right:1][cameraYaw:4][cameraPitch:4][jump:1][sprint:1][dive:1][timestamp:8]
+// Total: 30 bytes
 
-export const INPUT_PACKET_SIZE = 29;
+export const INPUT_PACKET_SIZE = 30;
 
 export function encodeTransform(opcode: number, data: TransformData): ArrayBuffer {
   const buffer = new ArrayBuffer(TRANSFORM_PACKET_SIZE);
@@ -239,6 +239,10 @@ export function encodeInput(opcode: number, data: InputData): ArrayBuffer {
   view.setUint8(offset, data.sprint ? 1 : 0);
   offset += 1;
   
+  // Dive (1 byte, uint8)
+  view.setUint8(offset, data.dive ? 1 : 0);
+  offset += 1;
+  
   // Timestamp (8 bytes, float64)
   view.setFloat64(offset, data.timestamp, true);
   
@@ -282,10 +286,14 @@ export function decodeInput(buffer: ArrayBuffer): InputData {
   const sprint = view.getUint8(offset) === 1;
   offset += 1;
   
+  // Dive (optional for backward compat with 29-byte packets)
+  const dive = buffer.byteLength >= 30 ? view.getUint8(offset) === 1 : false;
+  if (buffer.byteLength >= 30) offset += 1;
+  
   // Timestamp
   const timestamp = view.getFloat64(offset, true);
   
-  return { sequence, deltaTime, forward, right, cameraYaw, cameraPitch, jump, sprint, timestamp };
+  return { sequence, deltaTime, forward, right, cameraYaw, cameraPitch, jump, sprint, dive, timestamp };
 }
 
 // ── Shoot Request ─────────────────────────────────────────────

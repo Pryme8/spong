@@ -81,6 +81,7 @@ describe('PlayerStateSystem', () => {
         cameraPitch: 0.2,
         jump: true,
         sprint: true,
+        dive: false
       });
       system.syncInputAndStamina([entity]);
       expect(pc.input.forward).toBe(1);

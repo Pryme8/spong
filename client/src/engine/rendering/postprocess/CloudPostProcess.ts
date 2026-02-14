@@ -17,6 +17,7 @@
  *    Diagonal-blurs the clouds, then blends over the scene modulated by the mask.
  */
 
+import { LAYER_HIDDEN_FROM_MAIN } from '@/engine/camera/CameraController';
 import {
   Scene,
   Camera,
@@ -287,6 +288,7 @@ export class CloudPostProcess {
   /** Add a mesh to the mask RTT with the black override material. */
   private registerMeshForMask(mesh: AbstractMesh): void {
     if (this.cloudMeshes.indexOf(mesh) >= 0) return;
+    if(mesh.visibility == 0 || mesh.layerMask == LAYER_HIDDEN_FROM_MAIN) return;
     this.maskRT.renderList!.push(mesh);
     this.maskRT.setMaterialForRendering(mesh, this.blackMat);
   }

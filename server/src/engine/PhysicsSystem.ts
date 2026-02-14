@@ -7,7 +7,6 @@ import {
   capsuleVsCapsule,
   PLAYER_CAPSULE_RADIUS,
   type BoxCollider,
-  type WaterLevelProvider,
 } from '@spong/shared';
 import type { VoxelGrid, TreeColliderMesh, TreeTransform, RockColliderMesh, RockTransform } from '@spong/shared';
 
@@ -18,7 +17,6 @@ export interface PhysicsCollisionContext {
   blockColliders?: BoxCollider[];
   /** When set, used per-player for spatial culling (overrides blockColliders for character step). */
   getBlockCollidersNear?: (x: number, y: number, z: number, radius: number) => BoxCollider[] | undefined;
-  waterLevelProvider?: WaterLevelProvider;
   octree?: {
     queryPoint(x: number, y: number, z: number, radius: number): Array<{ type: string; data: unknown }>;
   };
@@ -70,8 +68,7 @@ export class PhysicsSystem {
         ctx.voxelGrid,
         filteredTrees,
         filteredRocks,
-        blockColliders,
-        ctx.waterLevelProvider
+        blockColliders
       );
     }
 

@@ -29,7 +29,10 @@ export class FinalPostProcess {
   private geometryBuffer: GeometryBufferRenderer | null = null;
   private normalTextureIndex: number = -1;
   private healthPercentage: number = 1.0; // 0 to 1
+  private underwaterIntensity: number = 0; // 0 to 1, blue tint when camera underwater
   private time: number = 0;
+  private damageDirectionAngle: number = 0; // radians, 0 = top of screen
+  private damageIndicatorIntensity: number = 0; // 0 to 1, fades over time
   
   // Exposed parameters for tweaking
   public exposure: number = 1.05;
@@ -341,16 +344,27 @@ export class FinalPostProcess {
       effect.setFloat2('screenSize', engine.getRenderWidth(), engine.getRenderHeight());
     };
 
-    // ── Pass 5: Vignette with Low Health Effects ───────────
+    // ── Pass 5: Vignette with Low Health Effects + Directional Damage Arc + Underwater Blue ─
     Effect.ShadersStore['vignetteFragmentShader'] = /* glsl */ `
       precision highp float;
       varying vec2 vUV;
       uniform sampler2D textureSampler;
       uniform float vignetteStrength;
       uniform float healthPercentage;
+      uniform float underwaterIntensity;
+      uniform float damageDirectionAngle;
+      uniform float damageIndicatorIntensity;
+      uniform float damageArcHalfWidth;
 
       void main() {
         vec4 color = texture2D(textureSampler, vUV);
+        
+        // Underwater blue tint (camera below water surface)
+        if (underwaterIntensity > 0.01) {
+          vec3 blueShift = vec3(-0.2, 0.05, 0.35);
+          color.rgb = color.rgb + blueShift * underwaterIntensity;
+          color.rgb *= 1.0 - underwaterIntensity * 0.35;
+        }
         
         // Calculate distance from center
         vec2 centered = vUV - 0.5;
@@ -375,6 +389,17 @@ export class FinalPostProcess {
           vignette = vignette * (1.0 - edgeDarkness * 0.95);
         }
         
+        // Directional damage indicator: ring arc (crust) at screen edge pointing toward attacker
+        if (damageIndicatorIntensity > 0.01) {
+          float angle = atan(centered.x, -centered.y); // 0 = top, PI/2 = right
+          float angleDiff = mod(angle - damageDirectionAngle + 3.14159265, 6.28318531) - 3.14159265;
+          float inArc = 1.0 - smoothstep(damageArcHalfWidth, damageArcHalfWidth + 0.15, abs(angleDiff));
+          float inRing = smoothstep(0.38, 0.42, dist) * (1.0 - smoothstep(0.48, 0.52, dist));
+          float arcMask = inArc * inRing * damageIndicatorIntensity;
+          vec3 damageRed = vec3(0.9, 0.15, 0.1);
+          color.rgb = mix(color.rgb, damageRed, arcMask * 0.98);
+        }
+        
         // Apply vignette
         gl_FragColor = vec4(color.rgb * vignette, color.a);
       }
@@ -383,7 +408,7 @@ export class FinalPostProcess {
     this.vignettePass = new PostProcess(
       'vignette',
       'vignette',
-      ['vignetteStrength', 'healthPercentage'],
+      ['vignetteStrength', 'healthPercentage', 'underwaterIntensity', 'damageDirectionAngle', 'damageIndicatorIntensity', 'damageArcHalfWidth'],
       null,
       1.0,
       camera
@@ -392,6 +417,10 @@ export class FinalPostProcess {
     this.vignettePass.onApply = (effect) => {
       effect.setFloat('vignetteStrength', 1.3);
       effect.setFloat('healthPercentage', this.healthPercentage);
+      effect.setFloat('underwaterIntensity', this.underwaterIntensity);
+      effect.setFloat('damageDirectionAngle', this.damageDirectionAngle);
+      effect.setFloat('damageIndicatorIntensity', this.damageIndicatorIntensity);
+      effect.setFloat('damageArcHalfWidth', 0.35);
     };
 
     // ── Pass 6: Film Grain ─────────────────────────────────
@@ -433,10 +462,22 @@ export class FinalPostProcess {
       effect.setFloat('time', this.time);
       effect.setFloat('grainIntensity', this.grainIntensity);
     };
-    // Animate grain over time
+    // Animate grain over time; decay damage indicator
     scene.onBeforeRenderObservable.add(() => {
       this.time += 0.01;
+      if (this.damageIndicatorIntensity > 0) {
+        this.damageIndicatorIntensity = Math.max(0, this.damageIndicatorIntensity - 0.015);
+      }
     });
+  }
+
+  /**
+   * Trigger directional damage indicator (red arc at screen edge pointing toward attacker).
+   * @param directionAngle - radians, 0 = top of screen, PI/2 = right
+   */
+  addDamageIndicator(directionAngle: number): void {
+    this.damageDirectionAngle = directionAngle;
+    this.damageIndicatorIntensity = 1.0;
   }
 
   /**
@@ -445,6 +486,13 @@ export class FinalPostProcess {
    */
   setHealthPercentage(healthPercentage: number): void {
     this.healthPercentage = Math.max(0, Math.min(1, healthPercentage));
+  }
+
+  /**
+   * Set underwater intensity for blue tint (0 = above water, 1 = camera submerged).
+   */
+  setUnderwaterIntensity(intensity: number): void {
+    this.underwaterIntensity = Math.max(0, Math.min(1, intensity));
   }
 
   /**

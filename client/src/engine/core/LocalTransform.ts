@@ -8,8 +8,7 @@ import {
   FIXED_TIMESTEP,
   VoxelGrid,
   type RockColliderMesh,
-  type RockTransform,
-  type WaterLevelProvider
+  type RockTransform
 } from '@spong/shared';
 import type { TreeColliderMesh } from '@spong/shared/dist/src/treegen/TreeMesh';
 import type { TreeTransform } from '@spong/shared/dist/src/treegen/TreeMeshTransform';
@@ -43,7 +42,6 @@ export class LocalTransform {
   private treeColliderGetter?: () => Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>;
   private rockColliderGetter?: () => Array<{ mesh: RockColliderMesh; transform: RockTransform }>;
   private octreeGetter?: () => any;
-  private waterLevelProviderGetter?: () => WaterLevelProvider | undefined;
   private scene: Scene;
 
   // Current input (updated each physics tick, consumed by fixedUpdate)
@@ -108,8 +106,7 @@ export class LocalTransform {
     buildingCollisionManager?: BuildingCollisionManager,
     treeColliderGetter?: () => Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>,
     rockColliderGetter?: () => Array<{ mesh: RockColliderMesh; transform: RockTransform }>,
-    octreeGetter?: () => any,
-    waterLevelProviderGetter?: () => WaterLevelProvider | undefined
+    octreeGetter?: () => any
   ) {
     this.entityId = entityId;
     this.isLocal = isLocal;
@@ -118,7 +115,6 @@ export class LocalTransform {
     this.treeColliderGetter = treeColliderGetter;
     this.rockColliderGetter = rockColliderGetter;
     this.octreeGetter = octreeGetter;
-    this.waterLevelProviderGetter = waterLevelProviderGetter;
     this.scene = scene;
     this.node = new TransformNode(`local_${entityId}`, scene);
     this.node.position = Vector3.Zero();
@@ -273,8 +269,7 @@ export class LocalTransform {
       rockColliders = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
     }
 
-    const waterProvider = this.waterLevelProviderGetter ? this.waterLevelProviderGetter() : undefined;
-    stepCharacter(this.state, this.input, deltaTime, this.voxelGrid, treeColliders, rockColliders, blockColliders, waterProvider);
+    stepCharacter(this.state, this.input, deltaTime, this.voxelGrid, treeColliders, rockColliders, blockColliders);
   }
 
   /**
@@ -310,7 +305,10 @@ export class LocalTransform {
       this.state.velX = data.velocity.x;
       this.state.velY = data.velocity.y;
       this.state.velZ = data.velocity.z;
-      
+      // NOTE: We intentionally do NOT apply data.rotation or data.headPitch for the local player.
+      // Camera rotation (yaw/pitch) is client-authoritative — the server echoes it for remote
+      // rendering, but we never let server state override our camera. This keeps look feel
+      // responsive at any latency; only position/velocity are reconciled.
       // Sync water state from server
       if (data.isInWater !== undefined) {
         this.state.isInWater = data.isInWater;
@@ -346,8 +344,7 @@ export class LocalTransform {
       }
 
       for (const snapshot of this.inputBuffer) {
-        const waterProvider = this.waterLevelProviderGetter ? this.waterLevelProviderGetter() : undefined;
-        stepCharacter(this.state, snapshot.input, FIXED_TIMESTEP, this.voxelGrid, treeColliders, rockColliders, blockColliders, waterProvider);
+        stepCharacter(this.state, snapshot.input, FIXED_TIMESTEP, this.voxelGrid, treeColliders, rockColliders, blockColliders);
       }
 
       // 5. How much did our prediction change?

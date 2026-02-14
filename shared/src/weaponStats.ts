@@ -25,6 +25,8 @@ export interface WeaponStats {
   weight: number;        // Weapon weight (affects recoil)
   stability: number;     // 0-1: How much each shot increases bloom (0=none, 1=instant max bloom, 0.1=10 shots to max)
   finesse: number;       // 0-1: Bloom recovery rate per second (fraction of bloom lost per second; 0.2 = 20%/s)
+  handling: number;      // 0-1: How much moving sets bloom floor. 0=none, 0.5=lerp(min,max,0.5), 1=max. Doubles when jumping.
+  recoilMultiplier?: number; // 0-1: Scale kick; default 1. Lower = gentler recoil.
   proximityRadius?: number;
   zoomFactor?: number;
   holdTransform?: HoldTransform; // First-person hold position/rotation
@@ -44,7 +46,8 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     pelletsPerShot: 1,
     weight: 2.0,
     stability: 0.15,
-    finesse: 0.72, // sidearm: good recovery for controlled shots
+    finesse: 0.72,
+    handling: 0.4,
     holdTransform: {
       position: { x: 0.370, y: -0.470, z: -0.860 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -64,7 +67,9 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     pelletsPerShot: 1,
     weight: 3.0,
     stability: 0.20,
-    finesse: 0.78, // spray weapon: bloom lingers between bursts
+    finesse: 0.78,
+    handling: 0.5,
+    recoilMultiplier: 0.4,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.730 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -84,7 +89,8 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     pelletsPerShot: 1,
     weight: 8.0,
     stability: 0.12,
-    finesse: 0.69, // sustained fire: slow recovery so full auto spreads
+    finesse: 0.69,
+    handling: 0.6,
     holdTransform: {
       position: { x: 0.300, y: -0.240, z: -0.760 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -104,7 +110,8 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     pelletsPerShot: 6,
     weight: 6.0,
     stability: 0.40,
-    finesse: 0.92, // slow fire: full recover between pumps
+    finesse: 0.92,
+    handling: 0.55,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.730 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -124,7 +131,8 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     pelletsPerShot: 12,
     weight: 5.0,
     stability: 0.50,
-    finesse: 0.92, // two shots then reload: recover between
+    finesse: 0.92,
+    handling: 0.5,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.730 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -144,7 +152,8 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     pelletsPerShot: 1,
     weight: 7.0,
     stability: 0.30,
-    finesse: 0.62, // precision: slower recovery for follow-up pacing
+    finesse: 0.62,
+    handling: 0.2,
     zoomFactor: 3,
     holdTransform: {
       position: { x: 0.270, y: -0.240, z: -0.980 },
@@ -165,7 +174,8 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     pelletsPerShot: 1,
     weight: 4.5,
     stability: 0.15,
-    finesse: 0.7, // burst/auto: good recovery, encourages burst control
+    finesse: 0.7,
+    handling: 0.45,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.760 },
       rotation: { x: 0.000, y: 3.140, z: 0.000 },
@@ -185,7 +195,8 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     pelletsPerShot: 1,
     weight: 6.0,
     stability: 0.20,
-    finesse: 0.69, // marksman semi-auto: recovery for follow-up shots
+    finesse: 0.69,
+    handling: 0.25,
     zoomFactor: 2.5,
     holdTransform: {
       position: { x: 0.300, y: -0.370, z: -0.960 },
@@ -206,7 +217,8 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
     pelletsPerShot: 1,
     weight: 1,
     stability: 0.30,
-    finesse: 0.65, // one shot, long reload
+    finesse: 0.65,
+    handling: 0.35,
     proximityRadius: 5,
     holdTransform: {
       position: { x: 0.270, y: -0.240, z: -0.62 },
@@ -395,6 +407,8 @@ export function calculateBarrelTipFromYawPitch(
  * Bloom system constants
  */
 export const BLOOM_EPSILON = 0.001; // Threshold to clamp bloom back to 0
+/** Speed at which handling is fully applied (sprint ~12). */
+export const BLOOM_MAX_SPEED_REF = 12;
 
 /** Base rise speed at weight 1; actual rise = this / weight so heavier = slower. */
 const RECOIL_RISE_BASE = 36;
@@ -412,7 +426,7 @@ const RECOIL_KICK_SCALE = 1.2;
 export function calculateRecoilKick(weaponType: WeaponType): number {
   const stats = WEAPON_STATS[weaponType];
   const momentum = stats.projectileSpeed * stats.pelletsPerShot;
-  const kick = (momentum / (stats.weight * 1000)) * RECOIL_KICK_SCALE;
+  const kick = (momentum / (stats.weight * 1000)) * RECOIL_KICK_SCALE * (stats.recoilMultiplier ?? 1);
   return kick;
 }
 
@@ -445,15 +459,32 @@ export function getBloomRange(weaponType: WeaponType): number {
 }
 
 /**
- * Apply finesse-based bloom decay (time-based so sustained fire can reach max bloom)
+ * Bloom floor from handling: scaled by horizontal speed. At rest, floor=0.
+ * handling=0.5 at full speed: floor=lerp(min,max,0.5). When jumping, handling doubles (capped at 1).
+ */
+export function getBloomFloor(weaponType: WeaponType, horizSpeed: number, isInAir: boolean): number {
+  if (horizSpeed <= 0) return 0;
+  const stats = WEAPON_STATS[weaponType];
+  const bloomRange = stats.maxAccuracy - stats.minAccuracy;
+  const handling = stats.handling ?? 0;
+  const baseFactor = isInAir ? Math.min(1, handling * 2) : handling;
+  const speedScale = Math.min(1, horizSpeed / BLOOM_MAX_SPEED_REF);
+  return bloomRange * baseFactor * speedScale;
+}
+
+/**
+ * Apply finesse-based bloom decay (time-based so sustained fire can reach max bloom).
+ * Decays in all states (grounded, swimming, air) — no gating by player state.
  * @param currentBloom Current bloom value
  * @param weaponType The weapon type
  * @param dtSec Delta time in seconds (e.g. frame delta or FIXED_TIMESTEP)
+ * @param decayMultiplier Optional 0–1; when in air some games use <1 for slower recovery. Default 1 = full decay.
  * @returns New bloom value after decay
  */
-export function applyBloomDecay(currentBloom: number, weaponType: WeaponType, dtSec: number): number {
+export function applyBloomDecay(currentBloom: number, weaponType: WeaponType, dtSec: number, decayMultiplier: number = 1): number {
   const stats = WEAPON_STATS[weaponType];
-  const decayedBloom = currentBloom * Math.pow(1 - stats.finesse, dtSec);
+  const effectiveDt = dtSec * decayMultiplier;
+  const decayedBloom = currentBloom * Math.pow(1 - stats.finesse, effectiveDt);
 
   if (decayedBloom < BLOOM_EPSILON) {
     return 0;

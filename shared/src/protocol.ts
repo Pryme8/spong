@@ -143,6 +143,7 @@ export interface InputData {
   cameraPitch: number; // Camera pitch angle in radians (for shooting direction)
   jump: boolean;       // Jump button pressed
   sprint: boolean;     // Sprint button pressed (shift)
+  dive?: boolean;      // Dive button pressed (Ctrl) - swim down when underwater
   timestamp: number;
 }
 

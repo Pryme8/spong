@@ -17,6 +17,8 @@ import {
   WATER,
   WEAPON_STATS,
   applyBloomDecay,
+  getBloomFloor,
+  getBloomRange,
   type PlayerComponent,
   type StaminaComponent,
   type ActiveBuffsComponent,
@@ -138,6 +140,7 @@ export class PlayerStateSystem {
         pc.input.cameraPitch = nextInput.cameraPitch;
         pc.input.jump = nextInput.jump;
         pc.input.sprint = nextInput.sprint;
+        pc.input.dive = nextInput.dive;
         pc.headPitch = nextInput.cameraPitch || 0;
         pc.lastProcessedInput = nextInput.sequence;
       }
@@ -156,8 +159,17 @@ export class PlayerStateSystem {
       const stamina = entity.get<StaminaComponent>(COMP_STAMINA);
       const shootable = entity.get<ShootableComponent>(COMP_SHOOTABLE);
       const weaponTypeComp = entity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
-      if (shootable && weaponTypeComp && shootable.currentBloom > 0 && weaponTypeComp.type in WEAPON_STATS) {
-        shootable.currentBloom = applyBloomDecay(shootable.currentBloom, weaponTypeComp.type as WeaponType, FIXED_TIMESTEP);
+      if (shootable && weaponTypeComp && weaponTypeComp.type in WEAPON_STATS) {
+        const horizSpeed = Math.sqrt(pc.state.velX * pc.state.velX + pc.state.velZ * pc.state.velZ);
+        const isInAir = !pc.state.isGrounded && !pc.state.isInWater;
+        const floor = getBloomFloor(weaponTypeComp.type as WeaponType, horizSpeed, isInAir);
+        const bloomRange = getBloomRange(weaponTypeComp.type as WeaponType);
+        if (shootable.currentBloom > 0 || floor > 0) {
+          const decayed = shootable.currentBloom > 0
+            ? applyBloomDecay(shootable.currentBloom, weaponTypeComp.type as WeaponType, FIXED_TIMESTEP)
+            : 0;
+          shootable.currentBloom = Math.max(floor, Math.min(bloomRange, decayed));
+        }
       }
       if (stamina?.isExhausted) {
         pc.state.velX *= 0.5;

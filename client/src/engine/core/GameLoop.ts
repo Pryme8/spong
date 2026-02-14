@@ -151,8 +151,11 @@ export class GameLoop {
       // Update reload progress
       deps.weaponSystem.updateReload(now);
 
-      // Update weapon bloom decay (time-based so sustained fire can reach max bloom)
-      deps.weaponSystem.updateBloom(frameDelta);
+      // Update weapon bloom decay — handling scaled by speed; doubles when jumping
+      const state = myTransform?.getState();
+      const horizSpeed = state ? Math.sqrt(state.velX * state.velX + state.velZ * state.velZ) : 0;
+      const isInAir = state ? !state.isGrounded && !state.isInWater : false;
+      deps.weaponSystem.updateBloom(frameDelta, 1, horizSpeed, isInAir);
 
       // Handle auto-fire for automatic weapons (SMG, LMG)
       if (myTransform && deps.inputManager?.isMouseHeld() && deps.weaponSystem.isAutoFireWeapon()) {

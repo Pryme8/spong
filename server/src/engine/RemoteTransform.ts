@@ -38,7 +38,10 @@ export class RemoteTransform {
     this.input.forward = input.forward;
     this.input.right = input.right;
     this.input.cameraYaw = input.cameraYaw;
+    this.input.cameraPitch = input.cameraPitch;
     this.input.jump = input.jump;
+    this.input.sprint = input.sprint || false;
+    this.input.dive = input.dive || false;
   }
 
   /** Run one fixed-timestep tick using the shared kinematic controller. */

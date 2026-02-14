@@ -2,7 +2,7 @@ import { ref } from 'vue';
 import { Scene } from '@babylonjs/core';
 import { NetworkClient } from '../network/NetworkClient';
 import { LocalTransform } from '../engine/core/LocalTransform';
-import { Opcode, TransformData, VoxelGrid, type RockColliderMesh, type RockTransform, type WaterLevelProvider } from '@spong/shared';
+import { Opcode, TransformData, VoxelGrid, type RockColliderMesh, type RockTransform } from '@spong/shared';
 import type { BuildingCollisionManager } from '../engine/building/BuildingCollisionManager';
 import type { TreeColliderMesh } from '@spong/shared/dist/src/treegen/TreeMesh';
 import type { TreeTransform } from '@spong/shared/dist/src/treegen/TreeMeshTransform';
@@ -17,8 +17,7 @@ export function useTransformSync(
   scene: Scene, 
   buildingCollisionManager?: BuildingCollisionManager, 
   colliderGetters?: ColliderGetters, 
-  octreeGetter?: () => any,
-  waterLevelProviderGetter?: () => WaterLevelProvider | undefined
+  octreeGetter?: () => any
 ) {
   const transforms = ref<Map<number, LocalTransform>>(new Map());
 
@@ -33,8 +32,7 @@ export function useTransformSync(
       entityId, scene, isLocal, voxelGrid, buildingCollisionManager,
       colliderGetters?.getTreeColliders,
       colliderGetters?.getRockColliders,
-      octreeGetter,
-      waterLevelProviderGetter
+      octreeGetter
     );
     transforms.value.set(entityId, transform);
     return transform;

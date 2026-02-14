@@ -9,6 +9,7 @@ import {
   VoxelGrid,
   GreedyMesher,
   Octree,
+  WATER,
   type OctreeEntry,
   type DummySpawnMessage,
   type TransformData,
@@ -107,9 +108,10 @@ export function useGameSession() {
   const hitMarkerTimer = ref(0); // 0 to 0.25 seconds
   const hitMarkerVisible = computed(() => hitMarkerTimer.value > 0);
   
-  // Drowning hurt sound cooldown to prevent spam
+  // Drowning hurt sound cooldown to prevent spam (server sends ~60/sec when drowning)
   let lastDrowningHurtSoundTime = 0;
-  const DROWNING_HURT_SOUND_COOLDOWN = 1.0; // seconds
+  const lastRemoteDrowningHurtTime = new Map<number, number>();
+  const DROWNING_HURT_SOUND_COOLDOWN = 2.5; // seconds
   
   // Low health heartbeat sound tracking
   let heartbeatSoundId: string | null = null;
@@ -392,8 +394,7 @@ export function useGameSession() {
         getTreeColliders: () => treeManager?.getColliderMeshes() ?? [],
         getRockColliders: () => rockManager?.getColliderMeshes() ?? []
       }, 
-      () => octree,
-      () => waterManager ?? undefined
+      () => octree
     );
     projectileManager = new ProjectileManager(scene);
     
@@ -567,6 +568,24 @@ export function useGameSession() {
             bloodEntryZ = camPos.z;
           }
         }
+
+        // Directional damage indicator: red arc at screen edge pointing toward attacker
+        if (tookHealthDamage && !isDrowning && payload.attackerId > 0 && finalPostProcess && cameraController && transformSync) {
+          const attackerTransform = transformSync.getTransform(payload.attackerId);
+          if (attackerTransform) {
+            const camera = cameraController.getCamera();
+            const myPos = camera.position;
+            const attackerPos = attackerTransform.getPosition();
+            const toAttacker = attackerPos.subtract(myPos).normalize();
+            const forward = camera.getDirection(Vector3.Forward());
+            const right = Vector3.Cross(forward, Vector3.Up()).normalize();
+            const up = Vector3.Cross(right, forward).normalize();
+            const viewX = Vector3.Dot(toAttacker, right);
+            const viewY = Vector3.Dot(toAttacker, up);
+            const directionAngle = Math.atan2(viewX, viewY) + Math.PI;
+            finalPostProcess.addDamageIndicator(directionAngle);
+          }
+        }
         
         // Play hurt sound with cooldown for drowning
         if (myTransform.value && tookHealthDamage) {
@@ -582,12 +601,19 @@ export function useGameSession() {
             }
           }
         }
-      } else if (transformSync) {
+      } else if (transformSync && payload.damage > 0) {
         // Remote player took damage - play hurt sound at their position
-        const remoteTransform = transformSync.getTransform(payload.entityId);
-        if (remoteTransform) {
-          const state = remoteTransform.getState();
-          playSFX3D('player_hurt', state.posX, state.posY, state.posZ, 0.7);
+        const isDrowning = payload.attackerId === 0;
+        const currentTime = performance.now() * 0.001;
+        const lastRemote = lastRemoteDrowningHurtTime.get(payload.entityId) ?? 0;
+        const cooldownOk = !isDrowning || (currentTime - lastRemote >= DROWNING_HURT_SOUND_COOLDOWN);
+        if (cooldownOk) {
+          const remoteTransform = transformSync.getTransform(payload.entityId);
+          if (remoteTransform) {
+            const state = remoteTransform.getState();
+            playSFX3D('player_hurt', state.posX, state.posY, state.posZ, 0.7);
+            if (isDrowning) lastRemoteDrowningHurtTime.set(payload.entityId, currentTime);
+          }
         }
       }
       
@@ -1386,9 +1412,14 @@ export function useGameSession() {
             // Update low health effects
             const healthPercent = playerHealth.value / PLAYER_MAX_HEALTH;
             
-            // Update post-process with health
+            // Update post-process with health and underwater blue tint
             if (finalPostProcess) {
               finalPostProcess.setHealthPercentage(healthPercent);
+              // Use global Y (same as physics) - camera/head below water surface = blue tint
+              const underwater = cameraController
+                ? cameraController.getPosition().y < WATER.LEVEL_Y
+                : playerIsUnderwater.value;
+              finalPostProcess.setUnderwaterIntensity(underwater ? 1 : 0);
             }
             
             // Manage heartbeat sound based on health
@@ -1426,7 +1457,7 @@ export function useGameSession() {
             const camPitch = cameraController.getPitch();
 
             // Set input on the local transform for this physics tick
-            myTransform.value.setInput(state.forward, state.right, camYaw, state.jump, state.sprint, camPitch);
+            myTransform.value.setInput(state.forward, state.right, camYaw, state.jump, state.sprint, camPitch, state.dive);
 
             // Increment sequence — exactly once per physics tick
             inputSequence++;
@@ -1445,6 +1476,7 @@ export function useGameSession() {
               cameraPitch: camPitch,
               jump: state.jump,
               sprint: state.sprint,
+              dive: state.dive,
               timestamp: performance.now()
             };
 

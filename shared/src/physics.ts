@@ -19,14 +19,10 @@ export interface BoxCollider {
 }
 
 /**
- * Water level provider interface.
- * Implementations should check if a given XZ position has water and return the water level Y.
+ * Water level provider interface (used by server for spawn validation).
+ * Physics uses global WATER.LEVEL_Y for swimming/breath - no provider needed.
  */
 export interface WaterLevelProvider {
-  /**
-   * Get water level at given XZ position.
-   * @returns Water surface Y coordinate, or -Infinity if no water at this position
-   */
   getWaterLevelAt(x: number, z: number): number;
 }
 
@@ -129,6 +125,7 @@ export interface CharacterInput {
   cameraPitch?: number; // radians (vertical rotation, optional for shooting)
   jump: boolean;
   sprint: boolean;   // True when holding shift to run
+  dive?: boolean;    // True when holding Ctrl to swim down
 }
 
 /**
@@ -172,7 +169,6 @@ export function createCharacterState(): CharacterState {
  * @param treeColliders Optional array of tree collision cylinders
  * @param rockColliderMeshes Optional array of rock collision meshes with transforms
  * @param blockColliders Optional array of box colliders for building blocks
- * @param waterLevelProvider Optional water level provider for water detection
  */
 export function stepCharacter(
   state: CharacterState,
@@ -181,8 +177,7 @@ export function stepCharacter(
   voxelGrid?: VoxelGrid,
   treeColliderMeshes?: Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>,
   rockColliderMeshes?: Array<{ mesh: RockColliderMesh; transform: RockTransform }>,
-  blockColliders?: BoxCollider[],
-  waterLevelProvider?: WaterLevelProvider
+  blockColliders?: BoxCollider[]
 ): void {
   // ── Determine swimming state ───────────────────────────────
   // Deep water = swimming (3D movement), shallow water = walk normally
@@ -228,7 +223,12 @@ export function stepCharacter(
         state.velY *= scale;
         state.velZ *= scale;
       }
-    } else {
+    }
+    // Ctrl = swim directly down
+    if (input.dive) {
+      state.velY -= WATER.ACCELERATION * dt * WATER.CONTROL;
+    }
+    if (moveLen <= 0.01) {
       // Water friction (smooth gliding when no input)
       const speed = Math.sqrt(state.velX * state.velX + state.velY * state.velY + state.velZ * state.velZ);
       if (speed > 0.01) {
@@ -292,9 +292,9 @@ export function stepCharacter(
   }
   
   if (isSwimming) {
-    // Swimming: Jump = vertical boost upward (helps climb out at surface)
+    // Swimming: Jump = swim up (strong impulse to surface)
     if (input.jump && !state.hasJumped) {
-      state.velY += WATER.VERTICAL_SWIM_SPEED * dt * 3.0; // Boost to help exit water
+      state.velY += WATER.SWIM_UP_IMPULSE;
       state.hasJumped = true;
     }
   } else {
@@ -599,40 +599,13 @@ export function stepCharacter(
     state.isGrounded = groundedOnVoxel || groundedOnBlock || groundedOnFlat;
   }
 
-  // ── Water detection and state update ───────────────────────
-  if (waterLevelProvider) {
-    const waterY = waterLevelProvider.getWaterLevelAt(state.posX, state.posZ);
-    
-    if (waterY !== -Infinity) {
-      // Water exists at this XZ position
-      const feetY = state.posY - PLAYER_HITBOX_HALF;
-      const headY = state.posY + PLAYER_HITBOX_HALF;
-      const centerY = state.posY;
-      
-      // Check if any part of player is in water
-      state.isInWater = feetY < waterY;
-      
-      // Check if head is underwater (based on head position)
-      state.isHeadUnderwater = headY < waterY;
-      
-      // Calculate water depth (how far center is below surface)
-      if (centerY < waterY) {
-        state.waterDepth = waterY - centerY;
-      } else {
-        state.waterDepth = 0;
-      }
-    } else {
-      // No water at this position
-      state.isInWater = false;
-      state.isHeadUnderwater = false;
-      state.waterDepth = 0;
-    }
-  } else {
-    // No water provider - clear water state
-    state.isInWater = false;
-    state.isHeadUnderwater = false;
-    state.waterDepth = 0;
-  }
+  // ── Water detection: global Y level only (no voxel sampling) ──
+  const waterY = WATER.LEVEL_Y;
+  const feetY = state.posY - PLAYER_HITBOX_HALF;
+  const headY = state.posY + PLAYER_HITBOX_HALF;
+  state.isInWater = feetY < waterY;
+  state.isHeadUnderwater = headY < waterY;
+  state.waterDepth = state.posY < waterY ? waterY - state.posY : 0;
 
   // ── Breath management ──────────────────────────────────────
   if (state.isHeadUnderwater) {

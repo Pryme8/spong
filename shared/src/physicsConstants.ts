@@ -63,6 +63,8 @@ export const CHARACTER = {
  * These preserve the "frictionless" feel that land movement used to have.
  */
 export const WATER = {
+  /** Global water surface Y - body below this = swimming, head below = breath drain */
+  LEVEL_Y: -14,
   /** Swimming acceleration (units/s²) - Lower than land for floaty feel */
   ACCELERATION: 20.0,
   /** Maximum swim speed (units/s) - 2/3 of sprint speed (8.0 * 1.5 * 2/3 = 8.0) */
@@ -73,14 +75,16 @@ export const WATER = {
   FRICTION: 12.0,
   /** Water control (3D movement, so higher than air control) */
   CONTROL: 0.85,
-  /** Buoyancy force (upward, opposes gravity) (units/s²) - Very subtle for neutral swimming */
-  BUOYANCY: 3.0,
+  /** Buoyancy disabled - was causing oscillation/crazy behavior; player controls vertical via swim inputs */
+  BUOYANCY: 0,
   /** Maximum breath duration when head underwater (seconds) */
   MAX_BREATH: 10.0,
   /** Drowning damage per second when breath = 0 (HP/s) */
   DROWNING_DAMAGE: 5.0,
   /** Vertical movement speed when actively diving/surfacing (units/s) */
   VERTICAL_SWIM_SPEED: 3.0,
+  /** Impulse when jump pressed underwater - swim up (units/s, applied once) */
+  SWIM_UP_IMPULSE: 6.0,
   /** Stamina drain when swimming (stamina/s) */
   SWIM_STAMINA_DRAIN: 15.0,
   /** Stamina drain when sprint-swimming (stamina/s) - double normal swimming */

@@ -359,7 +359,8 @@ export class Room {
       cameraYaw: input.cameraYaw,
       cameraPitch: input.cameraPitch,
       jump: input.jump,
-      sprint: input.sprint || false
+      sprint: input.sprint || false,
+      dive: input.dive || false
     });
 
     // Cap queue to prevent memory growth from clock drift or flooding
@@ -608,7 +609,6 @@ export class Room {
       rockColliderMeshes: this.levelSystem.getRockColliderMeshes(),
       blockColliders,
       getBlockCollidersNear: (x, y, z, r) => this.buildingSystem.collectBlockCollidersNear(x, y, z, r),
-      waterLevelProvider: this.waterLevelProvider,
       octree: this.levelSystem.getOctree() ?? undefined,
     });
 
@@ -638,7 +638,6 @@ export class Room {
       treeColliderMeshes: this.levelSystem.getTreeColliderMeshes(),
       rockColliderMeshes: this.levelSystem.getRockColliderMeshes(),
       blockColliders,
-      waterLevelProvider: this.waterLevelProvider,
       octree: this.levelSystem.getOctree() ?? undefined,
     };
     const { justSettledIds } = this.physicsSystem.tickCollectables(collectableEntities, collectableCtx);

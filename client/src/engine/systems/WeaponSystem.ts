@@ -15,6 +15,7 @@ import {
   getRecoilRecoveryPerS,
   getBloomIncrement,
   getBloomRange,
+  getBloomFloor,
   applyBloomDecay,
   getCurrentAccuracy,
   type WeaponType
@@ -406,12 +407,19 @@ export class WeaponSystem {
   }
 
   /**
-   * Update bloom decay (call every frame with frame delta in seconds)
+   * Update bloom decay (call every frame with frame delta in seconds).
+   * Handling: floor scaled by horizSpeed; when jumping, handling doubles.
    */
-  updateBloom(dtSec: number): void {
-    if (this.currentBloom > 0 && this.hasWeapon.value) {
-      this.currentBloom = applyBloomDecay(this.currentBloom, this.internalWeaponType, dtSec);
-      this.currentBloom = Math.min(getBloomRange(this.internalWeaponType), this.currentBloom);
+  updateBloom(dtSec: number, decayMultiplier: number, horizSpeed: number, isInAir: boolean): void {
+    if (this.hasWeapon.value) {
+      const bloomRange = getBloomRange(this.internalWeaponType);
+      const floor = getBloomFloor(this.internalWeaponType, horizSpeed, isInAir);
+      if (this.currentBloom > 0 || floor > 0) {
+        const decayed = this.currentBloom > 0
+          ? applyBloomDecay(this.currentBloom, this.internalWeaponType, dtSec, decayMultiplier)
+          : 0;
+        this.currentBloom = Math.max(floor, Math.min(bloomRange, decayed));
+      }
     }
 
     // Update reactive bloom percent (0-1 normalized)

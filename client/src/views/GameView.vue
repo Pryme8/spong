@@ -105,6 +105,14 @@
       @close="showCameraDebug = false"
     />
 
+    <!-- Latency Debug Panel (only if ?latencyDebug URL flag is present) -->
+    <LatencyDebugPanel
+      v-if="showLatencyDebug"
+      :visible="showLatencyDebug"
+      :current-latency-ms="simulatedLatencyMs ?? 0"
+      @close="showLatencyDebug = false"
+    />
+
     <!-- Weapon Debug Panel (toggle with U key) -->
     <WeaponDebugPanel
       v-if="showWeaponDebug"
@@ -206,6 +214,7 @@ import WaterDebugPanel from '../components/WaterDebugPanel.vue';
 import WorldDebugPanel from '../components/WorldDebugPanel.vue';
 import PostProcessDebugPanel from '../components/PostProcessDebugPanel.vue';
 import CameraDebugPanel from '../components/CameraDebugPanel.vue';
+import LatencyDebugPanel from '../components/LatencyDebugPanel.vue';
 import WeaponDebugPanel from '../components/WeaponDebugPanel.vue';
 import Scoreboard from '../components/Scoreboard.vue';
 import CountdownOverlay from '../components/CountdownOverlay.vue';
@@ -270,6 +279,7 @@ const showWaterDebug = ref(route.query.waterDebug !== undefined);
 const showWorldDebug = ref(route.query.debugWorld !== undefined);
 const showPostDebug = ref(route.query.debugPost !== undefined);
 const showCameraDebug = ref(route.query.cameraDebug !== undefined);
+const showLatencyDebug = ref(route.query.latencyDebug !== undefined);
 const showWeaponDebug = ref(false); // Toggle with U key
 const weaponDebugPosition = ref({ x: 0, y: 0, z: 0 });
 const weaponDebugRotation = ref({ x: 0, y: 0, z: 0 });

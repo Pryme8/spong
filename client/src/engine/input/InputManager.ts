@@ -24,6 +24,7 @@ export class InputManager {
   private lastRight = 0;
   private lastJump = false;
   private lastSprint = false;
+  private lastDive = false;
   private jumpBuffered = false;
   private isMobile: boolean;
   private contextMenuHandler: ((e: MouseEvent) => void) | null = null;
@@ -69,8 +70,8 @@ export class InputManager {
         }
       }
       
-      // Handle movement keys (including shift for sprint)
-      if (!['w', 'a', 's', 'd', ' ', 'shift'].includes(key)) {
+      // Handle movement keys (including shift for sprint, control for dive)
+      if (!['w', 'a', 's', 'd', ' ', 'shift', 'control'].includes(key)) {
         return;
       }
       
@@ -90,6 +91,7 @@ export class InputManager {
       this.lastRight = right;
       this.lastJump = this.keys.get(' ') || false;
       this.lastSprint = this.keys.get('shift') || false;
+      this.lastDive = this.keys.get('control') || false;
     });
   }
   
@@ -192,12 +194,13 @@ export class InputManager {
   }
 
   /** Get the current input state (includes buffered jump so short presses aren't missed). */
-  getCurrentState(): { forward: number; right: number; jump: boolean; sprint: boolean } {
+  getCurrentState(): { forward: number; right: number; jump: boolean; sprint: boolean; dive: boolean } {
     return {
       forward: this.lastForward,
       right: this.lastRight,
       jump: this.jumpBuffered || this.lastJump,
-      sprint: this.lastSprint
+      sprint: this.lastSprint,
+      dive: this.lastDive
     };
   }
 
