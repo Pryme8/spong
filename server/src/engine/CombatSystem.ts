@@ -3,7 +3,7 @@
  * Uses shared raycast helpers (rayVsVoxelGrid, rayVsTriangleMesh, rayVsAABB).
  */
 
-import type { World, Entity } from '@spong/shared';
+import type { World, Entity, TerrainCollisionGrid } from '@spong/shared';
 import {
   COMP_PLAYER,
   COMP_HEALTH,
@@ -51,7 +51,7 @@ export interface CombatSystemOptions {
 export class CombatSystem {
   private readonly world: World;
   private readonly broadcast: (opcode: number, msg: unknown) => void;
-  private readonly getVoxelGrid: () => VoxelGrid | undefined;
+  private readonly getVoxelGrid: () => TerrainCollisionGrid | undefined;
   private readonly getWaterLevelProvider: () => { isValidSpawnPosition(x: number, y: number, z: number): boolean } | undefined;
   private readonly getLevelSystem: () => LevelSystemCollision;
   private readonly roundSystem: RoundSystem;

@@ -17,7 +17,6 @@ import {
   PROJECTILE_LIFETIME_SHOTGUN,
   type PlayerComponent,
   type ProjectileComponent,
-  type VoxelGrid,
   type ProjectileSpawnData,
 } from '@spong/shared';
 import type { RockColliderMesh, RockTransform } from '@spong/shared';

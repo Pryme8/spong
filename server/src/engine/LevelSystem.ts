@@ -5,7 +5,7 @@
  * duplicating entity creation logic.
  */
 
-import type { VoxelGrid, MultiTileVoxelGrid } from '@spong/shared';
+import type { TerrainCollisionGrid } from '@spong/shared';
 import {
   createRNG,
   generateTreeVariations,
@@ -37,7 +37,7 @@ export interface LevelSystemOptions {
 
 export interface GenerateLevelOptions {
   seed: string;
-  voxelGrid: VoxelGrid;
+  voxelGrid: TerrainCollisionGrid;
   waterLevelProvider?: { isValidSpawnPosition(x: number, y: number, z: number): boolean };
   occupiedCells: Set<string>;
   lobbyConfig?: { pistolCount?: number; disableSpawns?: string[] };
@@ -122,7 +122,7 @@ export class LevelSystem {
 
   private spawnLevelItems(
     seed: string,
-    voxelGrid: VoxelGrid | MultiTileVoxelGrid,
+    voxelGrid: TerrainCollisionGrid,
     waterLevelProvider: { isValidSpawnPosition(x: number, y: number, z: number): boolean } | undefined,
     occupiedCells: Set<string>,
     config?: { pistolCount?: number }
@@ -165,7 +165,7 @@ export class LevelSystem {
     itemType: ItemType,
     count: number,
     rng: () => number,
-    opts: { voxelGrid: VoxelGrid | MultiTileVoxelGrid; waterLevelProvider?: { isValidSpawnPosition(x: number, y: number, z: number): boolean } },
+    opts: { voxelGrid: TerrainCollisionGrid; waterLevelProvider?: { isValidSpawnPosition(x: number, y: number, z: number): boolean } },
     occupiedCells: Set<string>,
     _label: string
   ): void {
@@ -185,7 +185,7 @@ export class LevelSystem {
     itemType: ItemType,
     count: number,
     rng: () => number,
-    opts: { voxelGrid: VoxelGrid },
+    opts: { voxelGrid: TerrainCollisionGrid },
     occupiedCells: Set<string>
   ): void {
     for (let i = 0; i < count; i++) {
@@ -196,7 +196,7 @@ export class LevelSystem {
     }
   }
 
-  private spawnLevelRocks(seed: string, voxelGrid: VoxelGrid | MultiTileVoxelGrid, occupiedCells: Set<string>): void {
+  private spawnLevelRocks(seed: string, voxelGrid: TerrainCollisionGrid, occupiedCells: Set<string>): void {
     const variations = generateRockVariations(seed, 5, 9);
     this.rockInstances = placeRockInstances(
       seed,
@@ -223,12 +223,11 @@ export class LevelSystem {
 
   private spawnLevelTrees(
     seed: string,
-    voxelGrid: VoxelGrid,
+    voxelGrid: TerrainCollisionGrid,
     waterLevelProvider: { isValidSpawnPosition(x: number, y: number, z: number): boolean } | undefined,
     occupiedCells: Set<string>
   ): void {
     const variations = generateTreeVariations(seed);
-    const targetCount = 540;
     const allTreeInstances = placeTreeInstances(
       seed,
       variations.length,
@@ -258,7 +257,7 @@ export class LevelSystem {
 
   private spawnLevelBushes(
     seed: string,
-    voxelGrid: VoxelGrid | MultiTileVoxelGrid,
+    voxelGrid: TerrainCollisionGrid,
     waterLevelProvider: { isValidSpawnPosition(x: number, y: number, z: number): boolean } | undefined,
     occupiedCells: Set<string>
   ): void {

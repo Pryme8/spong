@@ -63,6 +63,8 @@ export class PlayerHistory {
     const p0 = older.positions.get(entityId);
     if (!p0) return null;
 
+    if (!newer) newer = older;
+
     const p1 = newer.positions.get(entityId) ?? p0;
     if (older.timeMs === newer.timeMs) {
       return { x: p0.x, y: p0.y, z: p0.z };
