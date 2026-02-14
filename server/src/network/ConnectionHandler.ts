@@ -19,10 +19,24 @@ export class ConnectionHandler {
   private binaryHandlers = new Map<number, BinaryHandler>();
   private disconnectHandlers: DisconnectHandler[] = [];
   private nextId = 0;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    // Heartbeat every 30 seconds
-    setInterval(() => this.heartbeat(), 30000);
+    this.heartbeatInterval = setInterval(() => this.heartbeat(), 30000);
+  }
+
+  dispose(): void {
+    if (this.heartbeatInterval !== null) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    const conns = Array.from(this.connections.values());
+    this.connections.clear();
+    for (const conn of conns) {
+      try {
+        conn.ws.terminate();
+      } catch (_) {}
+    }
   }
 
   registerMessageHandler(opcode: Opcode, handler: MessageHandler) {

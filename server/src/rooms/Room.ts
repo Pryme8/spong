@@ -66,6 +66,7 @@ export class Room {
   private world = new World();
   private players = new Map<string, Player>();
   private connections = new Map<string, ConnectionState>();
+  private cachedConnections: ConnectionState[] | null = null;
   private tickInterval: NodeJS.Timeout | null = null;
   private broadcastInterval: NodeJS.Timeout | null = null;
   private connectionHandler: ConnectionHandler;
@@ -255,6 +256,7 @@ export class Room {
 
     this.players.set(conn.id, player);
     this.connections.set(conn.id, conn);
+    this.cachedConnections = null;
 
     conn.roomId = this.id;
     conn.entityId = entity.id;
@@ -319,6 +321,7 @@ export class Room {
       this.world.destroyEntity(player.entityId);
       this.players.delete(connectionId);
       this.connections.delete(connectionId);
+      this.cachedConnections = null;
       // Check if round should end due to insufficient players
       const remainingPlayers = this.players.size;
       if (remainingPlayers < this.roundSystem.config.minPlayers && this.roundSystem.phase === 'active') {
@@ -492,7 +495,9 @@ export class Room {
   }
 
   getAllConnections(): ConnectionState[] {
-    return Array.from(this.connections.values());
+    if (this.cachedConnections !== null) return this.cachedConnections;
+    this.cachedConnections = Array.from(this.connections.values());
+    return this.cachedConnections;
   }
 
   getOwnerId(): string | null {
@@ -602,6 +607,7 @@ export class Room {
       treeColliderMeshes: this.levelSystem.getTreeColliderMeshes(),
       rockColliderMeshes: this.levelSystem.getRockColliderMeshes(),
       blockColliders,
+      getBlockCollidersNear: (x, y, z, r) => this.buildingSystem.collectBlockCollidersNear(x, y, z, r),
       waterLevelProvider: this.waterLevelProvider,
       octree: this.levelSystem.getOctree() ?? undefined,
     });
@@ -673,5 +679,6 @@ export class Room {
     this.engine.dispose();
     this.players.clear();
     this.connections.clear();
+    this.cachedConnections = null;
   }
 }

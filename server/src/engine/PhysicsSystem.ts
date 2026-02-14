@@ -16,6 +16,8 @@ export interface PhysicsCollisionContext {
   treeColliderMeshes: Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>;
   rockColliderMeshes: Array<{ mesh: RockColliderMesh; transform: RockTransform }>;
   blockColliders?: BoxCollider[];
+  /** When set, used per-player for spatial culling (overrides blockColliders for character step). */
+  getBlockCollidersNear?: (x: number, y: number, z: number, radius: number) => BoxCollider[] | undefined;
   waterLevelProvider?: WaterLevelProvider;
   octree?: {
     queryPoint(x: number, y: number, z: number, radius: number): Array<{ type: string; data: unknown }>;
@@ -27,25 +29,39 @@ export interface PhysicsCollisionContext {
  * collision resolution. Room passes collision data and receives updated
  * character states (mutated in place on PlayerComponent.state).
  */
+type TreeEntry = { mesh: TreeColliderMesh; transform: TreeTransform };
+type RockEntry = { mesh: RockColliderMesh; transform: RockTransform };
+
 export class PhysicsSystem {
+  private readonly scratchTrees: TreeEntry[] = [];
+  private readonly scratchRocks: RockEntry[] = [];
+
   /**
    * Tick character physics for all active players, then resolve PvP overlaps.
    * Caller must have already dequeued one input per player and synced stamina/isExhausted.
    */
   tick(activePlayers: Entity[], ctx: PhysicsCollisionContext): void {
-    const blockColliders = ctx.blockColliders;
-
     for (const entity of activePlayers) {
       const pc = entity.get<PlayerComponent>(COMP_PLAYER);
       if (!pc) continue;
 
-      let filteredTrees = ctx.treeColliderMeshes;
-      let filteredRocks = ctx.rockColliderMeshes;
+      let filteredTrees: TreeEntry[] = ctx.treeColliderMeshes;
+      let filteredRocks: RockEntry[] = ctx.rockColliderMeshes;
       if (ctx.octree) {
+        this.scratchTrees.length = 0;
+        this.scratchRocks.length = 0;
         const nearby = ctx.octree.queryPoint(pc.state.posX, pc.state.posY, pc.state.posZ, 8);
-        filteredTrees = nearby.filter((e) => e.type === 'tree').map((e) => e.data as (typeof ctx.treeColliderMeshes)[0]);
-        filteredRocks = nearby.filter((e) => e.type === 'rock').map((e) => e.data as (typeof ctx.rockColliderMeshes)[0]);
+        for (const e of nearby) {
+          if (e.type === 'tree') this.scratchTrees.push(e.data as TreeEntry);
+          else if (e.type === 'rock') this.scratchRocks.push(e.data as RockEntry);
+        }
+        filteredTrees = this.scratchTrees;
+        filteredRocks = this.scratchRocks;
       }
+
+      const blockColliders = ctx.getBlockCollidersNear
+        ? ctx.getBlockCollidersNear(pc.state.posX, pc.state.posY, pc.state.posZ, 8)
+        : ctx.blockColliders;
 
       stepCharacter(
         pc.state,
@@ -85,14 +101,13 @@ export class PhysicsSystem {
   }
 
   private resolvePlayerVsPlayer(playerArray: Entity[]): void {
-    const arr = Array.from(playerArray);
-    for (let i = 0; i < arr.length; i++) {
-      const entity1 = arr[i];
+    for (let i = 0; i < playerArray.length; i++) {
+      const entity1 = playerArray[i];
       const pc1 = entity1.get<PlayerComponent>(COMP_PLAYER);
       if (!pc1) continue;
 
-      for (let j = i + 1; j < arr.length; j++) {
-        const entity2 = arr[j];
+      for (let j = i + 1; j < playerArray.length; j++) {
+        const entity2 = playerArray[j];
         const pc2 = entity2.get<PlayerComponent>(COMP_PLAYER);
         if (!pc2) continue;
 

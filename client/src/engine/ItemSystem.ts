@@ -98,22 +98,15 @@ export class ItemSystem {
   }
 
   /**
-   * Handle item position update from server
+   * Handle item settled update from server (server only sends when item lands; in-air motion is local).
    */
   handleUpdate(payload: ItemUpdateMessage): void {
     const node = this.itemNodes.get(payload.entityId);
-    if (node && node.metadata) {
-      // Update base position if still moving
-      if (!node.metadata.settled) {
-        node.metadata.settledY = payload.posY;
-      }
-
-      // Mark as settled when physics stops
-      if (payload.settled && !node.metadata.settled) {
-        node.metadata.settled = true;
-        node.metadata.settledY = payload.posY;
-      }
-    }
+    if (!node || !node.metadata) return;
+    if (!payload.settled) return;
+    node.metadata.settled = true;
+    node.metadata.settledY = payload.posY;
+    node.position.set(payload.posX, payload.posY, payload.posZ);
   }
 
   /**

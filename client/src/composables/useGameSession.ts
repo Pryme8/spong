@@ -276,16 +276,8 @@ export function useGameSession() {
         waterManager = new LevelWaterManager(scene);
         await waterManager.initialize(voxelGrid);
         // Update water ripples every frame (time comes from TimeManager)
-        let mirrorRefreshFrames = 0;
         scene.onBeforeRenderObservable.add(() => {
-          if (waterManager) {
-            waterManager.update();
-            mirrorRefreshFrames++;
-            if (mirrorRefreshFrames >= 120) {
-              mirrorRefreshFrames = 0;
-              waterManager.refreshMirrorRenderList();
-            }
-          }
+          waterManager?.update();
         });
       } catch (error) {
       }
@@ -331,8 +323,8 @@ export function useGameSession() {
       } catch (error) {
       }
       
-      // Initialize leaf effect and blood splatter (creates their post-processes)
-      await initializeLeafEffect(scene, cameraController.getCamera());
+      // Blood splatter + camera-in-leaves check only (no leaf overlay effect; foliage uses backFaceCulling on materials)
+      await setupGamePostProcesses(scene, cameraController.getCamera());
       
       // Initialize final post-processing (FXAA + vignette) LAST so it's applied after all other effects
       finalPostProcess = new FinalPostProcess(scene, cameraController.getCamera());
@@ -864,8 +856,7 @@ export function useGameSession() {
       if (transformSync.getTransform(payload.entityId)) return;
 
       const transform = transformSync.createTransform(payload.entityId, false);
-      // Dummy visuals are already provided by LocalTransform head/body meshes.
-
+      waterManager?.addNodeToMirrorRenderList(transform.getNode());
       const initialState: TransformData = {
         entityId: payload.entityId,
         position: { x: payload.posX, y: payload.posY, z: payload.posZ },
@@ -873,7 +864,6 @@ export function useGameSession() {
         velocity: { x: 0, y: 0, z: 0 },
         headPitch: 0
       };
-
       transform.applyServerState(initialState);
     });
 
@@ -905,6 +895,7 @@ export function useGameSession() {
           if (t >= 1) {
             scene.onBeforeRenderObservable.remove(observer);
             sphere.dispose();
+            material.dispose();
             return;
           }
           
@@ -968,11 +959,9 @@ export function useGameSession() {
         worldZ: t.posZ,
         rotationY: t.rotationY
       }));
-      treeManager.spawnTreeInstances(instances);
-      
-      // Build/rebuild octree
+      const added = treeManager.spawnTreeInstances(instances);
+      added.forEach(m => waterManager?.addMeshToMirrorRenderList(m));
       buildOctreeFromManagers();
-      waterManager?.refreshMirrorRenderList();
     });
     
     // Handle rock spawns from server (level rooms only)
@@ -986,29 +975,23 @@ export function useGameSession() {
         rotationY: r.rotationY,
         scale: r.scale
       }));
-      rockManager.spawnRockInstances(instances);
-      
-      // Build/rebuild octree
+      const added = rockManager.spawnRockInstances(instances);
+      added.forEach(m => waterManager?.addMeshToMirrorRenderList(m));
       buildOctreeFromManagers();
-      waterManager?.refreshMirrorRenderList();
     });
     
     // Handle bush spawns from server (level rooms only)
     networkClient.onLowFrequency(Opcode.BushSpawn, (payload) => {
-      if (!bushManager) {
-        return;
-      }
+      if (!bushManager) return;
       const instances = payload.bushes.map((b: any) => ({
         variationId: b.variationId,
         worldX: b.posX,
         worldY: b.posY,
         worldZ: b.posZ
       }));
-      bushManager.spawnBushInstances(instances);
-      
-      // Build/rebuild octree
+      const added = bushManager.spawnBushInstances(instances);
+      added.forEach(m => waterManager?.addMeshToMirrorRenderList(m));
       buildOctreeFromManagers();
-      waterManager?.refreshMirrorRenderList();
     });
     
     // Helper: Build octree from manager collision data
@@ -1068,7 +1051,7 @@ export function useGameSession() {
       cube.parent = transform.getNode();
       cube.position.y = 0;
       transform.registerPlayerCube(cube);
-      waterManager?.refreshMirrorRenderList();
+      waterManager?.addNodeToMirrorRenderList(transform.getNode());
     });
     
     // Handle players leaving
@@ -1139,6 +1122,7 @@ export function useGameSession() {
       cube.parent = myTransform.value.getNode();
       cube.position.y = 0;
       myTransform.value.registerPlayerCube(cube);
+      waterManager?.addNodeToMirrorRenderList(myTransform.value.getNode());
       if (shadowManager) {
         shadowManager.addShadowCaster(cube, true);
       }
@@ -1342,8 +1326,10 @@ export function useGameSession() {
       }
       
       // Stop preview render loop (if running from loading phase) and start full game loop
-      if (engine && scene && transformSync && cameraController) {
+      const nc = networkClient;
+      if (engine && scene && transformSync && cameraController && nc) {
         engine.stopRenderLoop(); // Stop any existing render loop (e.g., loading preview)
+        nc.setGameLoopDrainBudget(4);
         gameLoop.start(engine, scene, {
           transformSync,
           projectileManager,
@@ -1351,9 +1337,10 @@ export function useGameSession() {
           myTransformRef: myTransform,
           weaponSystem,
           inputManager,
-          networkClient,
+          networkClient: nc,
           scene,
           skyPickSphere,
+          drainNetworkQueue: () => nc.drainHighFreqQueue(64),
           onPositionUpdate: (x, y, z) => {
             playerX.value = x;
             playerY.value = y;
@@ -1535,7 +1522,18 @@ export function useGameSession() {
     engine?.dispose();
   };
   
-  // Leaf effect functions
+  /** Game level: blood splatter + checkCameraInLeaves only (no leaf overlay; bush/leaf materials use backFaceCulling). */
+  async function setupGamePostProcesses(scene: Scene, camera: any) {
+    if (!scene || !camera) return;
+    try {
+      bloodSplatterEffect = new BloodSplatterEffect(scene);
+      setupBloodSplatterPostProcess(scene, camera);
+      scene.onBeforeRenderObservable.add(checkCameraInLeaves);
+    } catch (error) {
+    }
+  }
+
+  // Leaf effect functions (used by other views that want the full leaf overlay)
   async function initializeLeafEffect(scene: Scene, camera: any) {
     if (!scene || !camera) return;
     leafEffect = new BushLeafEffect(scene);
@@ -1549,7 +1547,6 @@ export function useGameSession() {
       }
       setupLeafTriggerDetection(scene, camera);
       
-      // Initialize blood splatter effect and post-process
       bloodSplatterEffect = new BloodSplatterEffect(scene);
       setupBloodSplatterPostProcess(scene, camera);
     } catch (error) {

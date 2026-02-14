@@ -2,7 +2,7 @@
  * Level bush manager - handles bush mesh generation and instancing for levels.
  */
 
-import { Scene, Mesh, StandardMaterial, Color3, VertexData, TransformNode, MeshBuilder } from '@babylonjs/core';
+import { Scene, Mesh, AbstractMesh, StandardMaterial, Color3, VertexData, TransformNode, MeshBuilder } from '@babylonjs/core';
 import { generateBushVariations, BUSH_GRID_W, BUSH_GRID_H, BUSH_GRID_D, BUSH_VOXEL_SIZE, type BushVariation, type BushInstance } from '@spong/shared';
 import { ShadowManager } from '../systems/ShadowManager';
 
@@ -116,8 +116,10 @@ export class LevelBushManager {
 
   /**
    * Spawn bush instances from server data.
+   * Returns created meshes so caller can register them with the water mirror list.
    */
-  spawnBushInstances(instances: BushInstance[]): void {
+  spawnBushInstances(instances: BushInstance[]): AbstractMesh[] {
+    const created: AbstractMesh[] = [];
     this.bushColliders = [];
     
     for (let i = 0; i < instances.length; i++) {
@@ -132,30 +134,15 @@ export class LevelBushManager {
       const bushInstance = baseMesh.createInstance(`bush_inst_${instance.variationId}_${i}`);
       bushInstance.position.set(instance.worldX, instance.worldY, instance.worldZ);
       this.instanceRoots.push(bushInstance as any);
+      created.push(bushInstance);
       
       // Register shadows
       if (this.hasShadows) {
         const sm = ShadowManager.getInstance();
         if (sm) sm.addShadowCaster(bushInstance, false);
       }
-      
-      // Store bush collider data (local AABB + world position)
-      const localBounds = this.bushLocalBounds[instance.variationId];
-      if (localBounds) {
-        this.bushColliders.push({
-          localMinX: localBounds.minX,
-          localMinY: localBounds.minY,
-          localMinZ: localBounds.minZ,
-          localMaxX: localBounds.maxX,
-          localMaxY: localBounds.maxY,
-          localMaxZ: localBounds.maxZ,
-          posX: instance.worldX,
-          posY: instance.worldY,
-          posZ: instance.worldZ,
-          bushIndex: i
-        });
-      }
     }
+    return created;
   }
 
   /**
@@ -288,6 +275,7 @@ export class LevelBushManager {
     mat.diffuseColor = new Color3(0.15, 0.35, 0.12);
     mat.emissiveColor = new Color3(0, 0, 0);
     mat.specularColor = new Color3(0.03, 0.03, 0.03);
+    mat.backFaceCulling = false;
     return mat;
   }
 

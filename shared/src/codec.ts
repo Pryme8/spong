@@ -74,6 +74,61 @@ export function encodeTransform(opcode: number, data: TransformData): ArrayBuffe
   return buffer;
 }
 
+/** Delta format: [opcode:1][entityId:4][posDx:4][posDy:4][posDz:4][velDx:4][velDy:4][velDz:4] = 33 bytes */
+export const TRANSFORM_DELTA_PACKET_SIZE = 33;
+const MAX_DELTA = 5;
+
+export function encodeTransformDelta(
+  opcode: number,
+  data: TransformData,
+  prev: { posX: number; posY: number; posZ: number; velX: number; velY: number; velZ: number }
+): ArrayBuffer | null {
+  const dx = data.position.x - prev.posX;
+  const dy = data.position.y - prev.posY;
+  const dz = data.position.z - prev.posZ;
+  const dvx = data.velocity.x - prev.velX;
+  const dvy = data.velocity.y - prev.velY;
+  const dvz = data.velocity.z - prev.velZ;
+  if (Math.abs(dx) > MAX_DELTA || Math.abs(dy) > MAX_DELTA || Math.abs(dz) > MAX_DELTA ||
+      Math.abs(dvx) > MAX_DELTA || Math.abs(dvy) > MAX_DELTA || Math.abs(dvz) > MAX_DELTA) {
+    return null;
+  }
+  const buffer = new ArrayBuffer(TRANSFORM_DELTA_PACKET_SIZE);
+  const view = new DataView(buffer);
+  view.setUint8(0, opcode);
+  view.setUint32(1, data.entityId, true);
+  view.setFloat32(5, dx, true);
+  view.setFloat32(9, dy, true);
+  view.setFloat32(13, dz, true);
+  view.setFloat32(17, dvx, true);
+  view.setFloat32(21, dvy, true);
+  view.setFloat32(25, dvz, true);
+  return buffer;
+}
+
+export interface TransformDeltaData {
+  entityId: number;
+  positionDelta: { x: number; y: number; z: number };
+  velocityDelta: { x: number; y: number; z: number };
+}
+
+export function decodeTransformDelta(buffer: ArrayBuffer): TransformDeltaData {
+  const view = new DataView(buffer);
+  return {
+    entityId: view.getUint32(1, true),
+    positionDelta: {
+      x: view.getFloat32(5, true),
+      y: view.getFloat32(9, true),
+      z: view.getFloat32(13, true)
+    },
+    velocityDelta: {
+      x: view.getFloat32(17, true),
+      y: view.getFloat32(21, true),
+      z: view.getFloat32(25, true)
+    }
+  };
+}
+
 export function decodeTransform(buffer: ArrayBuffer): TransformData {
   const view = new DataView(buffer);
   

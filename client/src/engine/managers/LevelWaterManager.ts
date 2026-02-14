@@ -49,6 +49,8 @@ export class LevelWaterManager {
   private flowTexture: DynamicTexture | null = null;
   private waterMaterial: CustomMaterial | null = null;
   private mirrorTexture: MirrorTexture | null = null;
+  /** Mutable list so we can add/remove when entities spawn/dispose instead of full scene scan. */
+  private mirrorRenderList: AbstractMesh[] = [];
   params: WaterParams = { ...DEFAULT_PARAMS };
 
   constructor(scene: Scene) {
@@ -112,26 +114,49 @@ export class LevelWaterManager {
     return false;
   }
 
+  /** Whether a mesh should be in the reflection list (same rules as getReflectionMeshes). */
+  private shouldReflect(mesh: AbstractMesh): boolean {
+    if (mesh === this.waterPlane || !mesh.isEnabled() || !mesh.isVisible) return false;
+    if (LevelWaterManager.isItemMesh(mesh)) return false;
+    return true;
+  }
+
   /** Collect all meshes that should be reflected: sky, terrain, trees, bushes, rocks, players. Excludes water plane and item pickups. */
   private getReflectionMeshes(): AbstractMesh[] {
     const list: AbstractMesh[] = [];
-    const waterPlane = this.waterPlane;
-
-    const add = (mesh: AbstractMesh) => {
-      if (mesh === waterPlane || !mesh.isEnabled() || !mesh.isVisible) return;
-      if (LevelWaterManager.isItemMesh(mesh)) return;
-      list.push(mesh);
-    };
-
     for (const mesh of this.scene.meshes) {
-      add(mesh);
+      if (this.shouldReflect(mesh)) list.push(mesh);
     }
     for (const root of this.scene.rootNodes) {
       for (const child of root.getChildMeshes(false)) {
-        add(child);
+        if (this.shouldReflect(child)) list.push(child);
       }
     }
     return list;
+  }
+
+  /** Add one mesh to the mirror list. Call when a new reflectable mesh is created. */
+  addMeshToMirrorRenderList(mesh: AbstractMesh): void {
+    if (!this.mirrorTexture || !this.shouldReflect(mesh)) return;
+    if (this.mirrorRenderList.indexOf(mesh) !== -1) return;
+    this.mirrorRenderList.push(mesh);
+  }
+
+  /** Add a node and all its descendant meshes. Call when an entity (player, dummy, tree, etc.) spawns. */
+  addNodeToMirrorRenderList(node: TransformNode): void {
+    if (node instanceof AbstractMesh) this.addMeshToMirrorRenderList(node);
+    for (const child of node.getChildMeshes(true)) {
+      this.addMeshToMirrorRenderList(child);
+    }
+  }
+
+  /** Remove a node and all its descendant meshes. Call before disposing an entity. */
+  removeNodeFromMirrorRenderList(node: TransformNode): void {
+    const toRemove = new Set<AbstractMesh>();
+    if (node instanceof AbstractMesh) toRemove.add(node);
+    for (const m of node.getChildMeshes(true)) toRemove.add(m);
+    this.mirrorRenderList = this.mirrorRenderList.filter(m => !toRemove.has(m));
+    if (this.mirrorTexture) this.mirrorTexture.renderList = this.mirrorRenderList;
   }
 
   private createMirrorReflection(): void {
@@ -147,7 +172,8 @@ export class LevelWaterManager {
     const visualWaterY = WATER_LEVEL_Y - 0.1;
     this.mirrorTexture.mirrorPlane = new Plane(0, -1.0, 0, visualWaterY);
 
-    this.mirrorTexture.renderList = this.getReflectionMeshes();
+    this.mirrorRenderList = this.getReflectionMeshes();
+    this.mirrorTexture.renderList = this.mirrorRenderList;
 
     // Set reflection level (lower = less strong) and bind to material
     this.mirrorTexture.level = 0.15;
@@ -656,10 +682,11 @@ export class LevelWaterManager {
    * Update mirror reflection render list (call after adding trees, rocks, bushes, players).
    * Includes: sky, terrain, trees, bushes, rocks, players. Excludes: water plane, item pickups.
    */
+  /** Full rebuild of the mirror list. Only use for one-time init (e.g. late-loaded meshes); prefer addNodeToMirrorRenderList when entities spawn. */
   refreshMirrorRenderList(): void {
     if (!this.mirrorTexture || !this.scene) return;
-
-    this.mirrorTexture.renderList = this.getReflectionMeshes();
+    this.mirrorRenderList = this.getReflectionMeshes();
+    this.mirrorTexture.renderList = this.mirrorRenderList;
   }
 
   /**

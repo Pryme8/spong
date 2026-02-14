@@ -2,6 +2,7 @@
   <v-overlay 
     :model-value="visible" 
     class="countdown-overlay"
+    content-class="countdown-overlay__content"
     persistent
     no-click-animation
   >
@@ -24,6 +25,14 @@ defineProps<{
   background: rgba(0, 0, 0, 0.7);
   pointer-events: none;
   z-index: 9998;
+}
+
+.countdown-overlay__content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .countdown-content {

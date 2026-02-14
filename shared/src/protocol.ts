@@ -14,7 +14,9 @@ export enum Opcode {
   ProjectileSpawn = 0x04,
   ProjectileDestroy = 0x05,
   ProjectileSpawnBatch = 0x06,
-  
+  /** Delta-compressed transform (pos/vel deltas from last full). Same handler as TransformUpdate. */
+  TransformDelta = 0x07,
+
   // Low-frequency JSON messages (0x10+)
   RoomJoin = 0x10,
   RoomLeave = 0x11,

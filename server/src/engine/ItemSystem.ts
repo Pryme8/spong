@@ -454,17 +454,21 @@ export class ItemSystem {
     this.world.destroyEntity(pickup.itemId);
   }
 
-  /** Broadcast ItemUpdate for collectables that moved or just settled. */
+  /**
+   * Broadcast ItemUpdate only when an item lands (settled). All item traffic is low-frequency:
+   * ItemSpawn (spawn/drop), ItemUpdate (once per land, justSettledIds only), ItemPickup (pickup).
+   * No high-frequency position stream; in-air motion is client-side only.
+   */
   broadcastPositionUpdates(collectableEntities: Entity[], justSettledIds: Set<number>): void {
     for (const entity of collectableEntities) {
+      if (!justSettledIds.has(entity.id)) continue;
       const physics = entity.get<PhysicsComponent>(COMP_PHYSICS)!;
-      if (physics.onGround && !justSettledIds.has(entity.id)) continue;
       const update: ItemUpdateMessage = {
         entityId: entity.id,
         posX: physics.posX,
         posY: physics.posY,
         posZ: physics.posZ,
-        settled: physics.onGround
+        settled: true
       };
       this.broadcast(Opcode.ItemUpdate, update);
     }

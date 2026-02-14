@@ -120,6 +120,25 @@ export class BuildingCollisionManager {
   }
   
   /**
+   * Generate block colliders within radius of a point (for spatial culling).
+   * Uses AABB-sphere intersection. Use radius 0 to skip culling (return all).
+   */
+  getBlockCollidersNear(centerX: number, centerY: number, centerZ: number, radius: number): BoxCollider[] {
+    const all = this.getBlockColliders();
+    if (radius <= 0) return all;
+    const rSq = radius * radius;
+    return all.filter(box => {
+      const closestX = Math.max(box.minX, Math.min(centerX, box.maxX));
+      const closestY = Math.max(box.minY, Math.min(centerY, box.maxY));
+      const closestZ = Math.max(box.minZ, Math.min(centerZ, box.maxZ));
+      const dx = centerX - closestX;
+      const dy = centerY - closestY;
+      const dz = centerZ - closestZ;
+      return dx * dx + dy * dy + dz * dz <= rSq;
+    });
+  }
+
+  /**
    * Generate block colliders for physics prediction.
    * MUST match server implementation in Room.ts exactly!
    * Returns colliders from ALL buildings aggregated.

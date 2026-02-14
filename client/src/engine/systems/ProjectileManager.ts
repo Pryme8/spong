@@ -35,6 +35,10 @@ export class ProjectileManager {
   /** When we skip spawning server visual for our own shot, map server entityId -> our predicted id so destroy(serverId) removes the right visual. */
   private serverEntityIdToPredictedId = new Map<number, number>();
 
+  /** Safety: cap total projectiles so a bug or missed destroys can't make the game unplayable. */
+  private readonly MAX_PROJECTILES = 96;
+  private readonly MAX_PROJECTILE_AGE_MS = 3500; // Real-time max age (prune even if lifetime logic fails)
+
   constructor(scene: Scene) {
     this.scene = scene;
 
@@ -158,8 +162,15 @@ export class ProjectileManager {
   /** Fixed-timestep tick: advance all projectiles, check collisions, cull expired. */
   fixedUpdate(dt: number): void {
     const toRemove: number[] = [];
+    const now = Date.now();
 
     for (const [id, proj] of this.projectiles) {
+      // Safety: real-time max age so we always clean up even if server destroy is missed
+      if (now - proj.spawnTime > this.MAX_PROJECTILE_AGE_MS) {
+        toRemove.push(id);
+        continue;
+      }
+
       // Store previous position for swept collision
       const prevX = proj.component.posX;
       const prevY = proj.component.posY;
@@ -168,7 +179,7 @@ export class ProjectileManager {
       // Advance projectile
       stepProjectile(proj.component, dt);
 
-      // Check expiry
+      // Check expiry (game-time lifetime)
       if (proj.component.lifetime <= 0) {
         toRemove.push(id);
         continue;
@@ -188,8 +199,17 @@ export class ProjectileManager {
       }
     }
 
+    // Safety: hard cap so we never accumulate unbounded (e.g. missed destroys, reorder)
+    if (this.projectiles.size > this.MAX_PROJECTILES) {
+      const byAge = Array.from(this.projectiles.entries())
+        .sort((a, b) => a[1].spawnTime - b[1].spawnTime);
+      const removeCount = this.projectiles.size - (this.MAX_PROJECTILES >>> 1);
+      for (let i = 0; i < removeCount && i < byAge.length; i++) {
+        toRemove.push(byAge[i][0]);
+      }
+    }
+
     // Clean up old predicted IDs that weren't matched
-    const now = Date.now();
     this.recentPredictedIds = this.recentPredictedIds.filter(id => {
       const proj = this.projectiles.get(id);
       if (!proj) return false;
@@ -213,6 +233,7 @@ export class ProjectileManager {
   }
 
   private createProjectile(id: number, data: ProjectileSpawnData, isPredicted: boolean): void {
+    if (this.projectiles.size >= this.MAX_PROJECTILES) return;
     // Create an instance of the base mesh (much faster than creating new geometry)
     // Instancing reuses the same geometry for all projectiles - huge performance win
     const mesh = this.baseMesh.createInstance(`proj_${id}`);

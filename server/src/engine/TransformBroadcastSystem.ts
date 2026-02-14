@@ -1,6 +1,6 @@
 /**
  * Server-side transform and state broadcast. Builds TransformUpdate binary per player,
- * broadcasts with delta-based stamina/armor/helmet updates. Owns broadcast cache.
+ * broadcasts to all connections. Delta-based stamina/armor/helmet updates.
  */
 
 import type { Entity } from '@spong/shared';

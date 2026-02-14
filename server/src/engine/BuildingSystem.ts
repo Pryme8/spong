@@ -52,6 +52,8 @@ export class BuildingSystem {
   private readonly buildingEntities = new Map<number, Entity>();
   private readonly blockPhysics = new Map<string, { mesh: { position: { set: (x: number, y: number, z: number) => void }; dispose: () => void }; aggregate: { dispose: () => void } }>();
   private readonly blockColliderCache = new Map<number, Map<string, BlockColliderEntry>>();
+  private cachedColliders: BoxCollider[] | undefined = undefined;
+  private collidersDirty = true;
 
   constructor(options: BuildingSystemOptions) {
     this.world = options.world;
@@ -79,6 +81,7 @@ export class BuildingSystem {
     buildingEntity.add(COMP_BUILDING, buildingComp);
     this.buildingEntities.set(buildingEntityId, buildingEntity);
     this.blockColliderCache.set(buildingEntityId, new Map());
+    this.collidersDirty = true;
 
     const createdMsg: BuildingCreatedMessage = {
       buildingEntityId,
@@ -240,12 +243,32 @@ export class BuildingSystem {
     this.world.destroyEntity(buildingEntity.id);
     this.buildingEntities.delete(data.buildingEntityId);
     this.blockColliderCache.delete(data.buildingEntityId);
+    this.collidersDirty = true;
 
     this.broadcast(Opcode.BuildingDestroyed, { buildingEntityId: data.buildingEntityId });
   }
 
+  /**
+   * Return block colliders within radius of a point. Use radius 0 for all.
+   */
+  collectBlockCollidersNear(centerX: number, centerY: number, centerZ: number, radius: number): BoxCollider[] | undefined {
+    const all = this.collectBlockColliders();
+    if (!all || radius <= 0) return all;
+    const rSq = radius * radius;
+    return all.filter(box => {
+      const closestX = Math.max(box.minX, Math.min(centerX, box.maxX));
+      const closestY = Math.max(box.minY, Math.min(centerY, box.maxY));
+      const closestZ = Math.max(box.minZ, Math.min(centerZ, box.maxZ));
+      const dx = centerX - closestX;
+      const dy = centerY - closestY;
+      const dz = centerZ - closestZ;
+      return dx * dx + dy * dy + dz * dz <= rSq;
+    });
+  }
+
   collectBlockColliders(): BoxCollider[] | undefined {
     if (this.blockColliderCache.size === 0) return undefined;
+    if (!this.collidersDirty && this.cachedColliders !== undefined) return this.cachedColliders;
     const colliders: BoxCollider[] = [];
     for (const cache of this.blockColliderCache.values()) {
       for (const entry of cache.values()) {
@@ -259,7 +282,9 @@ export class BuildingSystem {
         });
       }
     }
-    return colliders.length > 0 ? colliders : undefined;
+    this.cachedColliders = colliders.length > 0 ? colliders : undefined;
+    this.collidersDirty = false;
+    return this.cachedColliders;
   }
 
   getInitialStateMessages(): BuildingInitialStateMessage[] {
@@ -351,17 +376,20 @@ export class BuildingSystem {
     if (!cache) return;
     const key = this.getBlockColliderKey(gridX, gridY, gridZ);
     cache.set(key, this.buildBlockColliderEntry(building, gridX, gridY, gridZ));
+    this.collidersDirty = true;
   }
 
   private removeBlockCollider(buildingEntityId: number, gridX: number, gridY: number, gridZ: number): void {
     const cache = this.blockColliderCache.get(buildingEntityId);
     if (!cache) return;
     cache.delete(this.getBlockColliderKey(gridX, gridY, gridZ));
+    this.collidersDirty = true;
   }
 
   private rebuildBlockCollidersForBuilding(buildingEntityId: number, building: BuildingComponent): void {
     const cache = this.blockColliderCache.get(buildingEntityId);
     if (!cache || cache.size === 0) return;
+    this.collidersDirty = true;
     for (const entry of cache.values()) {
       const updated = this.buildBlockColliderEntry(building, entry.gridX, entry.gridY, entry.gridZ);
       entry.minX = updated.minX;

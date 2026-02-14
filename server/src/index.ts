@@ -83,30 +83,18 @@ await killPort(config.port);
 // Wait a bit longer to ensure port is fully released
 await new Promise(resolve => setTimeout(resolve, 500));
 
-// Cleanup function for graceful shutdown
+// Cleanup function for graceful shutdown (hot reload or SIGINT/SIGTERM)
 async function cleanup(_signal: string) {
-  // Set a very short timeout for hot reload scenarios
-  const forceExitTimeout = setTimeout(() => {
-    process.exit(0); // Exit 0 for hot reload, not an error
-  }, 500); // Very short timeout for fast hot reload
-  
+  const forceExitTimeout = setTimeout(() => process.exit(0), 3000);
   try {
-    // Close Fastify server first (releases port immediately)
+    roomManager.dispose();
+    fastify.connectionHandler.dispose();
     await fastify.close();
-    // Dispose room manager quickly (don't wait for everything)
-    setImmediate(() => {
-      try {
-        roomManager.dispose();
-      } catch (_err) {
-        // Ignore errors during hot reload cleanup
-      }
-    });
-    
     clearTimeout(forceExitTimeout);
     process.exit(0);
   } catch (_err) {
     clearTimeout(forceExitTimeout);
-    process.exit(0); // Still exit cleanly for hot reload
+    process.exit(0);
   }
 }
 

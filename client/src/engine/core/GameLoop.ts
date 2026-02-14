@@ -29,12 +29,21 @@ interface GameLoopDependencies {
   onFixedTick?: () => void;
   /** Called every frame after interpolation. Use for timer updates and per-frame logic. */
   onVariableTick?: (deltaTime: number) => void;
+  /** Drain deferred network updates (run in same rAF as game to avoid long separate rAF). */
+  drainNetworkQueue?: () => void;
+}
+
+/** Enable with ?frameTiming=1 in the URL to see per-section timings in the Performance tab. */
+function isFrameTimingEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('frameTiming') === '1';
 }
 
 export class GameLoop {
   private lastFrameTime = performance.now();
   private physicsAccumulator = 0;
   private stopHandle: (() => void) | null = null;
+  private frameTiming = false;
 
   /**
    * Start the game loop
@@ -46,8 +55,21 @@ export class GameLoop {
 
     this.lastFrameTime = performance.now();
     this.physicsAccumulator = 0;
+    this.frameTiming = isFrameTimingEnabled();
 
     engine.runRenderLoop(() => {
+      const t = this.frameTiming ? (name: string) => {
+        performance.mark(`frame-${name}-start`);
+        return () => {
+          performance.mark(`frame-${name}-end`);
+          performance.measure(`frame: ${name}`, `frame-${name}-start`, `frame-${name}-end`);
+        };
+      } : () => () => {};
+
+      const endDrain = t('drainNetworkQueue');
+      deps.drainNetworkQueue?.();
+      endDrain();
+
       const now = performance.now();
       const frameDelta = (now - this.lastFrameTime) * 0.001;
       this.lastFrameTime = now;
@@ -55,6 +77,7 @@ export class GameLoop {
       // Cap accumulated time to prevent spiral of death
       this.physicsAccumulator += Math.min(frameDelta, 0.25);
 
+      const endPhysics = t('physics');
       // Fixed timestep physics updates
       while (this.physicsAccumulator >= FIXED_TIMESTEP) {
         // Update global time manager at fixed 60Hz
@@ -67,17 +90,25 @@ export class GameLoop {
         deps.projectileManager?.fixedUpdate(FIXED_TIMESTEP);
         this.physicsAccumulator -= FIXED_TIMESTEP;
       }
+      endPhysics();
 
       // Variable rate: interpolation + camera + render
       // Calculate physics interpolation alpha (how far between last and next physics tick)
       const physicsAlpha = this.physicsAccumulator / FIXED_TIMESTEP;
 
+      const endTransforms = t('transformSync.updateAll');
       deps.transformSync.updateAll(frameDelta, physicsAlpha);
-      deps.projectileManager?.update();
-      
-      // Call variable tick callback for per-frame logic
-      deps.onVariableTick?.(frameDelta);
+      endTransforms();
 
+      const endProjectiles = t('projectileManager.update');
+      deps.projectileManager?.update();
+      endProjectiles();
+
+      const endVariableTick = t('onVariableTick');
+      deps.onVariableTick?.(frameDelta);
+      endVariableTick();
+
+      const endCamera = t('cameraAndWeapon');
       const myTransform = deps.myTransformRef.value;
       if (myTransform) {
         const pos = myTransform.getPosition();
@@ -129,8 +160,11 @@ export class GameLoop {
           deps.weaponSystem.shoot(myTransform, deps.cameraController, deps.scene, deps.projectileManager, deps.networkClient);
         }
       }
+      endCamera();
 
+      const endRender = t('scene.render');
       scene.render();
+      endRender();
     });
 
     this.stopHandle = () => {

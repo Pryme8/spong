@@ -58,7 +58,7 @@ export class LocalTransform {
   // ── Input replay buffer (local player only) ────────────────
   private inputBuffer: InputSnapshot[] = [];
   private currentSequence = 0;
-  private readonly MAX_BUFFER_SIZE = 128;
+  private readonly MAX_BUFFER_SIZE = 64;
 
   // ── Local player: physics tick interpolation ───────────────
   // We store the state BEFORE the most recent physics step so we
@@ -240,7 +240,9 @@ export class LocalTransform {
     }
 
     // Get collision data for client-side prediction (must match server exactly)
-    const blockColliders = this.buildingCollisionManager?.getBlockColliders();
+    const blockColliders = this.buildingCollisionManager?.getBlockCollidersNear(
+      this.state.posX, this.state.posY, this.state.posZ, 8
+    );
     let treeColliders = this.treeColliderGetter?.() ?? [];
     let rockColliders = this.rockColliderGetter?.() ?? [];
     
@@ -309,7 +311,9 @@ export class LocalTransform {
 
       // 4. Replay all unacknowledged inputs
       // CRITICAL: Must use same collision data as initial prediction
-      const blockColliders = this.buildingCollisionManager?.getBlockColliders();
+      const blockColliders = this.buildingCollisionManager?.getBlockCollidersNear(
+        this.state.posX, this.state.posY, this.state.posZ, 8
+      );
       let treeColliders = this.treeColliderGetter?.() ?? [];
       let rockColliders = this.rockColliderGetter?.() ?? [];
       

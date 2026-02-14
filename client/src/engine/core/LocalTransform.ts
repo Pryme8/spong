@@ -20,6 +20,7 @@ import type { BuildingCollisionManager } from '../building/BuildingCollisionMana
 import { EYE_HEIGHT, EYE_FORWARD_OFFSET, LAYER_HIDDEN_FROM_MAIN } from '../camera/CameraController';
 import { WeaponHolder } from '../systems/WeaponHolder';
 import type { WeaponType } from '../systems/WeaponSystem';
+import { LevelWaterManager } from '../managers/LevelWaterManager';
 
 interface InputSnapshot {
   sequence: number;
@@ -61,7 +62,7 @@ export class LocalTransform {
   // ── Input replay buffer (local player only) ────────────────
   private inputBuffer: InputSnapshot[] = [];
   private currentSequence = 0;
-  private readonly MAX_BUFFER_SIZE = 128;
+  private readonly MAX_BUFFER_SIZE = 64;
 
   // ── Local player: physics tick interpolation ───────────────
   // We store the state BEFORE the most recent physics step so we
@@ -256,7 +257,9 @@ export class LocalTransform {
     }
 
     // Get collision data for client-side prediction (must match server exactly)
-    const blockColliders = this.buildingCollisionManager?.getBlockColliders();
+    const blockColliders = this.buildingCollisionManager?.getBlockCollidersNear(
+      this.state.posX, this.state.posY, this.state.posZ, 8
+    );
     const fullTreeColliders = this.treeColliderGetter?.() ?? [];
     const fullRockColliders = this.rockColliderGetter?.() ?? [];
     let treeColliders = fullTreeColliders;
@@ -268,11 +271,6 @@ export class LocalTransform {
       const nearby = octree.queryPoint(this.state.posX, this.state.posY, this.state.posZ, 8);
       treeColliders = nearby.filter((e: any) => e.type === 'tree').map((e: any) => e.data);
       rockColliders = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
-      // Fallback: if octree has no tree/rock entries (e.g. built before TreeSpawn), use full list
-      if (treeColliders.length === 0 && fullTreeColliders.length > 0) {
-        treeColliders = fullTreeColliders;
-      }
-      if (rockColliders.length === 0 && fullRockColliders.length > 0) rockColliders = fullRockColliders;
     }
 
     const waterProvider = this.waterLevelProviderGetter ? this.waterLevelProviderGetter() : undefined;
@@ -332,7 +330,9 @@ export class LocalTransform {
 
       // 4. Replay all unacknowledged inputs
       // CRITICAL: Must use same collision data as initial prediction
-      const blockColliders = this.buildingCollisionManager?.getBlockColliders();
+      const blockColliders = this.buildingCollisionManager?.getBlockCollidersNear(
+        this.state.posX, this.state.posY, this.state.posZ, 8
+      );
       const fullTreeColliders = this.treeColliderGetter?.() ?? [];
       const fullRockColliders = this.rockColliderGetter?.() ?? [];
       let treeColliders = fullTreeColliders;
@@ -343,8 +343,6 @@ export class LocalTransform {
         const nearby = octree.queryPoint(this.state.posX, this.state.posY, this.state.posZ, 8);
         treeColliders = nearby.filter((e: any) => e.type === 'tree').map((e: any) => e.data);
         rockColliders = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
-        if (treeColliders.length === 0 && fullTreeColliders.length > 0) treeColliders = fullTreeColliders;
-        if (rockColliders.length === 0 && fullRockColliders.length > 0) rockColliders = fullRockColliders;
       }
 
       for (const snapshot of this.inputBuffer) {
@@ -614,6 +612,7 @@ export class LocalTransform {
   }
 
   dispose() {
+    LevelWaterManager.getInstance()?.removeNodeFromMirrorRenderList(this.node);
     if (this.armorNode) {
       disposePlayerArmorMesh(`player_${this.entityId}`, this.scene);
       this.armorNode = null;

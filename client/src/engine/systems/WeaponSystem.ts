@@ -208,20 +208,14 @@ export class WeaponSystem {
         if (mesh.name === `cube_${myTransform.entityId}`) return false;
         if (mesh.name === `body_${myTransform.entityId}`) return false;
         if (mesh.name === `head_${myTransform.entityId}`) return false;
+        if (mesh.name.startsWith(`player_${myTransform.entityId}_helmet_`)) return false;
         if (mesh.name.startsWith('item_')) return false;
         if (mesh.name === 'basePlayerCube') return false;
+        if (mesh.name.startsWith('tree_leaf')) return false;
+        if (mesh.name.startsWith('bush_')) return false;
         return mesh.isPickable;
       }
     );
-
-    console.log('[raycast] center-of-screen', {
-      rayOrigin: ray.origin ? [ray.origin.x, ray.origin.y, ray.origin.z] : null,
-      rayDirection: ray.direction ? [ray.direction.x, ray.direction.y, ray.direction.z] : null,
-      hit: pick?.hit ?? false,
-      pickedPoint: pick?.pickedPoint ? [pick.pickedPoint.x, pick.pickedPoint.y, pick.pickedPoint.z] : null,
-      pickedMesh: pick?.pickedMesh?.name ?? null,
-      distance: pick?.distance ?? null
-    });
 
     if (!pick || !pick.hit || !pick.pickedPoint) {
       return false;

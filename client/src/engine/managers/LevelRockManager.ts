@@ -3,7 +3,7 @@
  * Rocks use a simple gray material; striation texture generator is available in RockStriationTexture but not bound here.
  */
 
-import { Scene, Mesh, StandardMaterial, Color3, VertexData, Vector3 } from '@babylonjs/core';
+import { Scene, Mesh, AbstractMesh, StandardMaterial, Color3, VertexData, Vector3 } from '@babylonjs/core';
 import { generateRockVariations, ROCK_VOXEL_SIZE, type RockVariation, type RockInstance, type RockColliderMesh, type RockTransform } from '@spong/shared';
 import { ShadowManager } from '../systems/ShadowManager';
 
@@ -65,8 +65,10 @@ export class LevelRockManager {
   /**
    * Create mesh instances from rock placement data.
    * Call this when RockSpawn message is received from server.
+   * Returns created meshes so caller can register them with the water mirror list.
    */
-  spawnRockInstances(instances: RockInstance[]): void {
+  spawnRockInstances(instances: RockInstance[]): AbstractMesh[] {
+    const created: AbstractMesh[] = [];
     // Build collision data matching server (Room.ts spawnLevelRocks)
     this.colliderMeshes = instances.map(instance => {
       const variation = this.variations[instance.variationId];
@@ -108,6 +110,7 @@ export class LevelRockManager {
       rockInstance.rotation.y = instance.rotationY;
       rockInstance.scaling.setAll(scale);
       this.instanceRoots.push(rockInstance);
+      created.push(rockInstance);
       
       // Register shadows with self-shadowing (same pattern as trees)
       if (this.hasShadows) {
@@ -115,6 +118,7 @@ export class LevelRockManager {
         if (sm) sm.addShadowCaster(rockInstance, true);
       }
     }
+    return created;
   }
 
   /**

@@ -2,7 +2,7 @@
  * Level tree manager - handles tree mesh generation and instancing for levels.
  */
 
-import { Scene, Mesh, StandardMaterial, Color3, VertexData, TransformNode, MeshBuilder } from '@babylonjs/core';
+import { Scene, Mesh, AbstractMesh, StandardMaterial, Color3, VertexData, TransformNode, MeshBuilder } from '@babylonjs/core';
 import { generateTreeVariations, type TreeVariation, type TreeInstance, type TreeQuad } from '@spong/shared';
 import type { TreeColliderMesh } from '@spong/shared/dist/src/treegen/TreeMesh';
 import type { TreeTransform } from '@spong/shared/dist/src/treegen/TreeMeshTransform';
@@ -155,8 +155,10 @@ export class LevelTreeManager {
   /**
    * Create mesh instances from tree placement data.
    * Call this when TreeSpawn message is received from server.
+   * Returns created meshes so caller can register them with the water mirror list.
    */
-  spawnTreeInstances(instances: TreeInstance[]): void {
+  spawnTreeInstances(instances: TreeInstance[]): AbstractMesh[] {
+    const created: AbstractMesh[] = [];
     // Build collision data matching server (Room.ts spawnLevelTrees)
     const TREE_SCALE = 0.4;
     this.colliderMeshes = instances.map(instance => {
@@ -190,6 +192,7 @@ export class LevelTreeManager {
       woodInstance.position.set(instance.worldX, instance.worldY + 0.4, instance.worldZ);
       woodInstance.rotation.y = instance.rotationY;
       this.instanceRoots.push(woodInstance as any);
+      created.push(woodInstance);
       
       // Register shadows with self-shadowing if enabled
       if (this.hasShadows) {
@@ -203,6 +206,7 @@ export class LevelTreeManager {
         leafInstance.position.set(instance.worldX, instance.worldY + 0.4, instance.worldZ);
         leafInstance.rotation.y = instance.rotationY;
         this.instanceRoots.push(leafInstance as any);
+        created.push(leafInstance);
         
         // Register shadows with self-shadowing if enabled
         if (this.hasShadows) {
@@ -217,6 +221,7 @@ export class LevelTreeManager {
         // }
       }
     }
+    return created;
   }
 
   /**

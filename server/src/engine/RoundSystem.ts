@@ -42,6 +42,7 @@ export class RoundSystem {
   phase: 'waiting' | 'countdown' | 'active' | 'ended' = 'waiting';
   scores = new Map<number, PlayerScore>();
   countdownTimer?: NodeJS.Timeout;
+  endRoundTimeout?: NodeJS.Timeout;
   countdownSeconds = 0;
   roundStartTime?: number;
   config: RoundConfig = {
@@ -177,7 +178,8 @@ export class RoundSystem {
   endRound(): void {
     this.phase = 'ended';
     this.broadcastRoundState();
-    setTimeout(() => {
+    this.endRoundTimeout = setTimeout(() => {
+      this.endRoundTimeout = undefined;
       this.phase = 'waiting';
       this.roundStartTime = undefined;
       this.checkRoundStart();
@@ -202,11 +204,15 @@ export class RoundSystem {
     this.broadcast(Opcode.RoundState, this.getRoundStateMessage());
   }
 
-  /** Clear countdown timer and set phase to waiting (e.g. when too few players or room dispose). */
+  /** Clear countdown and end-round timers; set phase to waiting (e.g. when too few players or room dispose). */
   cancelCountdown(): void {
     if (this.countdownTimer) {
       clearInterval(this.countdownTimer);
       this.countdownTimer = undefined;
+    }
+    if (this.endRoundTimeout) {
+      clearTimeout(this.endRoundTimeout);
+      this.endRoundTimeout = undefined;
     }
     this.phase = 'waiting';
     this.roundStartTime = undefined;

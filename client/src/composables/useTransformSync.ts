@@ -25,9 +25,7 @@ export function useTransformSync(
   // Handle transform updates from server
   networkClient.onHighFrequency(Opcode.TransformUpdate, (data: TransformData) => {
     const transform = transforms.value.get(data.entityId);
-    if (transform) {
-      transform.applyServerState(data);
-    }
+    if (transform) transform.applyServerState(data);
   });
 
   const createTransform = (entityId: number, isLocal: boolean, voxelGrid?: VoxelGrid): LocalTransform => {

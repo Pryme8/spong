@@ -65,31 +65,25 @@ export function useRoundState() {
     }
   }
   
+  const RECENT_KILLS_TTL_MS = 5000;
+  const RECENT_KILLS_MAX = 5;
+
   function addKill(killerId: number, killerName: string, victimId: number, victimName: string) {
-    const isSuicide = killerId === victimId;
-    
+    const now = Date.now();
+    recentKills.value = recentKills.value.filter(k => now - k.timestamp < RECENT_KILLS_TTL_MS);
+
     const killEvent: KillEvent = {
       killerId,
       killerName,
       victimId,
       victimName,
-      timestamp: Date.now(),
-      isSuicide,
+      timestamp: now,
+      isSuicide: killerId === victimId,
     };
-    
     recentKills.value.push(killEvent);
-    
-    // Keep only last 5
-    if (recentKills.value.length > 5) {
+    if (recentKills.value.length > RECENT_KILLS_MAX) {
       recentKills.value.shift();
     }
-    
-    // Auto-expire after 5 seconds
-    setTimeout(() => {
-      recentKills.value = recentKills.value.filter(k => 
-        Date.now() - k.timestamp < 5000
-      );
-    }, 5000);
   }
   
   function getPlayerName(entityId: number): string {

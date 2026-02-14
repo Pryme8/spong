@@ -67,6 +67,13 @@ export class NetworkClient {
   private connectionListeners: Array<() => void> = [];
   private disconnectionListeners: Array<() => void> = [];
 
+  /** Defer high-frequency handler work so the WebSocket message handler returns quickly (avoids [Violation] 'message' handler took Nms). */
+  private highFreqQueue: Array<{ opcode: number; run: () => void }> = [];
+  /** When set, game loop drains this queue each frame; no rAF is used (avoids separate long rAF). */
+  private drainBudget = 0;
+  /** Cap queue size to prevent unbounded growth → O(n) splice death spiral. Server sends ~30*N transforms/sec + projectiles. */
+  private static readonly MAX_HIGH_FREQ_QUEUE = 512;
+
   constructor(url: string) {
     this.url = url;
     this.simulatedLatencyMs = getSimulatedLatencyMs();
@@ -129,6 +136,30 @@ export class NetworkClient {
     }
   }
 
+  /**
+   * Process up to maxItems from the high-freq queue. Call once per frame from the game loop
+   * so work runs in the same rAF as the rest of the game (avoids [Violation] rAF handler took Nms).
+   */
+  drainHighFreqQueue(maxItems: number): void {
+    const chunk = this.highFreqQueue.splice(0, maxItems);
+    for (const { run } of chunk) run();
+  }
+
+  /** Tell the client the game loop will call drainHighFreqQueue each frame so we don't schedule a separate rAF. */
+  setGameLoopDrainBudget(perFrame: number): void {
+    this.drainBudget = perFrame;
+  }
+
+  private scheduleHighFreqFlush(): void {
+    if (this.drainBudget > 0) return; // Game loop will drain; don't schedule rAF
+    if (this.highFreqQueue.length === 0) return;
+    requestAnimationFrame(() => {
+      const chunk = this.highFreqQueue.splice(0, 64);
+      for (const { run } of chunk) run();
+      if (this.highFreqQueue.length > 0) this.scheduleHighFreqFlush();
+    });
+  }
+
   private handleMessage(data: ArrayBuffer | string) {
     if (typeof data === 'string') {
       return;
@@ -137,23 +168,28 @@ export class NetworkClient {
     const view = new DataView(data);
     const opcode = view.getUint8(0);
 
-    // High-frequency binary message
+    // High-frequency binary: decode now (cheap), run handlers on next frame so message handler returns fast
     if (opcode <= 0x0f) {
-      if (opcode === Opcode.TransformUpdate) {
-        const handlers = this.highFreqHandlers.get(opcode);
-        if (handlers) {
-          const transformData = decodeTransform(data);
-          handlers.forEach(handler => handler(transformData));
+      const push = (run: () => void) => {
+        if (this.highFreqQueue.length >= NetworkClient.MAX_HIGH_FREQ_QUEUE) {
+          this.highFreqQueue.shift();
         }
+        this.highFreqQueue.push({ opcode, run });
+        this.scheduleHighFreqFlush();
+      };
+      if (opcode === Opcode.TransformUpdate) {
+        const transformData = decodeTransform(data);
+        const handlers = this.highFreqHandlers.get(opcode);
+        if (handlers?.length) push(() => handlers.forEach(h => h(transformData)));
       } else if (opcode === Opcode.ProjectileSpawn) {
         const spawnData = decodeProjectileSpawn(data);
-        this.projectileSpawnHandlers.forEach(h => h(spawnData));
+        if (this.projectileSpawnHandlers.length) push(() => this.projectileSpawnHandlers.forEach(h => h(spawnData)));
       } else if (opcode === Opcode.ProjectileSpawnBatch) {
         const batchData = decodeProjectileSpawnBatch(data);
-        this.projectileSpawnBatchHandlers.forEach(h => h(batchData));
+        if (this.projectileSpawnBatchHandlers.length) push(() => this.projectileSpawnBatchHandlers.forEach(h => h(batchData)));
       } else if (opcode === Opcode.ProjectileDestroy) {
         const destroyData = decodeProjectileDestroy(data);
-        this.projectileDestroyHandlers.forEach(h => h(destroyData));
+        if (this.projectileDestroyHandlers.length) push(() => this.projectileDestroyHandlers.forEach(h => h(destroyData)));
       }
     } else {
       // Low-frequency JSON message
