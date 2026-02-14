@@ -266,8 +266,8 @@ New systems to add. Before starting any of these, make sure the systems they int
   - [ ] Armor vest + helmet spawn config
   - [ ] Materials/resource pack config
   - [ ] Organized UI tabs/sections
-- [ ] **Terrain ring system (9-tile world expansion)**
-  - [ ] **Terrain tiles** — wrap center tile in ring of 8 tiles (3×3 grid)
+- [ ] **Terrain ring system (9-tile world expansion)** *(in progress)*
+  - [x] ~~**Terrain tiles** — wrap center tile in ring of 8 tiles (3×3 grid)~~ (Completed: MultiTileVoxelGrid, generateMultiTileTerrain)
     - [ ] Create `MultiTileVoxelGrid` or extend `VoxelGrid` to support 9 tiles with per-tile offsets
     - [ ] Each tile: 100×100 voxels, same noise gen with tile-relative seed (e.g. `seed_tile_${tx}_${tz}`)
     - [ ] World bounds: ~-300 to 300 in X/Z (600×600 units total)

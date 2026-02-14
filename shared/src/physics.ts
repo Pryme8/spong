@@ -1,6 +1,10 @@
 import { GRAVITY, GROUND_HEIGHT, CHARACTER, WATER } from './physicsConstants.js';
 import { PLAYER_HITBOX_HALF, PLAYER_CAPSULE_RADIUS } from './types.js';
 import type { VoxelGrid } from './levelgen/VoxelGrid.js';
+import type { MultiTileVoxelGrid } from './levelgen/MultiTileVoxelGrid.js';
+
+/** Terrain grid for collision - VoxelGrid or MultiTileVoxelGrid */
+export type TerrainCollisionGrid = VoxelGrid | MultiTileVoxelGrid;
 import { aabbVsVoxelGrid, capsuleVsTriangleMesh, capsuleVsTreeMesh } from './collision.js';
 import type { RockColliderMesh, RockTransform } from './rockgen/index.js';
 import type { TreeColliderMesh } from './treegen/TreeMesh.js';
@@ -174,7 +178,7 @@ export function stepCharacter(
   state: CharacterState,
   input: CharacterInput,
   dt: number,
-  voxelGrid?: VoxelGrid,
+  voxelGrid?: TerrainCollisionGrid,
   treeColliderMeshes?: Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>,
   rockColliderMeshes?: Array<{ mesh: RockColliderMesh; transform: RockTransform }>,
   blockColliders?: BoxCollider[]
@@ -399,8 +403,8 @@ export function stepCharacter(
     // Note: isGrounded will be re-checked after block collision below
   }
 
-  // ── Play-area boundary (100 unit box) ──────────────────────
-  const maxBoundary = 100;
+  // ── Play-area boundary (9-tile world: ±270) ─────────────────
+  const maxBoundary = 270;
   if (state.posX > maxBoundary) {
     state.posX = maxBoundary;
     state.velX = 0;

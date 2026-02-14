@@ -112,6 +112,7 @@ export function generateRockVariations(
  * @param targetCount Target number of rock instances
  * @param terrainGetHeight Function to get terrain height at (worldX, worldZ)
  * @param occupiedCells Set of occupied cell keys from items ("x,z")
+ * @param bounds Optional half extent for world bounds (default 100 for single tile)
  * @returns Array of rock instances with positions, rotations, and scales
  */
 export function placeRockInstances(
@@ -119,37 +120,32 @@ export function placeRockInstances(
   variationCount: number,
   targetCount: number,
   terrainGetHeight: (worldX: number, worldZ: number) => number,
-  occupiedCells: Set<string>
+  occupiedCells: Set<string>,
+  bounds?: { halfExtent: number }
 ): RockInstance[] {
   const rng = new SeededRandom(baseSeed + '_rock_placement');
   const instances: RockInstance[] = [];
-  
-  // Terrain bounds (100x100 grid, 2x2 voxels, centered at origin)
-  // Grid world space: -100 to 100 in X and Z
-  const CELL_SIZE = 2.0; // Match terrain voxel size
+  const HALF_EXTENT = bounds?.halfExtent ?? 100;
+  const CELL_SIZE = 2.0;
+  const cellCount = Math.floor((HALF_EXTENT * 2) / CELL_SIZE);
   const MIN_SCALE = 0.3;
   const MAX_SCALE = 0.8;
-  
-  const MAX_ATTEMPTS = targetCount * 3; // Try up to 3x target to fill level
+
+  const MAX_ATTEMPTS = targetCount * 3;
   let attempts = 0;
   while (instances.length < targetCount && attempts < MAX_ATTEMPTS) {
     attempts++;
-    
-    // Random cell position
-    const cellX = Math.floor(rng.range(0, 100));
-    const cellZ = Math.floor(rng.range(0, 100));
+
+    const cellX = Math.floor(rng.range(0, cellCount));
+    const cellZ = Math.floor(rng.range(0, cellCount));
     const cellKey = `${cellX},${cellZ}`;
-    
-    // Check cell occupancy
+
     if (occupiedCells.has(cellKey)) {
       continue;
     }
-    
-    // Snap to cell position (cells are 2x2)
-    // Grid world space: -100 to 100, so offset by -100 to get to world coords
-    // Negative offset to align with terrain cell centers
-    const worldX = cellX * CELL_SIZE - 100 - CELL_SIZE * 0.5;
-    const worldZ = cellZ * CELL_SIZE - 100 - CELL_SIZE * 0.5;
+
+    const worldX = cellX * CELL_SIZE - HALF_EXTENT - CELL_SIZE * 0.5;
+    const worldZ = cellZ * CELL_SIZE - HALF_EXTENT - CELL_SIZE * 0.5;
     
     // Get terrain height at cell center
     const worldY = terrainGetHeight(worldX, worldZ);

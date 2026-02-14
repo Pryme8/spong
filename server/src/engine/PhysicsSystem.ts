@@ -8,10 +8,10 @@ import {
   PLAYER_CAPSULE_RADIUS,
   type BoxCollider,
 } from '@spong/shared';
-import type { VoxelGrid, TreeColliderMesh, TreeTransform, RockColliderMesh, RockTransform } from '@spong/shared';
+import type { TerrainCollisionGrid, TreeColliderMesh, TreeTransform, RockColliderMesh, RockTransform } from '@spong/shared';
 
 export interface PhysicsCollisionContext {
-  voxelGrid?: VoxelGrid;
+  voxelGrid?: TerrainCollisionGrid;
   treeColliderMeshes: Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>;
   rockColliderMeshes: Array<{ mesh: RockColliderMesh; transform: RockTransform }>;
   blockColliders?: BoxCollider[];

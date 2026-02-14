@@ -40,7 +40,7 @@ import {
   LadderPlaceMessage,
   LadderDestroyMessage,
   ProjectileSpawnData,
-  VoxelGrid,
+  generateMultiTileTerrain,
   DummySpawnMessage,
   COMP_COLLECTED,
   CollectedComponent,
@@ -71,7 +71,7 @@ export class Room {
   private broadcastInterval: NodeJS.Timeout | null = null;
   private connectionHandler: ConnectionHandler;
   private isInitialized = false;
-  private voxelGrid?: VoxelGrid;
+  private voxelGrid?: import('@spong/shared').TerrainCollisionGrid;
   private waterLevelProvider?: ServerWaterLevelProvider;
   private itemSystem!: ItemSystem;
   private levelSystem!: LevelSystem;
@@ -528,8 +528,7 @@ export class Room {
     this.gameStartSystem.enterLoadingPhase(finalSeed);
 
     if (!this.voxelGrid) {
-      this.voxelGrid = new VoxelGrid();
-      this.voxelGrid.generateFromNoise(finalSeed);
+      this.voxelGrid = generateMultiTileTerrain(finalSeed);
       this.waterLevelProvider = new ServerWaterLevelProvider(this.voxelGrid);
       const occupiedCells = new Set<string>();
       this.levelSystem.generateLevel({

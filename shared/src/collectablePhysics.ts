@@ -5,7 +5,7 @@
 
 import { PhysicsComponent } from './components/index.js';
 import { GRAVITY, COLLECTABLE, GROUND_HEIGHT } from './physicsConstants.js';
-import type { VoxelGrid } from './levelgen/VoxelGrid.js';
+import type { TerrainCollisionGrid } from './physics.js';
 import type { TreeColliderMesh } from './treegen/TreeMesh.js';
 import type { TreeTransform } from './treegen/TreeMeshTransform.js';
 import type { RockColliderMesh, RockTransform } from './rockgen/index.js';
@@ -22,7 +22,7 @@ const ITEM_RADIUS = 0.3; // Items use sphere collision
 export function stepCollectable(
   physics: PhysicsComponent,
   dt: number,
-  voxelGrid?: VoxelGrid,
+  voxelGrid?: TerrainCollisionGrid,
   treeColliderMeshes?: Array<{ mesh: TreeColliderMesh; transform: TreeTransform }>,
   rockColliderMeshes?: Array<{ mesh: RockColliderMesh; transform: RockTransform }>,
   blockColliders?: BoxCollider[]

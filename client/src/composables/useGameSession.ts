@@ -8,6 +8,7 @@ import {
   PLAYER_MAX_HEALTH,
   VoxelGrid,
   GreedyMesher,
+  generateMultiTileTerrain,
   Octree,
   WATER,
   type OctreeEntry,
@@ -143,7 +144,7 @@ export function useGameSession() {
   const myTransform = ref<any>(null);
   let projectileManager: ProjectileManager | null = null;
   let levelMesh: LevelMesh | null = null;
-  let voxelGrid: VoxelGrid | null = null;
+  let voxelGrid: VoxelGrid | import('@spong/shared').MultiTileVoxelGrid | null = null;
   let treeManager: LevelTreeManager | null = null;
   let rockManager: LevelRockManager | null = null;
   let bushManager: LevelBushManager | null = null;
@@ -265,18 +266,27 @@ export function useGameSession() {
     
     // 2. Generate level if seed is provided, otherwise create flat ground
     if (config.levelSeed && scene) {
-      voxelGrid = new VoxelGrid();
-      voxelGrid.generateFromNoise(config.levelSeed);
-      // Run greedy meshing
-      const mesher = new GreedyMesher(voxelGrid);
-      const quads = mesher.generateMesh();
-      // Create Babylon.js mesh
+      const multiTile = generateMultiTileTerrain(config.levelSeed);
+      voxelGrid = multiTile;
+      const allQuads: import('@spong/shared').Quad[] = [];
+      const tiles = multiTile.getTiles();
+      const TILE_VOXELS = 100;
+      for (let tx = 0; tx < 3; tx++) {
+        for (let tz = 0; tz < 3; tz++) {
+          const mesher = new GreedyMesher(tiles[tx][tz]);
+          const quads = mesher.generateMesh();
+          const offsetX = tx * TILE_VOXELS;
+          const offsetZ = tz * TILE_VOXELS;
+          for (const q of quads) {
+            allQuads.push({ ...q, x: q.x + offsetX, z: q.z + offsetZ });
+          }
+        }
+      }
       levelMesh = new LevelMesh(scene);
-      levelMesh.createFromQuads(quads);
-      // Initialize water manager
+      levelMesh.createFromQuads(allQuads, { x: -300, y: -25, z: -300 });
       try {
         waterManager = new LevelWaterManager(scene);
-        await waterManager.initialize(voxelGrid);
+        await waterManager.initialize(multiTile);
         // Update water ripples every frame (time comes from TimeManager)
         scene.onBeforeRenderObservable.add(() => {
           waterManager?.update();

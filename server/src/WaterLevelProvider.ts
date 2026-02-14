@@ -1,21 +1,22 @@
 /**
  * Server-side water level provider for physics water detection.
- * 
+ *
  * The server doesn't have the visual water texture, but it can use the voxel grid
  * to determine if water exists at a given position. Water exists where the terrain
  * height is below the water level.
  */
 
-import { VoxelGrid } from '@spong/shared';
 import type { WaterLevelProvider } from '@spong/shared';
 
 const WATER_LEVEL_Y = -14;
 
-export class ServerWaterLevelProvider implements WaterLevelProvider {
-  private voxelGrid: VoxelGrid | undefined;
+type TerrainWithSurface = { getWorldSurfaceY(worldX: number, worldZ: number): number };
 
-  constructor(voxelGrid?: VoxelGrid) {
-    this.voxelGrid = voxelGrid;
+export class ServerWaterLevelProvider implements WaterLevelProvider {
+  private terrain: TerrainWithSurface | undefined;
+
+  constructor(terrain?: TerrainWithSurface) {
+    this.terrain = terrain;
   }
 
   /**
@@ -23,12 +24,11 @@ export class ServerWaterLevelProvider implements WaterLevelProvider {
    * @returns Water surface Y coordinate, or -Infinity if no water at this position
    */
   getWaterLevelAt(x: number, z: number): number {
-    if (!this.voxelGrid) {
+    if (!this.terrain) {
       return -Infinity;
     }
 
-    // Get terrain height at this position
-    const terrainY = this.voxelGrid.getWorldSurfaceY(x, z);
+    const terrainY = this.terrain.getWorldSurfaceY(x, z);
 
     // If terrain is below water level, there's water here
     if (terrainY < WATER_LEVEL_Y) {

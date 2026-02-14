@@ -1,9 +1,9 @@
 /**
  * One-time room setup: level terrain, shooting range, builder room, editor rooms.
- * Uses shared VoxelGrid. Room passes setters and LevelSystem so initializer stays decoupled.
+ * Uses shared VoxelGrid / MultiTileVoxelGrid. Room passes setters and LevelSystem so initializer stays decoupled.
  */
 
-import { VoxelGrid } from '@spong/shared';
+import { VoxelGrid, generateMultiTileTerrain } from '@spong/shared';
 import { ServerWaterLevelProvider } from '../WaterLevelProvider.js';
 import type { LevelSystem } from './LevelSystem.js';
 
@@ -18,7 +18,7 @@ export type LobbyConfig = {
 export interface RoomInitializerOptions {
   getRoomId: () => string;
   getLobbyConfig: () => LobbyConfig;
-  setVoxelGrid: (v: VoxelGrid | undefined) => void;
+  setVoxelGrid: (v: import('@spong/shared').VoxelGrid | import('@spong/shared').MultiTileVoxelGrid | undefined) => void;
   setWaterLevelProvider: (p: ServerWaterLevelProvider | undefined) => void;
   getLevelSystem: () => LevelSystem;
   spawnWeaponAtPosition: (type: string, x: number, y: number, z: number) => void;
@@ -39,8 +39,7 @@ export class RoomInitializer {
     const levelSystem = this.options.getLevelSystem();
     if (roomId.startsWith('level_')) {
       const seed = roomId.substring(6);
-      const voxelGrid = new VoxelGrid();
-      voxelGrid.generateFromNoise(seed);
+      const voxelGrid = generateMultiTileTerrain(seed);
       this.options.setVoxelGrid(voxelGrid);
       const waterLevelProvider = new ServerWaterLevelProvider(voxelGrid);
       this.options.setWaterLevelProvider(waterLevelProvider);

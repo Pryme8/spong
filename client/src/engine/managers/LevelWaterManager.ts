@@ -5,7 +5,14 @@
 
 import { Scene, Mesh, MeshBuilder, DynamicTexture, Color3, MirrorTexture, Plane, AbstractMesh, TransformNode } from '@babylonjs/core';
 import { CustomMaterial } from '@babylonjs/materials/custom';
-import { VoxelGrid, GRID_WIDTH, GRID_DEPTH, VOXEL_WIDTH, VOXEL_HEIGHT, VOXEL_DEPTH, LEVEL_OFFSET_X, LEVEL_OFFSET_Y, LEVEL_OFFSET_Z } from '@spong/shared';
+import {
+  VOXEL_WIDTH,
+  VOXEL_HEIGHT,
+  VOXEL_DEPTH,
+  LEVEL_OFFSET_X,
+  LEVEL_OFFSET_Y,
+  LEVEL_OFFSET_Z,
+} from '@spong/shared';
 import { World } from '../core/World';
 
 const WATER_LEVEL_Y = -14;
@@ -80,8 +87,8 @@ export class LevelWaterManager {
     }
   }
 
-  async initialize(voxelGrid: VoxelGrid): Promise<void> {
-    this.voxelGrid = voxelGrid;
+  async initialize(terrain: { getColumnHeight(x: number, z: number): number; getOffset?(): { offsetX: number; offsetZ: number }; width: number; depth: number }): Promise<void> {
+    this.terrain = terrain;
 
     // Create textures
     this.createHeightTexture();
@@ -185,25 +192,23 @@ export class LevelWaterManager {
   }
 
   private createWaterPlane(): void {
-    if (!this.voxelGrid) return;
+    if (!this.terrain) return;
 
-    // Calculate plane size based on grid dimensions
-    const planeWidth = GRID_WIDTH * VOXEL_WIDTH;
-    const planeDepth = GRID_DEPTH * VOXEL_DEPTH;
+    const planeWidth = this.terrain.width * VOXEL_WIDTH;
+    const planeDepth = this.terrain.depth * VOXEL_DEPTH;
+    const offset = this.terrain.getOffset?.() ?? { offsetX: LEVEL_OFFSET_X, offsetZ: LEVEL_OFFSET_Z };
 
-    // Create a plane facing up (normal = +Y)
     this.waterPlane = MeshBuilder.CreatePlane('waterPlane', {
       width: planeWidth,
       height: planeDepth,
       sideOrientation: Mesh.DOUBLESIDE
     }, this.scene);
 
-    // Rotate to face up and position at water level (visual offset down by 0.1)
     this.waterPlane.rotation.x = Math.PI * 0.5;
     this.waterPlane.position.set(
-      LEVEL_OFFSET_X + planeWidth * 0.5,
+      offset.offsetX + planeWidth * 0.5,
       WATER_LEVEL_Y - 0.1,
-      LEVEL_OFFSET_Z + planeDepth * 0.5
+      offset.offsetZ + planeDepth * 0.5
     );
 
     // Don't block collisions or picking
@@ -222,19 +227,19 @@ export class LevelWaterManager {
     this.waterMaterial.backFaceCulling = false;
     this.waterMaterial.needDepthPrePass = true;
 
-    // Add custom uniforms
-    if (this.heightTexture && this.flowTexture) {
+    if (this.heightTexture && this.flowTexture && this.terrain) {
+      const offset = this.terrain.getOffset?.() ?? { offsetX: LEVEL_OFFSET_X, offsetZ: LEVEL_OFFSET_Z };
       this.waterMaterial.AddUniform('heightMap', 'sampler2D', this.heightTexture);
       this.waterMaterial.AddUniform('flowMap', 'sampler2D', this.flowTexture);
       this.waterMaterial.AddUniform('wLevel', 'float', WATER_LEVEL_Y);
-      this.waterMaterial.AddUniform('gWidth', 'float', GRID_WIDTH);
-      this.waterMaterial.AddUniform('gDepth', 'float', GRID_DEPTH);
+      this.waterMaterial.AddUniform('gWidth', 'float', this.terrain.width);
+      this.waterMaterial.AddUniform('gDepth', 'float', this.terrain.depth);
       this.waterMaterial.AddUniform('vHeight', 'float', VOXEL_HEIGHT);
       this.waterMaterial.AddUniform('oY', 'float', LEVEL_OFFSET_Y);
       this.waterMaterial.AddUniform('vW', 'float', VOXEL_WIDTH);
       this.waterMaterial.AddUniform('vD', 'float', VOXEL_DEPTH);
-      this.waterMaterial.AddUniform('oX', 'float', LEVEL_OFFSET_X);
-      this.waterMaterial.AddUniform('oZ', 'float', LEVEL_OFFSET_Z);
+      this.waterMaterial.AddUniform('oX', 'float', offset.offsetX);
+      this.waterMaterial.AddUniform('oZ', 'float', offset.offsetZ);
       this.waterMaterial.AddUniform('wTime', 'float', 0);
 
       // Tweakable wave uniforms
@@ -445,10 +450,10 @@ export class LevelWaterManager {
   }
 
   private createHeightTexture(): void {
-    if (!this.voxelGrid) return;
+    if (!this.terrain) return;
 
-    const texWidth = GRID_WIDTH * 8;
-    const texHeight = GRID_DEPTH * 8;
+    const texWidth = this.terrain.width * 8;
+    const texHeight = this.terrain.depth * 8;
 
     this.heightTexture = new DynamicTexture(
       'heightTexture',
@@ -461,10 +466,10 @@ export class LevelWaterManager {
   }
 
   private createFlowTexture(): void {
-    if (!this.voxelGrid) return;
+    if (!this.terrain) return;
 
-    const texWidth = GRID_WIDTH * 8;
-    const texHeight = GRID_DEPTH * 8;
+    const texWidth = this.terrain.width * 8;
+    const texHeight = this.terrain.depth * 8;
 
     this.flowTexture = new DynamicTexture(
       'flowTexture',
@@ -477,10 +482,10 @@ export class LevelWaterManager {
   }
 
   private updateHeightTexture(): void {
-    if (!this.heightTexture || !this.voxelGrid) return;
+    if (!this.heightTexture || !this.terrain) return;
 
-    const gridW = GRID_WIDTH;
-    const gridD = GRID_DEPTH;
+    const gridW = this.terrain.width;
+    const gridD = this.terrain.depth;
     const scale = 8; // 8x upscale
     const texW = gridW * scale;
     const texD = gridD * scale;
@@ -494,7 +499,7 @@ export class LevelWaterManager {
         // Map texture pixel back to grid cell
         const gx = Math.floor(tx / scale);
         const gz = Math.floor(tz / scale);
-        const columnHeight = this.voxelGrid.getColumnHeight(gx, gz);
+        const columnHeight = this.terrain.getColumnHeight(gx, gz);
         const idx = tz * texW + tx;
         waterMask[idx] = columnHeight < waterLevelVoxels ? 1.0 : 0.0;
       }
@@ -701,25 +706,22 @@ export class LevelWaterManager {
    * @returns Water surface Y coordinate, or -Infinity if no water at this position
    */
   getWaterLevelAt(x: number, z: number): number {
-    if (!this.heightTexture || !this.voxelGrid) {
+    if (!this.heightTexture || !this.terrain) {
       return -Infinity;
     }
 
-    // Convert world XZ to UV coordinates
-    const planeWidth = GRID_WIDTH * VOXEL_WIDTH;
-    const planeDepth = GRID_DEPTH * VOXEL_DEPTH;
-    const u = (x - LEVEL_OFFSET_X) / planeWidth;
-    const v = 1.0 - (z - LEVEL_OFFSET_Z) / planeDepth;
+    const offset = this.terrain.getOffset?.() ?? { offsetX: LEVEL_OFFSET_X, offsetZ: LEVEL_OFFSET_Z };
+    const planeWidth = this.terrain.width * VOXEL_WIDTH;
+    const planeDepth = this.terrain.depth * VOXEL_DEPTH;
+    const u = (x - offset.offsetX) / planeWidth;
+    const v = 1.0 - (z - offset.offsetZ) / planeDepth;
 
-    // Check bounds
     if (u < 0 || u > 1 || v < 0 || v > 1) {
       return -Infinity;
     }
 
-    // Sample height texture to check if water exists here
-    // The texture stores a grayscale mask: 1.0 = water, 0.0 = land
-    const texWidth = GRID_WIDTH * 8;
-    const texHeight = GRID_DEPTH * 8;
+    const texWidth = this.terrain.width * 8;
+    const texHeight = this.terrain.depth * 8;
     const px = Math.floor(u * texWidth);
     const py = Math.floor(v * texHeight);
 

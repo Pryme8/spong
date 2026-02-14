@@ -49,7 +49,6 @@ import {
   WEAPON_STATS,
   type WeaponType,
 } from '@spong/shared';
-import type { VoxelGrid } from '@spong/shared';
 
 const PICKUP_GRID_CELL_SIZE = 2.0;
 const PICKUP_RANGE = 1.5;
@@ -90,7 +89,7 @@ const ENTITY_CONFIGS: Record<ItemType, EntitySpawnConfig> = {
 };
 
 export interface SpawnTerrainOptions {
-  voxelGrid?: VoxelGrid;
+  voxelGrid?: import('@spong/shared').VoxelGrid | import('@spong/shared').MultiTileVoxelGrid;
   waterLevelProvider?: { isValidSpawnPosition(x: number, y: number, z: number): boolean };
 }
 

@@ -42,7 +42,7 @@ export interface ProjectileSpawnParams {
 }
 
 export interface ProjectileCollisionContext {
-  voxelGrid?: VoxelGrid;
+  voxelGrid?: import('@spong/shared').TerrainCollisionGrid;
   rockColliderMeshes: Array<{ mesh: RockColliderMesh; transform: RockTransform }>;
   octree?: {
     queryRay(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, len: number): Array<{ type: string; data: unknown }>;

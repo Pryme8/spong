@@ -22,8 +22,10 @@ export class LevelMesh {
 
   /**
    * Create Babylon.js mesh from greedy mesh quads.
+   * @param quads Greedy mesh quads (voxel-space positions)
+   * @param position Optional mesh position (default: LEVEL_OFFSET for single tile)
    */
-  createFromQuads(quads: Quad[]): Mesh {
+  createFromQuads(quads: Quad[], position?: { x: number; y: number; z: number }): Mesh {
     const positions: number[] = [];
     const normals: number[] = [];
     const uvs: number[] = [];
@@ -63,11 +65,10 @@ export class LevelMesh {
 
     vertexData.applyToMesh(mesh);
 
-    // Convert to flat shaded so each face has its own normals
     mesh.convertToFlatShadedMesh();
 
-    // Position the mesh (centered and lowered)
-    mesh.position.set(LEVEL_OFFSET_X, LEVEL_OFFSET_Y, LEVEL_OFFSET_Z);
+    const pos = position ?? { x: LEVEL_OFFSET_X, y: LEVEL_OFFSET_Y, z: LEVEL_OFFSET_Z };
+    mesh.position.set(pos.x, pos.y, pos.z);
 
     // Create tri-planar material using CustomMaterial
     const material = this.createTriPlanarMaterial();

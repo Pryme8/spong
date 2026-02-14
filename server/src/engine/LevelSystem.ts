@@ -5,7 +5,7 @@
  * duplicating entity creation logic.
  */
 
-import type { VoxelGrid } from '@spong/shared';
+import type { VoxelGrid, MultiTileVoxelGrid } from '@spong/shared';
 import {
   createRNG,
   generateTreeVariations,
@@ -27,7 +27,7 @@ import {
 import type { ItemSystem, ItemType } from './ItemSystem.js';
 
 const CELL_SIZE = 2.0;
-const HALF_EXTENT = 90;
+const HALF_EXTENT = 270; // 9-tile world: -270 to 270 in X/Z
 const TREE_SCALE = 0.4;
 const ROCK_SCALE = 0.5;
 
@@ -122,18 +122,18 @@ export class LevelSystem {
 
   private spawnLevelItems(
     seed: string,
-    voxelGrid: VoxelGrid,
+    voxelGrid: VoxelGrid | MultiTileVoxelGrid,
     waterLevelProvider: { isValidSpawnPosition(x: number, y: number, z: number): boolean } | undefined,
     occupiedCells: Set<string>,
     config?: { pistolCount?: number }
   ): void {
     const rng = createRNG(seed + '_items');
     const opts = { voxelGrid, waterLevelProvider };
-    const PISTOL_COUNT = config?.pistolCount ?? 30;
+    const PISTOL_COUNT = config?.pistolCount ?? 35;
 
     let spawned = this.itemSystem.spawnOnTerrain('pistol', 3, 0, opts);
     if (spawned) {
-      occupiedCells.add(`${Math.floor((3 + 100) / CELL_SIZE)},${Math.floor((0 + 100) / CELL_SIZE)}`);
+      occupiedCells.add(`${Math.floor((3 + HALF_EXTENT) / CELL_SIZE)},${Math.floor((0 + HALF_EXTENT) / CELL_SIZE)}`);
     }
     let pistolsSpawned = spawned ? 1 : 0;
     const maxAttempts = PISTOL_COUNT * 3;
@@ -142,29 +142,30 @@ export class LevelSystem {
       const wz = (rng() * 2 - 1) * HALF_EXTENT;
       if (this.itemSystem.spawnOnTerrain('pistol', wx, wz, opts)) {
         pistolsSpawned++;
-        occupiedCells.add(`${Math.floor((wx + 100) / CELL_SIZE)},${Math.floor((wz + 100) / CELL_SIZE)}`);
+        occupiedCells.add(`${Math.floor((wx + HALF_EXTENT) / CELL_SIZE)},${Math.floor((wz + HALF_EXTENT) / CELL_SIZE)}`);
       }
     }
-    this.spawnScattered('smg', 12, rng, opts, occupiedCells, 'SMGs');
-    this.spawnScattered('lmg', 6, rng, opts, occupiedCells, 'LMGs');
-    this.spawnScattered('shotgun', 8, rng, opts, occupiedCells, 'Shotguns');
-    this.spawnScattered('assault', 8, rng, opts, occupiedCells, 'Assault Rifles');
-    this.spawnScattered('sniper', 4, rng, opts, occupiedCells, 'Snipers');
-    this.spawnScattered('rocket', 3, rng, opts, occupiedCells, 'Rocket Launchers');
-    this.spawnScattered('kevlar', 10, rng, opts, occupiedCells, 'Kevlar');
-    this.spawnScattered('helmet', 10, rng, opts, occupiedCells, 'Helmets');
+    this.spawnScattered('smg', 24, rng, opts, occupiedCells, 'SMGs');
+    this.spawnScattered('lmg', 12, rng, opts, occupiedCells, 'LMGs');
+    this.spawnScattered('shotgun', 16, rng, opts, occupiedCells, 'Shotguns');
+    this.spawnScattered('assault', 16, rng, opts, occupiedCells, 'Assault Rifles');
+    this.spawnScattered('dmr', 8, rng, opts, occupiedCells, 'DMRs');
+    this.spawnScattered('sniper', 8, rng, opts, occupiedCells, 'Snipers');
+    this.spawnScattered('rocket', 6, rng, opts, occupiedCells, 'Rocket Launchers');
+    this.spawnScattered('kevlar', 20, rng, opts, occupiedCells, 'Kevlar');
+    this.spawnScattered('helmet', 20, rng, opts, occupiedCells, 'Helmets');
 
-    this.spawnScatteredNoValidate('medic_pack', 15, rng, opts, occupiedCells);
-    this.spawnScatteredNoValidate('large_medic_pack', 8, rng, opts, occupiedCells);
-    this.spawnScatteredNoValidate('apple', 20, rng, opts, occupiedCells);
-    this.spawnScatteredNoValidate('pill_bottle', 5, rng, opts, occupiedCells);
+    this.spawnScatteredNoValidate('medic_pack', 30, rng, opts, occupiedCells);
+    this.spawnScatteredNoValidate('large_medic_pack', 16, rng, opts, occupiedCells);
+    this.spawnScatteredNoValidate('apple', 40, rng, opts, occupiedCells);
+    this.spawnScatteredNoValidate('pill_bottle', 10, rng, opts, occupiedCells);
   }
 
   private spawnScattered(
     itemType: ItemType,
     count: number,
     rng: () => number,
-    opts: { voxelGrid: VoxelGrid; waterLevelProvider?: { isValidSpawnPosition(x: number, y: number, z: number): boolean } },
+    opts: { voxelGrid: VoxelGrid | MultiTileVoxelGrid; waterLevelProvider?: { isValidSpawnPosition(x: number, y: number, z: number): boolean } },
     occupiedCells: Set<string>,
     _label: string
   ): void {
@@ -175,7 +176,7 @@ export class LevelSystem {
       const wz = (rng() * 2 - 1) * HALF_EXTENT;
       if (this.itemSystem.spawnOnTerrain(itemType, wx, wz, opts)) {
         n++;
-        occupiedCells.add(`${Math.floor((wx + 100) / CELL_SIZE)},${Math.floor((wz + 100) / CELL_SIZE)}`);
+        occupiedCells.add(`${Math.floor((wx + HALF_EXTENT) / CELL_SIZE)},${Math.floor((wz + HALF_EXTENT) / CELL_SIZE)}`);
       }
     }
   }
@@ -191,18 +192,19 @@ export class LevelSystem {
       const wx = (rng() * 2 - 1) * HALF_EXTENT;
       const wz = (rng() * 2 - 1) * HALF_EXTENT;
       this.itemSystem.spawnOnTerrain(itemType, wx, wz, opts);
-      occupiedCells.add(`${Math.floor((wx + 100) / CELL_SIZE)},${Math.floor((wz + 100) / CELL_SIZE)}`);
+      occupiedCells.add(`${Math.floor((wx + HALF_EXTENT) / CELL_SIZE)},${Math.floor((wz + HALF_EXTENT) / CELL_SIZE)}`);
     }
   }
 
-  private spawnLevelRocks(seed: string, voxelGrid: VoxelGrid, occupiedCells: Set<string>): void {
+  private spawnLevelRocks(seed: string, voxelGrid: VoxelGrid | MultiTileVoxelGrid, occupiedCells: Set<string>): void {
     const variations = generateRockVariations(seed, 5, 9);
     this.rockInstances = placeRockInstances(
       seed,
       variations.length,
-      300,
+      900,
       (worldX: number, worldZ: number) => voxelGrid.getWorldSurfaceY(worldX, worldZ),
-      occupiedCells
+      occupiedCells,
+      { halfExtent: HALF_EXTENT }
     );
     this.rockColliderMeshes = this.rockInstances.map(instance => {
       const variation = variations[instance.variationId];
@@ -226,13 +228,14 @@ export class LevelSystem {
     occupiedCells: Set<string>
   ): void {
     const variations = generateTreeVariations(seed);
-    const targetCount = 120;
+    const targetCount = 540;
     const allTreeInstances = placeTreeInstances(
       seed,
       variations.length,
-      targetCount,
+      540,
       (worldX: number, worldZ: number) => voxelGrid.getWorldSurfaceY(worldX, worldZ),
-      occupiedCells
+      occupiedCells,
+      { halfExtent: HALF_EXTENT }
     );
     this.treeInstances = waterLevelProvider
       ? allTreeInstances.filter(inst => waterLevelProvider.isValidSpawnPosition(inst.worldX, inst.worldY, inst.worldZ))
@@ -255,16 +258,15 @@ export class LevelSystem {
 
   private spawnLevelBushes(
     seed: string,
-    voxelGrid: VoxelGrid,
+    voxelGrid: VoxelGrid | MultiTileVoxelGrid,
     waterLevelProvider: { isValidSpawnPosition(x: number, y: number, z: number): boolean } | undefined,
     occupiedCells: Set<string>
   ): void {
     const variations = generateBushVariations(seed, 8, 18);
-    const targetCount = 200;
     const allBushInstances = placeBushInstances(
       seed,
       variations.length,
-      targetCount,
+      720,
       (worldX: number, worldZ: number) => voxelGrid.getWorldSurfaceY(worldX, worldZ),
       occupiedCells
     );
@@ -274,7 +276,7 @@ export class LevelSystem {
   }
 
   private buildOctree(): void {
-    this.octree = new Octree(0, 10, 0, 110, 6, 8);
+    this.octree = new Octree(0, 10, 0, 310, 6, 8);
     let nextId = 0;
     for (let i = 0; i < this.treeColliderMeshes.length; i++) {
       const instance = this.treeInstances[i];

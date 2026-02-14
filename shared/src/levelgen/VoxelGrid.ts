@@ -38,17 +38,21 @@ export class VoxelGrid {
 
   /**
    * Generate terrain from seeded noise with multi-layer terracing.
-   * 
+   *
    * @param seed String seed for deterministic generation
    * @param scale Noise scale (smaller = smoother terrain)
    * @param octaves Number of FBM octaves for detail
    * @param flatHeight Optional fixed height for flat terrain (in voxels). When provided, generates flat terrain at this height instead of using noise.
+   * @param worldOffsetX Optional world X of voxel (0,0) - use for seamless multi-tile generation
+   * @param worldOffsetZ Optional world Z of voxel (0,0) - use for seamless multi-tile generation
    */
   generateFromNoise(
     seed: string,
     scale: number = 0.02,
     octaves: number = 3,
-    flatHeight?: number
+    flatHeight?: number,
+    worldOffsetX?: number,
+    worldOffsetZ?: number
   ): void {
     // If flatHeight is specified, generate flat terrain
     if (flatHeight !== undefined) {
@@ -68,7 +72,9 @@ export class VoxelGrid {
     const secondaryMaskNoise = new Noise2D(seed + '_mask2');
     const blendNoise = new Noise2D(seed + '_blend');
 
-    // Terracing parameters
+    const offX = worldOffsetX ?? 0;
+    const offZ = worldOffsetZ ?? 0;
+
     const primarySteps = 6;
     const secondarySteps = 3;
     const primaryScale = 0.01;
@@ -77,11 +83,12 @@ export class VoxelGrid {
 
     for (let x = 0; x < this.width; x++) {
       for (let z = 0; z < this.depth; z++) {
-        // Sample primary height noise [0, 1]
-        const baseHeight = heightNoise.fbm(x * scale, z * scale, octaves);
+        const worldX = offX + x * VOXEL_WIDTH;
+        const worldZ = offZ + z * VOXEL_DEPTH;
 
-        // ── Primary terracing pass (aggressive, 6 steps) ──────────
-        const primaryMask = primaryMaskNoise.fbm(x * primaryScale, z * primaryScale, 2);
+        const baseHeight = heightNoise.fbm(worldX * scale, worldZ * scale, octaves);
+
+        const primaryMask = primaryMaskNoise.fbm(worldX * primaryScale, worldZ * primaryScale, 2);
         let primaryHeight = baseHeight;
         
         // Softer blending using smoothstep
@@ -91,8 +98,7 @@ export class VoxelGrid {
           primaryHeight = this.lerp(baseHeight, terraced, primaryStrength);
         }
 
-        // ── Secondary terracing pass (subtle, 3 steps) ────────────
-        const secondaryMask = secondaryMaskNoise.fbm(x * secondaryScale, z * secondaryScale, 2);
+        const secondaryMask = secondaryMaskNoise.fbm(worldX * secondaryScale, worldZ * secondaryScale, 2);
         let secondaryHeight = baseHeight;
         
         const secondaryStrength = this.smoothstep(0.4, 0.8, secondaryMask);
@@ -101,8 +107,7 @@ export class VoxelGrid {
           secondaryHeight = this.lerp(baseHeight, terraced, secondaryStrength);
         }
 
-        // ── Final blend between primary and secondary ─────────────
-        const blendMask = blendNoise.fbm(x * blendScale, z * blendScale, 2);
+        const blendMask = blendNoise.fbm(worldX * blendScale, worldZ * blendScale, 2);
         const finalHeight = this.lerp(primaryHeight, secondaryHeight, blendMask);
 
         // Convert to column height (number of half-cubes)

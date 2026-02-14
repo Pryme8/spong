@@ -27,7 +27,7 @@ export function useTransformSync(
     if (transform) transform.applyServerState(data);
   });
 
-  const createTransform = (entityId: number, isLocal: boolean, voxelGrid?: VoxelGrid): LocalTransform => {
+  const createTransform = (entityId: number, isLocal: boolean, voxelGrid?: VoxelGrid | import('@spong/shared').MultiTileVoxelGrid): LocalTransform => {
     const transform = new LocalTransform(
       entityId, scene, isLocal, voxelGrid, buildingCollisionManager,
       colliderGetters?.getTreeColliders,

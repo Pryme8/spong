@@ -4,7 +4,6 @@
  */
 
 import type { World, Entity } from '@spong/shared';
-import type { VoxelGrid } from '@spong/shared';
 import {
   COMP_PLAYER,
   COMP_HEALTH,
@@ -41,7 +40,7 @@ export type LevelSystemCollision = {
 export interface CombatSystemOptions {
   world: World;
   broadcast: (opcode: number, msg: unknown) => void;
-  getVoxelGrid: () => VoxelGrid | undefined;
+  getVoxelGrid: () => import('@spong/shared').TerrainCollisionGrid | undefined;
   getWaterLevelProvider: () => { isValidSpawnPosition(x: number, y: number, z: number): boolean } | undefined;
   getLevelSystem: () => LevelSystemCollision;
   roundSystem: RoundSystem;
@@ -78,7 +77,7 @@ export class CombatSystem {
       }
       const voxelGrid = this.getVoxelGrid();
       const maxAttempts = 100;
-      const maxRadius = 50;
+      const maxRadius = 270;
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const angle = Math.random() * Math.PI * 2;
         const radius = Math.random() * maxRadius;

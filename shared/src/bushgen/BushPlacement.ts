@@ -23,6 +23,7 @@ export interface BushInstance {
  * @param targetCount Target number of bush instances (200-300)
  * @param terrainGetHeight Function to get terrain height at (worldX, worldZ)
  * @param occupiedCells Set of occupied cell keys ("x,z")
+ * @param bounds Optional half extent for world bounds (default 100 for single tile)
  * @returns Array of bush instances with positions and variation IDs
  */
 export function placeBushInstances(
@@ -30,16 +31,16 @@ export function placeBushInstances(
   variationCount: number,
   targetCount: number,
   terrainGetHeight: (worldX: number, worldZ: number) => number,
-  occupiedCells: Set<string>
+  occupiedCells: Set<string>,
+  bounds?: { halfExtent: number }
 ): BushInstance[] {
   const rng = new SeededRandom(baseSeed + '_bush_placement');
   const instances: BushInstance[] = [];
-  
-  // Level boundaries (200x200 world)
-  const minX = -100;
-  const maxX = 100;
-  const minZ = -100;
-  const maxZ = 100;
+  const HALF_EXTENT = bounds?.halfExtent ?? 100;
+  const minX = -HALF_EXTENT;
+  const maxX = HALF_EXTENT;
+  const minZ = -HALF_EXTENT;
+  const maxZ = HALF_EXTENT;
   
   // Bush placement parameters
   const cellSize = 4; // 4 units per cell (bushes are smaller)

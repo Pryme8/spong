@@ -113,6 +113,7 @@ export function generateTreeVariations(baseSeed: string, gridResolution: number 
  * @param targetCount Target number of tree instances (200-400)
  * @param terrainGetHeight Function to get terrain height at (worldX, worldZ)
  * @param occupiedCells Set of occupied cell keys ("x,z")
+ * @param bounds Optional half extent for world bounds (default 90 for single tile)
  * @returns Array of tree instances with positions and rotations
  */
 export function placeTreeInstances(
@@ -120,27 +121,24 @@ export function placeTreeInstances(
   variationCount: number,
   targetCount: number,
   terrainGetHeight: (worldX: number, worldZ: number) => number,
-  occupiedCells: Set<string>
+  occupiedCells: Set<string>,
+  bounds?: { halfExtent: number }
 ): TreeInstance[] {
   const rng = new SeededRandom(baseSeed + '_tree_placement');
   const instances: TreeInstance[] = [];
-  
-  // Terrain bounds (100x100 grid, 2x2 voxels, centered at origin)
-  // Grid world space: -100 to 100 in X and Z
-  const HALF_EXTENT = 90; // Stay inside edges
-  const CELL_SIZE = 2.0; // Match terrain voxel size
-  
-  const MAX_ATTEMPTS = targetCount * 3; // Try up to 3x target to fill level
+  const HALF_EXTENT = bounds?.halfExtent ?? 90;
+  const CELL_SIZE = 2.0;
+  const cellCount = Math.floor((HALF_EXTENT * 2) / CELL_SIZE);
+
+  const MAX_ATTEMPTS = targetCount * 3;
   let attempts = 0;
   while (instances.length < targetCount && attempts < MAX_ATTEMPTS) {
     attempts++;
-    
-    // Random cell position
-    const cellX = Math.floor(rng.next() * (HALF_EXTENT * 2 / CELL_SIZE));
-    const cellZ = Math.floor(rng.next() * (HALF_EXTENT * 2 / CELL_SIZE));
+
+    const cellX = Math.floor(rng.next() * cellCount);
+    const cellZ = Math.floor(rng.next() * cellCount);
     const cellKey = `${cellX},${cellZ}`;
-    
-    // Snap to cell center (terrain cells are 2x2)
+
     const worldX = cellX * CELL_SIZE - HALF_EXTENT + CELL_SIZE * 0.5;
     const worldZ = cellZ * CELL_SIZE - HALF_EXTENT + CELL_SIZE * 0.5;
     

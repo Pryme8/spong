@@ -154,17 +154,23 @@ export function rayVsAABB(
  * Voxel collision utilities for level terrain.
  */
 
-import type { VoxelGrid } from './levelgen/VoxelGrid.js';
 import { VOXEL_WIDTH, VOXEL_HEIGHT, VOXEL_DEPTH, LEVEL_OFFSET_X, LEVEL_OFFSET_Y, LEVEL_OFFSET_Z } from './levelgen/VoxelGrid.js';
+
+type VoxelGridLike = { getVoxel(x: number, y: number, z: number): boolean; getOffset?(): { offsetX: number; offsetZ: number } };
+
+function getGridOffset(grid: VoxelGridLike): { offsetX: number; offsetZ: number } {
+  if (grid.getOffset) return grid.getOffset();
+  return { offsetX: LEVEL_OFFSET_X, offsetZ: LEVEL_OFFSET_Z };
+}
 
 /**
  * Check if a point in world space is inside a solid voxel.
  */
-export function pointInVoxel(grid: VoxelGrid, worldX: number, worldY: number, worldZ: number): boolean {
-  // Translate world coordinates to grid coordinates
-  const gridX = worldX - LEVEL_OFFSET_X;
+export function pointInVoxel(grid: VoxelGridLike, worldX: number, worldY: number, worldZ: number): boolean {
+  const { offsetX, offsetZ } = getGridOffset(grid);
+  const gridX = worldX - offsetX;
   const gridY = worldY - LEVEL_OFFSET_Y;
-  const gridZ = worldZ - LEVEL_OFFSET_Z;
+  const gridZ = worldZ - offsetZ;
 
   const voxelX = Math.floor(gridX / VOXEL_WIDTH);
   const voxelY = Math.floor(gridY / VOXEL_HEIGHT);
@@ -175,13 +181,13 @@ export function pointInVoxel(grid: VoxelGrid, worldX: number, worldY: number, wo
 /**
  * Check if an AABB intersects any solid voxels in the grid.
  * Returns true if collision detected.
- * 
- * @param grid VoxelGrid to test against
+ *
+ * @param grid VoxelGrid or MultiTileVoxelGrid to test against
  * @param centerX, centerY, centerZ Box center in world space
  * @param halfX, halfY, halfZ Box half-extents (not necessarily uniform)
  */
 export function aabbVsVoxelGrid(
-  grid: VoxelGrid,
+  grid: VoxelGridLike,
   centerX: number,
   centerY: number,
   centerZ: number,
@@ -189,12 +195,11 @@ export function aabbVsVoxelGrid(
   halfY: number,
   halfZ: number
 ): boolean {
-  // Translate world coordinates to grid coordinates
-  const gridCenterX = centerX - LEVEL_OFFSET_X;
+  const { offsetX, offsetZ } = getGridOffset(grid);
+  const gridCenterX = centerX - offsetX;
   const gridCenterY = centerY - LEVEL_OFFSET_Y;
-  const gridCenterZ = centerZ - LEVEL_OFFSET_Z;
+  const gridCenterZ = centerZ - offsetZ;
 
-  // Grid space bounds
   const minX = gridCenterX - halfX;
   const maxX = gridCenterX + halfX;
   const minY = gridCenterY - halfY;
@@ -202,7 +207,6 @@ export function aabbVsVoxelGrid(
   const minZ = gridCenterZ - halfZ;
   const maxZ = gridCenterZ + halfZ;
 
-  // Voxel space bounds
   const voxelMinX = Math.floor(minX / VOXEL_WIDTH);
   const voxelMaxX = Math.floor(maxX / VOXEL_WIDTH);
   const voxelMinY = Math.floor(minY / VOXEL_HEIGHT);
@@ -210,17 +214,14 @@ export function aabbVsVoxelGrid(
   const voxelMinZ = Math.floor(minZ / VOXEL_DEPTH);
   const voxelMaxZ = Math.floor(maxZ / VOXEL_DEPTH);
 
-  // Test all voxels in range
   for (let x = voxelMinX; x <= voxelMaxX; x++) {
     for (let y = voxelMinY; y <= voxelMaxY; y++) {
       for (let z = voxelMinZ; z <= voxelMaxZ; z++) {
         if (grid.getVoxel(x, y, z)) {
-          // Voxel is solid, check precise AABB vs AABB (in grid space)
           const voxelCenterX = (x + 0.5) * VOXEL_WIDTH;
           const voxelCenterY = (y + 0.5) * VOXEL_HEIGHT;
           const voxelCenterZ = (z + 0.5) * VOXEL_DEPTH;
 
-          // AABB overlap test
           if (
             Math.abs(gridCenterX - voxelCenterX) < halfX + VOXEL_WIDTH * 0.5 &&
             Math.abs(gridCenterY - voxelCenterY) < halfY + VOXEL_HEIGHT * 0.5 &&
@@ -239,11 +240,11 @@ export function aabbVsVoxelGrid(
 /**
  * Raycast through voxel grid for projectile collision.
  * Uses DDA (Digital Differential Analyzer) algorithm for fast voxel traversal.
- * 
+ *
  * @returns { hit: boolean, distance: number, voxelX, voxelY, voxelZ } - hit voxel coordinates if collision
  */
 export function rayVsVoxelGrid(
-  grid: VoxelGrid,
+  grid: VoxelGridLike,
   originX: number,
   originY: number,
   originZ: number,
@@ -252,10 +253,10 @@ export function rayVsVoxelGrid(
   dirZ: number,
   maxDist: number
 ): { hit: boolean; distance: number; voxelX?: number; voxelY?: number; voxelZ?: number } {
-  // Translate world coordinates to grid coordinates
-  const gridOriginX = originX - LEVEL_OFFSET_X;
+  const { offsetX, offsetZ } = getGridOffset(grid);
+  const gridOriginX = originX - offsetX;
   const gridOriginY = originY - LEVEL_OFFSET_Y;
-  const gridOriginZ = originZ - LEVEL_OFFSET_Z;
+  const gridOriginZ = originZ - offsetZ;
 
   // Normalize direction
   const len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
@@ -283,8 +284,8 @@ export function rayVsVoxelGrid(
 
   let dist = 0;
 
-  // Traverse voxels
-  for (let i = 0; i < 200; i++) { // Max iterations to prevent infinite loops
+  // Traverse voxels (400 covers ~600 world units at 2 units/voxel)
+  for (let i = 0; i < 400; i++) {
     // Check current voxel
     if (grid.getVoxel(x, y, z)) {
       return { hit: true, distance: dist, voxelX: x, voxelY: y, voxelZ: z };
