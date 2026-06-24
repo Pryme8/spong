@@ -51,9 +51,6 @@ export class LocalTransform {
   };
   private static correctionWindowCount = 0;
   private static correctionWindowStartMs = 0;
-  /** When true (?netdebug URL flag), logs the context of any large reconciliation correction. */
-  static NetDebug = typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).has('netdebug');
 
   readonly entityId: number;
   private node: TransformNode;
@@ -411,23 +408,7 @@ export class LocalTransform {
       const deltaZ = oldPredictedZ - this.state.posZ;
       const dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
 
-      // Diagnostic: log the context of any meaningful correction so we can see
-      // WHAT diverged (position vs server, velocity, water/exhaustion state).
-      if (LocalTransform.NetDebug && dist > 0.5) {
-        console.warn('[netdebug] correction', {
-          dist: +dist.toFixed(3),
-          predicted: [+oldPredictedX.toFixed(2), +oldPredictedY.toFixed(2), +oldPredictedZ.toFixed(2)],
-          serverRaw: [+data.position.x.toFixed(2), +data.position.y.toFixed(2), +data.position.z.toFixed(2)],
-          afterReplay: [+this.state.posX.toFixed(2), +this.state.posY.toFixed(2), +this.state.posZ.toFixed(2)],
-          vel: [+this.state.velX.toFixed(2), +this.state.velY.toFixed(2), +this.state.velZ.toFixed(2)],
-          waterDepth: +this.state.waterDepth.toFixed(2),
-          isInWater: this.state.isInWater,
-          isExhausted: this.state.isExhausted,
-          unackedInputs: this.inputBuffer.length,
-        });
-      }
-
-      // Debug net stats (read by LatencyDebugPanel)
+      // Net stats (read by LatencyDebugPanel)
       const stats = LocalTransform.NetStats;
       stats.lastErrorUnits = dist;
       stats.avgErrorUnits = stats.avgErrorUnits * 0.9 + dist * 0.1;

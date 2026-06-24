@@ -96,15 +96,6 @@ export class Room {
   private broadcastTickCounter = 0;
   private physicsAccumulatorMs = 0;
   private lastLoopMs = 0;
-  // Tick-timing diagnostics (enabled via TICKDEBUG env var)
-  private readonly tickDebug = process.env.TICKDEBUG === '1';
-  private tickDebugLastMs = 0;
-  private tickDebugCount = 0;
-  private tickDebugIntervalSum = 0;
-  private tickDebugIntervalMax = 0;
-  private tickDebugQueueSum = 0;
-  private tickDebugQueueMax = 0;
-  private tickDebugLastProcMs = 0;
   /**
    * Remote-player interpolation delay (ms) the client renders behind server time.
    * Used by lag compensation to rewind targets to what the shooter actually saw.
@@ -675,43 +666,6 @@ export class Room {
     const playerEntities = this.world.query(COMP_PLAYER);
     const activePlayers = playerEntities.filter(entity => !entity.hasTag(TAG_DUMMY));
 
-    // ── Optional tick-timing diagnostics (set TICKDEBUG=1) ────────────────────
-    // Logs the REAL interval between physics ticks (exposes Windows setInterval
-    // jitter), tick processing time, and input-queue depth — once per second.
-    if (this.tickDebug) {
-      if (this.tickDebugLastMs > 0) {
-        const interval = nowMs - this.tickDebugLastMs;
-        this.tickDebugIntervalSum += interval;
-        this.tickDebugIntervalMax = Math.max(this.tickDebugIntervalMax, interval);
-      }
-      this.tickDebugLastMs = nowMs;
-      this.tickDebugCount++;
-      let qSum = 0;
-      let qMax = 0;
-      for (const e of activePlayers) {
-        const pc = e.get<PlayerComponent>(COMP_PLAYER);
-        const len = pc?.inputQueue?.length ?? 0;
-        qSum += len;
-        qMax = Math.max(qMax, len);
-      }
-      this.tickDebugQueueSum += activePlayers.length > 0 ? qSum / activePlayers.length : 0;
-      this.tickDebugQueueMax = Math.max(this.tickDebugQueueMax, qMax);
-      if (this.tickDebugCount >= this.physicsRate) {
-        const avgInterval = this.tickDebugIntervalSum / Math.max(1, this.tickDebugCount - 1);
-        const avgQueue = this.tickDebugQueueSum / this.tickDebugCount;
-        console.log(
-          `[tick] avgInterval=${avgInterval.toFixed(1)}ms (target ${(1000 / this.physicsRate).toFixed(1)}, max ${this.tickDebugIntervalMax.toFixed(0)}) ` +
-          `lastTickProc=${this.tickDebugLastProcMs.toFixed(1)}ms queueAvg=${avgQueue.toFixed(1)} queueMax=${this.tickDebugQueueMax}`
-        );
-        this.tickDebugCount = 0;
-        this.tickDebugIntervalSum = 0;
-        this.tickDebugIntervalMax = 0;
-        this.tickDebugQueueSum = 0;
-        this.tickDebugQueueMax = 0;
-      }
-    }
-    const tickStartMs = this.tickDebug ? performance.now() : 0;
-
     this.playerStateSystem.tickBuffs(activePlayers, now);
     this.playerStateSystem.tickStamina(activePlayers, now);
     this.playerStateSystem.syncExhaustion(activePlayers);
@@ -765,8 +719,6 @@ export class Room {
 
     // 5. Step Havok scene for future environment physics
     this.scene.render();
-
-    if (this.tickDebug) this.tickDebugLastProcMs = performance.now() - tickStartMs;
 
     // Phase-locked broadcast: emit transforms every (physicsRate/broadcastRate)
     // ticks, immediately after the state for this tick is finalized.

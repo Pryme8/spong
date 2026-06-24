@@ -498,9 +498,9 @@ export function useGameSession() {
         const sendTime = inputSendTimes.get(ackedSeq);
         if (sendTime !== undefined) {
           // True round-trip: time from sending input `ackedSeq` to the server's
-          // acknowledgment ARRIVING (stamped on the socket message), not when this
-          // handler runs — so a slow render frame doesn't inflate the reading.
-          const arrivalTime = (data.recvTime as number | undefined) ?? performance.now();
+          // acknowledgment ARRIVING (stamped in the network worker at true arrival,
+          // immune to render-frame stalls). Both ends use Date.now().
+          const arrivalTime = (data.recvTime as number | undefined) ?? Date.now();
           const measuredLatency = arrivalTime - sendTime;
           latencySamples.push(measuredLatency);
           if (latencySamples.length > MAX_LATENCY_SAMPLES) {
@@ -1552,7 +1552,9 @@ export function useGameSession() {
               timestamp: performance.now()
             };
 
-            inputSendTimes.set(inputSequence, performance.now());
+            // Date.now() (not performance.now) so it's comparable to the worker's
+            // recvTime stamp, which is cross-thread and therefore epoch-based.
+            inputSendTimes.set(inputSequence, Date.now());
             // Safety cap: if acks stop (e.g. disconnect), don't let the map grow.
             if (inputSendTimes.size > 256) {
               const oldest = inputSendTimes.keys().next().value;

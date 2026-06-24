@@ -95,15 +95,19 @@ Room.ts was ~4.5k lines; now ~908 after extracting Physics, Projectile, Building
 
 Finish what's already built. Each section groups the remaining work for a system that's partially implemented.
 
-### Movement Feel & Netcode Responsiveness *(in progress)*
+### Movement Feel & Netcode Responsiveness
 
-- [ ] **Validate tuned constants in play** — ACCELERATION 50, FRICTION 40, AIR_CONTROL 0.45, TURN_BRAKE 60; tune further to taste
-- [ ] **Validate at 50/100/200ms simulated latency** (`?latency=N`) — no rubber-banding, correct gravity off edges, step-up onto blocks
+- [x] ~~**Tune movement constants**~~ (Completed: ACCELERATION 50, FRICTION 40, AIR_CONTROL 0.45, TURN_BRAKE 60 counter-strafe brake; validated in play)
+- [x] ~~**Real-time server tick loop**~~ (Completed: replaced setInterval(16.67) — which Windows throttled to ~23ms/42Hz — with a real-time accumulator; true 60Hz, idle RTT dropped from ~80ms to ~12ms)
+- [x] ~~**TCP_NODELAY on server sockets**~~ (Completed: `setNoDelay(true)` in ConnectionHandler; disables Nagle for the server→client direction)
+- [x] ~~**WebSocket moved to a Web Worker**~~ (Completed: networkWorker.ts owns the socket; message arrival timestamped off the render thread → accurate latency, no frame-stall spikes)
+- [x] ~~**Exhaustion speed penalty desync**~~ (Completed: replaced compounding per-step `velX*=0.5` with a deterministic max-speed cap in shared stepCharacter; fixed the on-exhaustion lag spike)
+- [x] ~~**Underwater frame-stall spike**~~ (Completed: skip the water mirror reflection render while camera is submerged; fixed deep-water input-buffer/replay spikes)
 - [ ] **Consider `TransformDelta` opcode** — server already has the opcode; implement delta compression if 60Hz full-packet bandwidth becomes an issue at higher player counts
 
 ### Competitive Shooter Hardening
 
-- [x] ~~**Anti-speedhack: input step budget**~~ (Completed: per-player `stepBudget` in PhysicsSystem refills 1/tick cap 5; flooding throttled to real-time, stalls recover in one burst; tests in PhysicsSystem.test.ts)
+- [x] ~~**Anti-speedhack: input step budget**~~ (Completed: per-player `stepBudget` in PhysicsSystem refills by real wall-clock elapsed, cap 5; flooding throttled to real-time; anti-bloat drops keep the queue shallow; tests in PhysicsSystem.test.ts)
 - [x] ~~**Lag compensation for hits**~~ (Completed: model (a) spawn-time rewind — `PlayerHistory` wired into `catchUpProjectiles`, targets evaluated at projectile time minus client interp delay; tests in ProjectileSystem.test.ts)
 - [x] ~~**Hitbox/headshot fidelity**~~ (Completed: `PLAYER_HEAD_HALF`/`PLAYER_HEAD_OFFSET_Y` in types.ts, unified dummy/player head calc in ProjectileSystem, head/body/miss tests)
 - [x] ~~**Net-debug readouts**~~ (Completed: `LocalTransform.NetStats` — pred error avg/last, corrections/sec, unacked inputs — shown live in LatencyDebugPanel with reconciliation toggle)

@@ -51,11 +51,15 @@ export function getWebSocketUrl(): string {
 }
 
 export class NetworkClient {
-  private ws: WebSocket | null = null;
+  /**
+   * The WebSocket now lives in a worker (networkWorker.ts) so message arrival is
+   * timestamped immediately, never delayed by render frames. This class is a thin
+   * proxy: it posts raw bytes to the worker and decodes/dispatches what comes back.
+   * Public API is unchanged so the rest of the game is unaffected.
+   */
+  private worker: Worker | null = null;
   private url: string;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
+  private connected = false;
   /** One-way simulated latency in ms (incoming and outgoing). RTT = 2 * this. */
   private simulatedLatencyMs = 0;
 
@@ -84,55 +88,44 @@ export class NetworkClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.url);
-        this.ws.binaryType = 'arraybuffer';
+        this.worker = new Worker(new URL('./networkWorker.ts', import.meta.url), { type: 'module' });
+        let settled = false;
 
-        this.ws.onopen = () => {
-          this.reconnectAttempts = 0;
-          this.connectionListeners.forEach(cb => cb());
-          resolve();
-        };
-
-        this.ws.onmessage = (event) => {
-          const data = event.data;
-          if (this.simulatedLatencyMs > 0) {
-            const copy = data instanceof ArrayBuffer ? data.slice(0) : data;
-            setTimeout(() => this.handleMessage(copy), this.simulatedLatencyMs);
-          } else {
-            this.handleMessage(data);
+        this.worker.onmessage = (e: MessageEvent) => {
+          const msg = e.data;
+          if (!msg) return;
+          if (msg.type === 'open') {
+            this.connected = true;
+            if (!settled) { settled = true; resolve(); }
+            this.connectionListeners.forEach(cb => cb());
+          } else if (msg.type === 'close') {
+            this.connected = false;
+            this.disconnectionListeners.forEach(cb => cb());
+          } else if (msg.type === 'msg') {
+            // recvTime stamped in the worker at true arrival (Date.now, cross-thread safe).
+            this.handleMessage(msg.data as ArrayBuffer, msg.recvTime as number);
+          } else if (msg.type === 'error') {
+            if (!settled) { settled = true; reject(new Error('WebSocket connection error')); }
           }
         };
 
-        this.ws.onerror = (error) => {
-          reject(error);
+        this.worker.onerror = (err) => {
+          if (!settled) { settled = true; reject(err); }
         };
 
-        this.ws.onclose = (event) => {
-          this.disconnectionListeners.forEach(cb => cb());
-          this.attemptReconnect();
-        };
+        this.worker.postMessage({ type: 'init', url: this.url, simulatedLatencyMs: this.simulatedLatencyMs });
       } catch (err) {
         reject(err);
       }
     });
   }
 
-  private attemptReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-      setTimeout(() => {
-        this.connect().catch(err => {
-        });
-      }, delay);
-    } else {
-    }
-  }
-
   disconnect() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    this.connected = false;
+    if (this.worker) {
+      this.worker.postMessage({ type: 'close' });
+      this.worker.terminate();
+      this.worker = null;
     }
   }
 
@@ -160,7 +153,7 @@ export class NetworkClient {
     });
   }
 
-  private handleMessage(data: ArrayBuffer | string) {
+  private handleMessage(data: ArrayBuffer | string, recvTime?: number) {
     if (typeof data === 'string') {
       return;
     }
@@ -179,11 +172,9 @@ export class NetworkClient {
       };
       if (opcode === Opcode.TransformUpdate) {
         const transformData = decodeTransform(data);
-        // Stamp the true arrival time NOW (on the socket message), before this is
-        // queued for frame-rate-gated handling. Latency must be measured against
-        // this, not against when the handler eventually runs — otherwise a slow
-        // render frame (the message waiting in the queue) inflates the reading.
-        (transformData as any).recvTime = performance.now();
+        // recvTime is the true arrival time stamped in the worker (Date.now),
+        // immune to main-thread render stalls. Used for the latency metric.
+        (transformData as any).recvTime = recvTime ?? Date.now();
         const handlers = this.highFreqHandlers.get(opcode);
         if (handlers?.length) push(() => handlers.forEach(h => h(transformData)));
       } else if (opcode === Opcode.ProjectileSpawn) {
@@ -225,15 +216,12 @@ export class NetworkClient {
   }
 
   private doSend(buffer: ArrayBuffer): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.ws.send(buffer);
+    // The worker owns the socket and handles readyState + simulated latency.
+    if (!this.worker) return;
+    this.worker.postMessage({ type: 'send', data: buffer });
   }
 
   sendLow(opcode: Opcode, payload: any) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
     const json = JSON.stringify(payload);
     const encoder = new TextEncoder();
     const jsonBytes = encoder.encode(json);
@@ -243,23 +231,11 @@ export class NetworkClient {
     view.setUint8(0, opcode);
     new Uint8Array(buffer, 1).set(jsonBytes);
 
-    if (this.simulatedLatencyMs > 0) {
-      setTimeout(() => this.doSend(buffer), this.simulatedLatencyMs);
-    } else {
-      this.doSend(buffer);
-    }
+    this.doSend(buffer);
   }
 
   sendBinary(data: ArrayBuffer) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    if (this.simulatedLatencyMs > 0) {
-      setTimeout(() => this.doSend(data), this.simulatedLatencyMs);
-    } else {
-      this.doSend(data);
-    }
+    this.doSend(data);
   }
   
   sendInput(input: InputData) {
@@ -338,7 +314,7 @@ export class NetworkClient {
   }
 
   get isConnected(): boolean {
-    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+    return this.connected;
   }
 
   /** Simulated one-way latency in ms (0 = disabled). RTT ≈ 2 * this when active. */
