@@ -40,6 +40,12 @@ export interface PlayerComponent {
   headPitch: number; // Current pitch of head for hitbox calculation and visualization
   /** Server-side input queue — one entry per received client input, processed one per tick. */
   inputQueue?: Array<CharacterInput & { sequence: number }>;
+  /**
+   * Server-side catch-up budget (anti-speedhack). Refills 1 per physics tick,
+   * capped at a small bank; each physics step consumes 1. Limits how fast a
+   * client can drain its input queue so flooding can't exceed real-time movement.
+   */
+  stepBudget?: number;
 }
 
 export interface HealthComponent {

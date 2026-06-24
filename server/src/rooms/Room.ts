@@ -92,7 +92,25 @@ export class Room {
   private readonly maxRewindMs = 150;
 
   private physicsRate = 60;
-  private broadcastRate = 30;
+  private broadcastRate = 60;
+  private broadcastTickCounter = 0;
+  private physicsAccumulatorMs = 0;
+  private lastLoopMs = 0;
+  // Tick-timing diagnostics (enabled via TICKDEBUG env var)
+  private readonly tickDebug = process.env.TICKDEBUG === '1';
+  private tickDebugLastMs = 0;
+  private tickDebugCount = 0;
+  private tickDebugIntervalSum = 0;
+  private tickDebugIntervalMax = 0;
+  private tickDebugQueueSum = 0;
+  private tickDebugQueueMax = 0;
+  private tickDebugLastProcMs = 0;
+  /**
+   * Remote-player interpolation delay (ms) the client renders behind server time.
+   * Used by lag compensation to rewind targets to what the shooter actually saw.
+   * Must match the client's LocalTransform interpDuration (50ms).
+   */
+  private static readonly LagCompInterpMs = 50;
   private readonly physicsSystem = new PhysicsSystem();
   private readonly projectileSystem = new ProjectileSystem();
   private buildingSystem!: BuildingSystem;
@@ -374,8 +392,8 @@ export class Room {
     });
 
     // Cap queue to prevent memory growth from clock drift or flooding
-    if (queue.length > 8) {
-      queue.splice(0, queue.length - 8);
+    if (queue.length > 32) {
+      queue.splice(0, queue.length - 32);
     }
 
     // Update visual-only headPitch immediately (used for broadcast, not physics)
@@ -612,13 +630,32 @@ export class Room {
   private startTicking() {
     if (this.tickInterval) return;
 
+    // Real-time accumulator loop instead of setInterval(16.67). On Windows the OS
+    // timer rounds a 16.67ms interval up to ~23-31ms (measured), throttling the
+    // server to ~42Hz and adding ~50ms of input/broadcast latency. We instead fire
+    // a fast timer and run as many fixed 60Hz physics steps as real time has
+    // elapsed — so physics stays at a true 60Hz regardless of timer granularity.
+    // Broadcasts remain phase-locked to physicsTick (see physicsTick).
+    this.broadcastTickCounter = 0;
+    this.physicsAccumulatorMs = 0;
+    this.lastLoopMs = Date.now();
+    const stepMs = 1000 / this.physicsRate;
     this.tickInterval = setInterval(() => {
-      this.physicsTick();
-    }, 1000 / this.physicsRate);
-
-    this.broadcastInterval = setInterval(() => {
-      this.broadcastTransforms();
-    }, 1000 / this.broadcastRate);
+      const nowMs = Date.now();
+      let delta = nowMs - this.lastLoopMs;
+      this.lastLoopMs = nowMs;
+      if (delta > 250) delta = 250; // clamp to avoid spiral-of-death after a stall
+      this.physicsAccumulatorMs += delta;
+      // Cap steps per wake-up so a long stall can't block the event loop.
+      let steps = 0;
+      while (this.physicsAccumulatorMs >= stepMs && steps < 8) {
+        this.physicsTick();
+        this.physicsAccumulatorMs -= stepMs;
+        steps++;
+      }
+      // Drop any unprocessed backlog beyond the cap so we don't run away.
+      if (this.physicsAccumulatorMs > stepMs) this.physicsAccumulatorMs = 0;
+    }, 4);
   }
 
   private stopTicking() {
@@ -638,9 +675,46 @@ export class Room {
     const playerEntities = this.world.query(COMP_PLAYER);
     const activePlayers = playerEntities.filter(entity => !entity.hasTag(TAG_DUMMY));
 
+    // ── Optional tick-timing diagnostics (set TICKDEBUG=1) ────────────────────
+    // Logs the REAL interval between physics ticks (exposes Windows setInterval
+    // jitter), tick processing time, and input-queue depth — once per second.
+    if (this.tickDebug) {
+      if (this.tickDebugLastMs > 0) {
+        const interval = nowMs - this.tickDebugLastMs;
+        this.tickDebugIntervalSum += interval;
+        this.tickDebugIntervalMax = Math.max(this.tickDebugIntervalMax, interval);
+      }
+      this.tickDebugLastMs = nowMs;
+      this.tickDebugCount++;
+      let qSum = 0;
+      let qMax = 0;
+      for (const e of activePlayers) {
+        const pc = e.get<PlayerComponent>(COMP_PLAYER);
+        const len = pc?.inputQueue?.length ?? 0;
+        qSum += len;
+        qMax = Math.max(qMax, len);
+      }
+      this.tickDebugQueueSum += activePlayers.length > 0 ? qSum / activePlayers.length : 0;
+      this.tickDebugQueueMax = Math.max(this.tickDebugQueueMax, qMax);
+      if (this.tickDebugCount >= this.physicsRate) {
+        const avgInterval = this.tickDebugIntervalSum / Math.max(1, this.tickDebugCount - 1);
+        const avgQueue = this.tickDebugQueueSum / this.tickDebugCount;
+        console.log(
+          `[tick] avgInterval=${avgInterval.toFixed(1)}ms (target ${(1000 / this.physicsRate).toFixed(1)}, max ${this.tickDebugIntervalMax.toFixed(0)}) ` +
+          `lastTickProc=${this.tickDebugLastProcMs.toFixed(1)}ms queueAvg=${avgQueue.toFixed(1)} queueMax=${this.tickDebugQueueMax}`
+        );
+        this.tickDebugCount = 0;
+        this.tickDebugIntervalSum = 0;
+        this.tickDebugIntervalMax = 0;
+        this.tickDebugQueueSum = 0;
+        this.tickDebugQueueMax = 0;
+      }
+    }
+    const tickStartMs = this.tickDebug ? performance.now() : 0;
+
     this.playerStateSystem.tickBuffs(activePlayers, now);
     this.playerStateSystem.tickStamina(activePlayers, now);
-    this.playerStateSystem.syncInputAndStamina(activePlayers);
+    this.playerStateSystem.syncExhaustion(activePlayers);
 
     // Character physics (stepping + PvP resolution)
     const blockColliders = this.buildingSystem.collectBlockColliders();
@@ -651,9 +725,10 @@ export class Room {
       blockColliders,
       getBlockCollidersNear: (x, y, z, r) => this.buildingSystem.collectBlockCollidersNear(x, y, z, r),
       octree: this.levelSystem.getOctree() ?? undefined,
+      nowMs,
     });
 
-    this.playerStateSystem.tickBloomAndExhaustion(activePlayers);
+    this.playerStateSystem.tickBloom(activePlayers);
     this.combatSystem.tickDrowning(activePlayers, now);
     this.playerStateSystem.tickReload(activePlayers, now);
 
@@ -690,6 +765,17 @@ export class Room {
 
     // 5. Step Havok scene for future environment physics
     this.scene.render();
+
+    if (this.tickDebug) this.tickDebugLastProcMs = performance.now() - tickStartMs;
+
+    // Phase-locked broadcast: emit transforms every (physicsRate/broadcastRate)
+    // ticks, immediately after the state for this tick is finalized.
+    const broadcastEvery = Math.max(1, Math.round(this.physicsRate / this.broadcastRate));
+    this.broadcastTickCounter++;
+    if (this.broadcastTickCounter >= broadcastEvery) {
+      this.broadcastTickCounter = 0;
+      this.broadcastTransforms();
+    }
   }
 
   private catchUpProjectiles(
@@ -710,11 +796,18 @@ export class Room {
     if (projectileEntities.length === 0) return;
 
     const killableEntities = this.world.queryTag(TAG_KILLABLE);
+    // Lag compensation (model a — spawn-time rewind): during the catch-up window
+    // we evaluate targets at the position the shooter actually saw them, i.e. the
+    // projectile's simulated server time minus the client's interpolation delay.
+    // Once the projectile catches up to the present it continues (in physicsTick)
+    // against live positions.
     const ctx = {
       voxelGrid: this.voxelGrid,
       rockColliderMeshes: this.levelSystem.getRockColliderMeshes(),
       octree: this.levelSystem.getOctree() ?? undefined,
-      groundY: GROUND_HEIGHT
+      groundY: GROUND_HEIGHT,
+      getRewindPosition: (entityId: number, timeMs: number) => this.playerHistory.getPosition(entityId, timeMs),
+      rewindTimeMs: shotServerTimeMs - Room.LagCompInterpMs
     };
 
     const stepMs = FIXED_TIMESTEP * 1000;
@@ -722,6 +815,7 @@ export class Room {
     let currentTimeMs = shotServerTimeMs;
 
     while (remainingMs >= stepMs && projectileEntities.length > 0) {
+      ctx.rewindTimeMs = currentTimeMs - Room.LagCompInterpMs;
       const result = this.projectileSystem.tick(projectileEntities, killableEntities, ctx);
 
       if (result.hits.length > 0) {

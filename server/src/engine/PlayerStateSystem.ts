@@ -124,26 +124,17 @@ export class PlayerStateSystem {
     }
   }
 
-  /** Dequeue one input per entity and sync isExhausted to state. */
-  syncInputAndStamina(activePlayers: Entity[]): void {
+  /**
+   * Sync the exhaustion flag from stamina onto character state so the physics
+   * step can react to it. Input dequeue + stepping happens in PhysicsSystem,
+   * which drains one physics step per buffered input (with catch-up) so the
+   * server's step count matches the client's exactly.
+   */
+  syncExhaustion(activePlayers: Entity[]): void {
     for (const entity of activePlayers) {
       const pc = entity.get<PlayerComponent>(COMP_PLAYER);
       const stamina = entity.get<StaminaComponent>(COMP_STAMINA);
       if (!pc) continue;
-
-      const queue = pc.inputQueue!;
-      if (queue.length > 0) {
-        const nextInput = queue.shift()!;
-        pc.input.forward = nextInput.forward;
-        pc.input.right = nextInput.right;
-        pc.input.cameraYaw = nextInput.cameraYaw;
-        pc.input.cameraPitch = nextInput.cameraPitch;
-        pc.input.jump = nextInput.jump;
-        pc.input.sprint = nextInput.sprint;
-        pc.input.dive = nextInput.dive;
-        pc.headPitch = nextInput.cameraPitch || 0;
-        pc.lastProcessedInput = nextInput.sequence;
-      }
 
       if (stamina) {
         pc.state.isExhausted = stamina.isExhausted;
@@ -152,11 +143,14 @@ export class PlayerStateSystem {
     }
   }
 
-  /** Post-physics: bloom decay and exhaustion speed clamp. */
-  tickBloomAndExhaustion(activePlayers: Entity[]): void {
+  /**
+   * Post-physics: weapon bloom decay.
+   * (The exhaustion speed penalty now lives in shared stepCharacter so client
+   * prediction stays in sync — see physics.ts.)
+   */
+  tickBloom(activePlayers: Entity[]): void {
     for (const entity of activePlayers) {
       const pc = entity.get<PlayerComponent>(COMP_PLAYER)!;
-      const stamina = entity.get<StaminaComponent>(COMP_STAMINA);
       const shootable = entity.get<ShootableComponent>(COMP_SHOOTABLE);
       const weaponTypeComp = entity.get<WeaponTypeComponent>(COMP_WEAPON_TYPE);
       if (shootable && weaponTypeComp && weaponTypeComp.type in WEAPON_STATS) {
@@ -170,10 +164,6 @@ export class PlayerStateSystem {
             : 0;
           shootable.currentBloom = Math.max(floor, Math.min(bloomRange, decayed));
         }
-      }
-      if (stamina?.isExhausted) {
-        pc.state.velX *= 0.5;
-        pc.state.velZ *= 0.5;
       }
     }
   }

@@ -27,6 +27,34 @@ interface InputSnapshot {
 }
 
 export class LocalTransform {
+  /**
+   * Global toggle for the local player's server reconciliation.
+   * When false, the local player ignores server corrections entirely and runs
+   * pure client-authoritative prediction (great for A/B feel testing).
+   * Defaults off via `?noReconcile` URL param; can be flipped live in the
+   * browser console with `toggleReconciliation()`.
+   */
+  static ReconciliationEnabled = !(
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('noReconcile')
+  );
+
+  /**
+   * Live netcode stats for the local player, read by the debug panel.
+   * Updated on each reconciliation.
+   */
+  static readonly NetStats = {
+    lastErrorUnits: 0,
+    avgErrorUnits: 0,
+    correctionsPerSec: 0,
+    unackedInputs: 0
+  };
+  private static correctionWindowCount = 0;
+  private static correctionWindowStartMs = 0;
+  /** When true (?netdebug URL flag), logs the context of any large reconciliation correction. */
+  static NetDebug = typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('netdebug');
+
   readonly entityId: number;
   private node: TransformNode;
   private headNode: Mesh;
@@ -94,7 +122,15 @@ export class LocalTransform {
   private targetRotation = Quaternion.Identity();
   private targetHeadPitch = 0;
   private interpT = 0;
-  private interpDuration = 0.05; // 50ms = 20Hz
+  private interpDuration = 0.05; // seconds; adapted at runtime to snapshot rate + jitter
+  // Adaptive interpolation: track snapshot inter-arrival gap + jitter so the
+  // interpolation buffer is just large enough to stay smooth under variable
+  // latency without adding unnecessary delay.
+  private lastSnapshotMs = 0;
+  private avgGapMs = 0;
+  private jitterMs = 0;
+  private static readonly InterpMinMs = 33;  // floor (~2 frames at 60Hz)
+  private static readonly InterpMaxMs = 150; // ceiling to bound visual delay
 
   readonly hasShadows = true;
 
@@ -162,6 +198,16 @@ export class LocalTransform {
     // Initialize weapon holder
     this.weaponHolder = new WeaponHolder(scene, `player_${entityId}`, isLocal);
 
+    // Expose a live reconciliation toggle for movement-feel testing
+    if (isLocal && typeof window !== 'undefined') {
+      (window as any).toggleReconciliation = (enabled?: boolean) => {
+        LocalTransform.ReconciliationEnabled =
+          enabled === undefined ? !LocalTransform.ReconciliationEnabled : enabled;
+        console.log(`[Reconciliation] ${LocalTransform.ReconciliationEnabled ? 'ON (server-authoritative)' : 'OFF (client-authoritative)'}`);
+        return LocalTransform.ReconciliationEnabled;
+      };
+    }
+
     // Remote players: create view node at eye height so weapon can use first-person hold transform
     if (!isLocal) {
       this.weaponViewNode = new TransformNode(`player_${entityId}_weaponView`, scene);
@@ -201,13 +247,14 @@ export class LocalTransform {
     }
   }
 
-  setInput(forward: number, right: number, cameraYaw: number, jump: boolean, sprint: boolean = false, cameraPitch: number = 0) {
+  setInput(forward: number, right: number, cameraYaw: number, jump: boolean, sprint: boolean = false, cameraPitch: number = 0, dive: boolean = false) {
     this.input.forward = forward;
     this.input.right = right;
     this.input.cameraYaw = cameraYaw;
     this.input.cameraPitch = cameraPitch;
     this.input.jump = jump;
     this.input.sprint = sprint;
+    this.input.dive = dive;
   }
 
   setHeadPitch(pitch: number) {
@@ -240,7 +287,8 @@ export class LocalTransform {
       cameraYaw: this.input.cameraYaw,
       cameraPitch: this.input.cameraPitch,
       jump: this.input.jump,
-      sprint: this.input.sprint
+      sprint: this.input.sprint,
+      dive: this.input.dive
     };
 
     this.inputBuffer.push({
@@ -255,7 +303,7 @@ export class LocalTransform {
     // Get collision data for client-side prediction (must match server exactly)
     const blockColliders = this.buildingCollisionManager?.getBlockCollidersNear(
       this.state.posX, this.state.posY, this.state.posZ, 8
-    );
+    ) ?? [];
     const fullTreeColliders = this.treeColliderGetter?.() ?? [];
     const fullRockColliders = this.rockColliderGetter?.() ?? [];
     let treeColliders = fullTreeColliders;
@@ -293,6 +341,13 @@ export class LocalTransform {
         );
       }
 
+      // TEST MODE: client-authoritative — ignore the server's authoritative
+      // state and keep our own predicted simulation. No snap, no replay, no
+      // error offset. This shows what zero-reconciliation movement feels like.
+      if (!LocalTransform.ReconciliationEnabled) {
+        return;
+      }
+
       // 2. Remember where we predicted we'd be RIGHT NOW
       const oldPredictedX = this.state.posX;
       const oldPredictedY = this.state.posY;
@@ -326,25 +381,28 @@ export class LocalTransform {
         this.state.isExhausted = data.isExhausted;
       }
 
-      // 4. Replay all unacknowledged inputs
-      // CRITICAL: Must use same collision data as initial prediction
-      const blockColliders = this.buildingCollisionManager?.getBlockCollidersNear(
+      // 4. Replay all unacknowledged inputs.
+      // Query nearby colliders ONCE for the whole replay (not per input). The
+      // replay window is only a handful of inputs (~100-200ms of movement, ~1-2
+      // units) — well within the 8-unit query radius — so the collider set barely
+      // changes. Re-querying per input multiplied this cost by N every server
+      // update (60/sec) and was the main source of movement-time FPS drops.
+      const replayBlockColliders = this.buildingCollisionManager?.getBlockCollidersNear(
         this.state.posX, this.state.posY, this.state.posZ, 8
-      );
+      ) ?? [];
       const fullTreeColliders = this.treeColliderGetter?.() ?? [];
       const fullRockColliders = this.rockColliderGetter?.() ?? [];
-      let treeColliders = fullTreeColliders;
-      let rockColliders = fullRockColliders;
-
+      let replayTrees = fullTreeColliders;
+      let replayRocks = fullRockColliders;
       const octree = this.octreeGetter?.();
       if (octree) {
         const nearby = octree.queryPoint(this.state.posX, this.state.posY, this.state.posZ, 8);
-        treeColliders = nearby.filter((e: any) => e.type === 'tree').map((e: any) => e.data);
-        rockColliders = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
+        replayTrees = nearby.filter((e: any) => e.type === 'tree').map((e: any) => e.data);
+        replayRocks = nearby.filter((e: any) => e.type === 'rock').map((e: any) => e.data);
       }
 
       for (const snapshot of this.inputBuffer) {
-        stepCharacter(this.state, snapshot.input, FIXED_TIMESTEP, this.voxelGrid, treeColliders, rockColliders, blockColliders);
+        stepCharacter(this.state, snapshot.input, FIXED_TIMESTEP, this.voxelGrid, replayTrees, replayRocks, replayBlockColliders);
       }
 
       // 5. How much did our prediction change?
@@ -352,6 +410,37 @@ export class LocalTransform {
       const deltaY = oldPredictedY - this.state.posY;
       const deltaZ = oldPredictedZ - this.state.posZ;
       const dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+
+      // Diagnostic: log the context of any meaningful correction so we can see
+      // WHAT diverged (position vs server, velocity, water/exhaustion state).
+      if (LocalTransform.NetDebug && dist > 0.5) {
+        console.warn('[netdebug] correction', {
+          dist: +dist.toFixed(3),
+          predicted: [+oldPredictedX.toFixed(2), +oldPredictedY.toFixed(2), +oldPredictedZ.toFixed(2)],
+          serverRaw: [+data.position.x.toFixed(2), +data.position.y.toFixed(2), +data.position.z.toFixed(2)],
+          afterReplay: [+this.state.posX.toFixed(2), +this.state.posY.toFixed(2), +this.state.posZ.toFixed(2)],
+          vel: [+this.state.velX.toFixed(2), +this.state.velY.toFixed(2), +this.state.velZ.toFixed(2)],
+          waterDepth: +this.state.waterDepth.toFixed(2),
+          isInWater: this.state.isInWater,
+          isExhausted: this.state.isExhausted,
+          unackedInputs: this.inputBuffer.length,
+        });
+      }
+
+      // Debug net stats (read by LatencyDebugPanel)
+      const stats = LocalTransform.NetStats;
+      stats.lastErrorUnits = dist;
+      stats.avgErrorUnits = stats.avgErrorUnits * 0.9 + dist * 0.1;
+      stats.unackedInputs = this.inputBuffer.length;
+      const statsNowMs = performance.now();
+      if (LocalTransform.correctionWindowStartMs === 0) LocalTransform.correctionWindowStartMs = statsNowMs;
+      if (dist > 0.05) LocalTransform.correctionWindowCount++; // count only meaningful corrections
+      const statsElapsed = statsNowMs - LocalTransform.correctionWindowStartMs;
+      if (statsElapsed >= 1000) {
+        stats.correctionsPerSec = Math.round((LocalTransform.correctionWindowCount * 1000) / statsElapsed);
+        LocalTransform.correctionWindowCount = 0;
+        LocalTransform.correctionWindowStartMs = statsNowMs;
+      }
 
       if (dist > 4.0) {
         // Huge desync (teleport / respawn) — hard snap, zero offset
@@ -397,6 +486,7 @@ export class LocalTransform {
         this.targetHeadPitch = data.headPitch || 0;
         this.headNode.rotation.x = this.targetHeadPitch;
         this.interpT = 1.0;
+        this.lastSnapshotMs = performance.now(); // reset timing so the teleport gap isn't counted
       } else {
         // Normal movement - interpolate smoothly
         this.prevPosition.copyFrom(this.node.position);
@@ -407,6 +497,21 @@ export class LocalTransform {
         this.targetRotation.set(data.rotation.x, data.rotation.y, data.rotation.z, data.rotation.w);
         this.targetHeadPitch = data.headPitch || 0;
         this.interpT = 0;
+
+        // Adapt the interpolation window to the measured snapshot cadence + jitter.
+        const nowMs = performance.now();
+        if (this.lastSnapshotMs > 0) {
+          const gap = nowMs - this.lastSnapshotMs;
+          this.avgGapMs = this.avgGapMs === 0 ? gap : this.avgGapMs * 0.9 + gap * 0.1;
+          const deviation = Math.abs(gap - this.avgGapMs);
+          this.jitterMs = this.jitterMs * 0.9 + deviation * 0.1;
+          const targetMs = Math.min(
+            LocalTransform.InterpMaxMs,
+            Math.max(LocalTransform.InterpMinMs, this.avgGapMs + this.jitterMs * 2)
+          );
+          this.interpDuration = targetMs * 0.001;
+        }
+        this.lastSnapshotMs = nowMs;
       }
       
       // Sync water state for remote players too (for future effects)
@@ -473,8 +578,8 @@ export class LocalTransform {
         this.smoothY = targetY;
       } else if (targetY > this.smoothY) {
         // Going UP while on ground (step-up) → smooth rise.
-        // Rate: ~4 units/sec ensures 0.5u step takes ~125ms.
-        const maxRise = 4.0 * deltaTime;
+        // Rate: ~8 units/sec ensures 0.5u step takes ~62ms.
+        const maxRise = 8.0 * deltaTime;
         const diff = targetY - this.smoothY;
         this.smoothY += Math.min(diff, maxRise);
       }

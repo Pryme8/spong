@@ -108,6 +108,21 @@ export class LevelWaterManager {
 
     // Create mirror reflection
     this.createMirrorReflection();
+
+    // Pre-warm the (expensive) water shader now, during load, instead of letting
+    // Babylon compile it on the first frame the player actually sees water — that
+    // first-draw GPU compile caused a ~1s frame hitch when jumping in.
+    await this.prewarm();
+  }
+
+  /** Force GPU compilation of the water material at load to avoid a first-draw hitch. */
+  private async prewarm(): Promise<void> {
+    if (!this.waterPlane || !this.waterMaterial) return;
+    try {
+      await this.waterMaterial.forceCompilationAsync(this.waterPlane);
+    } catch {
+      // Non-fatal: if pre-warm fails, the shader simply compiles on first draw as before.
+    }
   }
 
   /** Return true if mesh (or its root ancestor) is an item pickup - exclude from reflection. */
@@ -155,6 +170,21 @@ export class LevelWaterManager {
     for (const child of node.getChildMeshes(true)) {
       this.addMeshToMirrorRenderList(child);
     }
+  }
+
+  /**
+   * Enable/disable the mirror reflection render. When the camera is underwater the
+   * surface reflection isn't visible, so we skip the expensive full-scene render to
+   * the mirror RTT (it was tanking FPS while submerged, which stalled the client and
+   * caused input-buffer/replay latency spikes). Guarded so it only toggles on change.
+   */
+  private mirrorEnabled = true;
+  setMirrorEnabled(enabled: boolean): void {
+    if (enabled === this.mirrorEnabled || !this.mirrorTexture) return;
+    this.mirrorEnabled = enabled;
+    // Empty render list = the RTT pass renders nothing (cheap) instead of the
+    // whole scene. Restore the real list when back above water.
+    this.mirrorTexture.renderList = enabled ? this.mirrorRenderList : [];
   }
 
   /** Remove a node and all its descendant meshes. Call before disposing an entity. */

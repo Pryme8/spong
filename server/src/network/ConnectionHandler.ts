@@ -61,6 +61,16 @@ export class ConnectionHandler {
       isAlive: true
     };
 
+    // Disable Nagle's algorithm on the underlying TCP socket (server→client).
+    // Without TCP_NODELAY the OS coalesces our small per-tick packets and, with
+    // delayed-ACK, can stall them up to ~40-500ms — unacceptable for a realtime
+    // game. This is the only side we can control: the browser WebSocket API has
+    // no equivalent (Chrome already disables Nagle for WebSockets client-side).
+    const rawSocket = (ws as unknown as { _socket?: { setNoDelay?: (v: boolean) => void } })._socket;
+    if (rawSocket && typeof rawSocket.setNoDelay === 'function') {
+      rawSocket.setNoDelay(true);
+    }
+
     this.connections.set(id, conn);
 
     // Handle pong responses

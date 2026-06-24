@@ -57,7 +57,10 @@ export const SHOOT_COOLDOWN_MS = 200; // Milliseconds between shots (300 RPM)
 export const SHOOT_COOLDOWN_S = 0.2; // Same in seconds for server
 
 // Player constants
-export const PLAYER_HITBOX_HALF = 0.5; // Half-extent of 1x1x1 cube hitbox
+export const PLAYER_HITBOX_HALF = 0.5; // Half-extent of 1x1x1 body cube hitbox
 export const PLAYER_CAPSULE_RADIUS = 0.4; // Capsule radius for player-vs-player collision
 export const PLAYER_MAX_HEALTH = 100;
-export const PLAYER_HITBOX_CENTER_Y = 0.5; // Center of hitbox above ground
+export const PLAYER_HITBOX_CENTER_Y = 0.5; // Body-hitbox center above feet (used to lift feet-anchored entities like dummies)
+// Head hitbox (headshot detection) — head render cube is 0.6 wide, so half = 0.3
+export const PLAYER_HEAD_HALF = 0.3; // Half-extent of head hitbox
+export const PLAYER_HEAD_OFFSET_Y = 0.8; // Head center above the body-hitbox center

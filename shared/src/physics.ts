@@ -37,6 +37,7 @@ const MOVEMENT_FRICTION = CHARACTER.FRICTION;
 const AIR_CONTROL = CHARACTER.AIR_CONTROL;
 const JUMP_VELOCITY = CHARACTER.JUMP_VELOCITY;
 const STEP_HEIGHT = CHARACTER.STEP_HEIGHT;
+const TURN_BRAKE = CHARACTER.TURN_BRAKE;
 
 /**
  * Check if player AABB overlaps any block collider.
@@ -258,15 +259,39 @@ export function stepCharacter(
       const normZ = moveZ / moveLen;
       const controlFactor = state.isGrounded ? 1.0 : AIR_CONTROL;
 
+      // Counter-strafe: when grounded and input opposes velocity, brake first for snappier turns
+      if (state.isGrounded) {
+        const horizSpeed = Math.sqrt(state.velX * state.velX + state.velZ * state.velZ);
+        if (horizSpeed > 0.01) {
+          const dot = (normX * state.velX + normZ * state.velZ) / horizSpeed;
+          if (dot < 0) {
+            const brakeAmount = -dot * TURN_BRAKE * dt;
+            const newSpeed = Math.max(0, horizSpeed - brakeAmount);
+            const scale = newSpeed / horizSpeed;
+            state.velX *= scale;
+            state.velZ *= scale;
+          }
+        }
+      }
+
       state.velX += normX * MOVEMENT_ACCELERATION * dt * controlFactor;
       state.velZ += normZ * MOVEMENT_ACCELERATION * dt * controlFactor;
 
-      // Determine max speed based on wading state
-      let maxSpeed = input.sprint ? MOVEMENT_MAX_SPEED * 1.5 : MOVEMENT_MAX_SPEED;
+      // Determine max speed based on wading state (no sprint while exhausted)
+      const canSprint = input.sprint && !state.isExhausted;
+      let maxSpeed = canSprint ? MOVEMENT_MAX_SPEED * 1.5 : MOVEMENT_MAX_SPEED;
       
       // Wading in water (body center underwater but grounded): half speed
       if (state.waterDepth > 0 && state.isGrounded) {
         maxSpeed *= 0.5; // Half speed when wading
+      }
+
+      // Exhausted: half speed. A speed CAP (not a per-step velocity multiplier)
+      // so it's deterministic regardless of how many steps run — the previous
+      // `velX *= 0.5` per step compounded and diverged badly during client replay,
+      // causing a large reconciliation correction (lag spike) on exhaustion.
+      if (state.isExhausted) {
+        maxSpeed *= 0.5;
       }
       
       const speed = Math.sqrt(state.velX * state.velX + state.velZ * state.velZ);
@@ -626,4 +651,8 @@ export function stepCharacter(
   // ── Instant rotation to camera yaw ─────────────────────────
   // Player cube instantly faces camera direction (no smooth rotation)
   state.yaw = input.cameraYaw;
+
+  // NOTE: the exhaustion movement penalty is applied as a deterministic max-speed
+  // cap in the land-movement clamp above (not a per-step velocity multiplier), so
+  // it stays identical across client prediction/replay and server simulation.
 }

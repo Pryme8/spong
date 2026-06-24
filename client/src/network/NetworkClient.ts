@@ -179,6 +179,11 @@ export class NetworkClient {
       };
       if (opcode === Opcode.TransformUpdate) {
         const transformData = decodeTransform(data);
+        // Stamp the true arrival time NOW (on the socket message), before this is
+        // queued for frame-rate-gated handling. Latency must be measured against
+        // this, not against when the handler eventually runs — otherwise a slow
+        // render frame (the message waiting in the queue) inflates the reading.
+        (transformData as any).recvTime = performance.now();
         const handlers = this.highFreqHandlers.get(opcode);
         if (handlers?.length) push(() => handlers.forEach(h => h(transformData)));
       } else if (opcode === Opcode.ProjectileSpawn) {

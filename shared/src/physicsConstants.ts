@@ -40,14 +40,14 @@ export const MAX_ACCUMULATED_TIME = 0.25;
  * Character-specific constants (LAND movement)
  */
 export const CHARACTER = {
-  /** Movement acceleration (units/s²) - Tighter, more responsive */
-  ACCELERATION: 35.0,
+  /** Movement acceleration (units/s²) */
+  ACCELERATION: 50.0,
   /** Maximum movement speed (units/s) */
   MAX_SPEED: 8.0,
-  /** Friction/deceleration when no input (units/s²) - INCREASED for tighter control */
-  FRICTION: 28.0,
+  /** Friction/deceleration when no input (units/s²) */
+  FRICTION: 40.0,
   /** Air control multiplier (0.0 = no control, 1.0 = full control) */
-  AIR_CONTROL: 0.3,
+  AIR_CONTROL: 0.45,
   /** Jump initial velocity (units/s) */
   JUMP_VELOCITY: 8.0,
   /** Maximum height player can step up (units) */
@@ -56,6 +56,8 @@ export const CHARACTER = {
   HITBOX_HALF: 0.3,
   /** Player capsule radius for player-vs-player collision (units) */
   CAPSULE_RADIUS: 0.5,
+  /** Extra deceleration when input opposes current velocity (counter-strafe, units/s²) */
+  TURN_BRAKE: 60.0,
 } as const;
 
 /**

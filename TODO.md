@@ -95,6 +95,22 @@ Room.ts was ~4.5k lines; now ~908 after extracting Physics, Projectile, Building
 
 Finish what's already built. Each section groups the remaining work for a system that's partially implemented.
 
+### Movement Feel & Netcode Responsiveness *(in progress)*
+
+- [ ] **Validate tuned constants in play** — ACCELERATION 50, FRICTION 40, AIR_CONTROL 0.45, TURN_BRAKE 60; tune further to taste
+- [ ] **Validate at 50/100/200ms simulated latency** (`?latency=N`) — no rubber-banding, correct gravity off edges, step-up onto blocks
+- [ ] **Consider `TransformDelta` opcode** — server already has the opcode; implement delta compression if 60Hz full-packet bandwidth becomes an issue at higher player counts
+
+### Competitive Shooter Hardening
+
+- [x] ~~**Anti-speedhack: input step budget**~~ (Completed: per-player `stepBudget` in PhysicsSystem refills 1/tick cap 5; flooding throttled to real-time, stalls recover in one burst; tests in PhysicsSystem.test.ts)
+- [x] ~~**Lag compensation for hits**~~ (Completed: model (a) spawn-time rewind — `PlayerHistory` wired into `catchUpProjectiles`, targets evaluated at projectile time minus client interp delay; tests in ProjectileSystem.test.ts)
+- [x] ~~**Hitbox/headshot fidelity**~~ (Completed: `PLAYER_HEAD_HALF`/`PLAYER_HEAD_OFFSET_Y` in types.ts, unified dummy/player head calc in ProjectileSystem, head/body/miss tests)
+- [x] ~~**Net-debug readouts**~~ (Completed: `LocalTransform.NetStats` — pred error avg/last, corrections/sec, unacked inputs — shown live in LatencyDebugPanel with reconciliation toggle)
+- [x] ~~**Adaptive remote-player interpolation**~~ (Completed: interp window adapts to measured snapshot gap+jitter, EWMA clamped 33–150ms, in LocalTransform)
+- [ ] **Send server input-queue depth + applied rewind ms to client** — needs a protocol field; surface in net-debug readouts
+- [ ] **Tighten body hitbox to visual width** — body hitbox is 1.0 wide vs 0.8 rendered; decide via playtest (currently generous)
+
 ### Client Prediction *(done)*
 
 - [x] ~~**Validate at real latencies**~~ (Completed: LatencyDebugPanel with 50/100/200ms presets; use `?latencyDebug` or `?latency=N`)

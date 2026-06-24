@@ -69,25 +69,27 @@ describe('PlayerStateSystem', () => {
     });
   });
 
-  describe('syncInputAndStamina', () => {
-    it('dequeues one input and applies to player component', () => {
+  describe('syncExhaustion', () => {
+    it('syncs isExhausted onto character state and clears sprint when exhausted', () => {
       const entity = createTestPlayerEntity(world, 'conn1');
       const pc = entity.get(COMP_PLAYER)!;
-      pc.inputQueue!.push({
-        sequence: 42,
-        forward: 1,
-        right: 0,
-        cameraYaw: 1.5,
-        cameraPitch: 0.2,
-        jump: true,
-        sprint: true,
-        dive: false
-      });
-      system.syncInputAndStamina([entity]);
-      expect(pc.input.forward).toBe(1);
-      expect(pc.input.jump).toBe(true);
-      expect(pc.lastProcessedInput).toBe(42);
-      expect(pc.inputQueue).toHaveLength(0);
+      const stamina = entity.get(COMP_STAMINA)!;
+      stamina.isExhausted = true;
+      pc.input.sprint = true;
+      system.syncExhaustion([entity]);
+      expect(pc.state.isExhausted).toBe(true);
+      expect(pc.input.sprint).toBe(false);
+    });
+
+    it('leaves sprint untouched when not exhausted', () => {
+      const entity = createTestPlayerEntity(world, 'conn1');
+      const pc = entity.get(COMP_PLAYER)!;
+      const stamina = entity.get(COMP_STAMINA)!;
+      stamina.isExhausted = false;
+      pc.input.sprint = true;
+      system.syncExhaustion([entity]);
+      expect(pc.state.isExhausted).toBe(false);
+      expect(pc.input.sprint).toBe(true);
     });
   });
 

@@ -68,7 +68,8 @@ export class TransformBroadcastSystem {
         isInWater: pc.state.isInWater,
         isHeadUnderwater: pc.state.isHeadUnderwater,
         breathRemaining: pc.state.breathRemaining,
-        waterDepth: pc.state.waterDepth
+        waterDepth: pc.state.waterDepth,
+        isExhausted: pc.state.isExhausted
       };
 
       const buffer = encodeTransform(Opcode.TransformUpdate, transformData);

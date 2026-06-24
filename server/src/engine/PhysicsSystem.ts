@@ -20,6 +20,8 @@ export interface PhysicsCollisionContext {
   octree?: {
     queryPoint(x: number, y: number, z: number, radius: number): Array<{ type: string; data: unknown }>;
   };
+  /** Wall-clock time (ms) of this tick, used to refill the catch-up budget by real elapsed time. Defaults to Date.now(). */
+  nowMs?: number;
 }
 
 /**
@@ -31,48 +33,125 @@ type TreeEntry = { mesh: TreeColliderMesh; transform: TreeTransform };
 type RockEntry = { mesh: RockColliderMesh; transform: RockTransform };
 
 export class PhysicsSystem {
+  /**
+   * Cap of the catch-up budget bank (also the max steps in a single tick). Bounds
+   * per-tick work after a stall. Anti-cheat itself comes from the wall-clock refill
+   * (you only ever earn budget as real time passes), not from this cap.
+   */
+  private static readonly MaxStepsPerTick = 5;
+  /** Milliseconds per fixed physics step. */
+  private static readonly FixedStepMs = FIXED_TIMESTEP * 1000;
+
   private readonly scratchTrees: TreeEntry[] = [];
   private readonly scratchRocks: RockEntry[] = [];
+  /** Wall-clock time of the previous tick, for budget refill. 0 = uninitialized. */
+  private lastTickMs = 0;
 
   /**
    * Tick character physics for all active players, then resolve PvP overlaps.
-   * Caller must have already dequeued one input per player and synced stamina/isExhausted.
+   *
+   * For each player we run one stepCharacter per buffered input, draining the
+   * queue but limited by a per-player catch-up budget (see below). This keeps the
+   * server's step count aligned with the client's: a balanced connection steps
+   * once per tick, a backed-up queue catches up within budget, and a starved
+   * queue simply doesn't advance that tick (it catches up when the inputs
+   * arrive). That correspondence is what eliminates the prediction drift that
+   * caused rubber-banding on stop, while the budget prevents speedhacking.
+   *
+   * Caller must have synced isExhausted onto state (see PlayerStateSystem).
    */
   tick(activePlayers: Entity[], ctx: PhysicsCollisionContext): void {
+    // Anti-speedhack budget refill, by REAL elapsed time (not tick count). The
+    // server's setInterval is jittery — often slower than 60Hz on some platforms —
+    // so crediting one step per tick would throttle a client that sends at a true
+    // 60Hz below its real rate, growing the input queue and spiking latency.
+    // Crediting elapsedMs/FixedStepMs lets the server drain exactly as much as
+    // real time allows: it keeps up with a real-time client and absorbs timer
+    // jitter, while a flooding client still can't earn budget faster than time passes.
+    const nowMs = ctx.nowMs ?? Date.now();
+    const elapsedMs = this.lastTickMs === 0
+      ? PhysicsSystem.FixedStepMs
+      : Math.max(0, nowMs - this.lastTickMs);
+    this.lastTickMs = nowMs;
+    const refill = elapsedMs / PhysicsSystem.FixedStepMs;
+
     for (const entity of activePlayers) {
       const pc = entity.get<PlayerComponent>(COMP_PLAYER);
       if (!pc) continue;
 
-      let filteredTrees: TreeEntry[] = ctx.treeColliderMeshes;
-      let filteredRocks: RockEntry[] = ctx.rockColliderMeshes;
-      if (ctx.octree) {
-        this.scratchTrees.length = 0;
-        this.scratchRocks.length = 0;
-        const nearby = ctx.octree.queryPoint(pc.state.posX, pc.state.posY, pc.state.posZ, 8);
-        for (const e of nearby) {
-          if (e.type === 'tree') this.scratchTrees.push(e.data as TreeEntry);
-          else if (e.type === 'rock') this.scratchRocks.push(e.data as RockEntry);
+      const budget = pc.stepBudget ?? PhysicsSystem.MaxStepsPerTick;
+      pc.stepBudget = Math.min(PhysicsSystem.MaxStepsPerTick, budget + refill);
+
+      const queue = pc.inputQueue;
+      let stepCount = 0;
+      if (queue && queue.length > 0) {
+        const affordable = Math.floor(pc.stepBudget);
+        // Anti-bloat: never hold more than we can process this tick plus a 1-input
+        // jitter slot. Inputs beyond that exceed the real-time budget (the client is
+        // ahead of real time — a hitch burst or flooding), so we DROP the oldest
+        // rather than let a standing backlog accumulate and inflate latency. This
+        // keeps the queue shallow (low ping) while the budget still caps the
+        // sustained processing rate to real time (anti-speedhack).
+        const maxKeep = affordable + 1;
+        if (queue.length > maxKeep) {
+          queue.splice(0, queue.length - maxKeep);
         }
-        filteredTrees = this.scratchTrees;
-        filteredRocks = this.scratchRocks;
+        stepCount = Math.min(queue.length, affordable);
       }
 
-      const blockColliders = ctx.getBlockCollidersNear
-        ? ctx.getBlockCollidersNear(pc.state.posX, pc.state.posY, pc.state.posZ, 8)
-        : ctx.blockColliders;
+      for (let s = 0; s < stepCount; s++) {
+        const nextInput = queue!.shift()!;
+        pc.stepBudget--;
+        pc.input.forward = nextInput.forward;
+        pc.input.right = nextInput.right;
+        pc.input.cameraYaw = nextInput.cameraYaw;
+        pc.input.cameraPitch = nextInput.cameraPitch;
+        pc.input.jump = nextInput.jump;
+        pc.input.sprint = nextInput.sprint;
+        pc.input.dive = nextInput.dive;
+        pc.headPitch = nextInput.cameraPitch || 0;
+        pc.lastProcessedInput = nextInput.sequence;
+        if (pc.state.isExhausted) pc.input.sprint = false;
 
-      stepCharacter(
-        pc.state,
-        pc.input,
-        FIXED_TIMESTEP,
-        ctx.voxelGrid,
-        filteredTrees,
-        filteredRocks,
-        blockColliders
-      );
+        this.stepPlayer(pc, ctx);
+      }
+      // stepCount === 0: queue starved this tick — hold position and catch up
+      // next tick when the delayed inputs arrive. This matches the client, which
+      // also only advanced on the inputs it actually produced.
     }
 
     this.resolvePlayerVsPlayer(activePlayers);
+  }
+
+  /** Run one character physics step for a player, querying nearby colliders at its current position. */
+  private stepPlayer(pc: PlayerComponent, ctx: PhysicsCollisionContext): void {
+    let filteredTrees: TreeEntry[] = ctx.treeColliderMeshes;
+    let filteredRocks: RockEntry[] = ctx.rockColliderMeshes;
+    if (ctx.octree) {
+      this.scratchTrees.length = 0;
+      this.scratchRocks.length = 0;
+      const nearby = ctx.octree.queryPoint(pc.state.posX, pc.state.posY, pc.state.posZ, 8);
+      for (const e of nearby) {
+        if (e.type === 'tree') this.scratchTrees.push(e.data as TreeEntry);
+        else if (e.type === 'rock') this.scratchRocks.push(e.data as RockEntry);
+      }
+      filteredTrees = this.scratchTrees;
+      filteredRocks = this.scratchRocks;
+    }
+
+    const blockColliders = ctx.getBlockCollidersNear
+      ? ctx.getBlockCollidersNear(pc.state.posX, pc.state.posY, pc.state.posZ, 8)
+      : ctx.blockColliders;
+
+    stepCharacter(
+      pc.state,
+      pc.input,
+      FIXED_TIMESTEP,
+      ctx.voxelGrid,
+      filteredTrees,
+      filteredRocks,
+      blockColliders
+    );
   }
 
   /**

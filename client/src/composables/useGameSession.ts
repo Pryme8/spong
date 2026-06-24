@@ -126,7 +126,9 @@ export function useGameSession() {
   const latencySamples: number[] = [];
   const simulatedLatencyMs = ref(0);
   const MAX_LATENCY_SAMPLES = 20;
-  let lastInputSendTime = 0;
+  // True input→ack RTT: map each input sequence to the time it was sent, then
+  // measure against the server's echoed lastProcessedInput. Pruned on ack.
+  const inputSendTimes = new Map<number, number>();
   
   const pingColorClass = computed(() => {
     if (latency.value >= 120) return 'ping-red';
@@ -491,17 +493,32 @@ export function useGameSession() {
     };
     // Track latency and update remote player footsteps
     networkClient.onHighFrequency(Opcode.TransformUpdate, (data: any) => {
-      if (data.entityId === myEntityId.value && lastInputSendTime > 0) {
-        const now = performance.now();
-        const measuredLatency = now - lastInputSendTime;
-        latencySamples.push(measuredLatency);
-        if (latencySamples.length > MAX_LATENCY_SAMPLES) {
-          latencySamples.shift();
+      if (data.entityId === myEntityId.value && typeof data.lastProcessedInput === 'number') {
+        const ackedSeq = data.lastProcessedInput;
+        const sendTime = inputSendTimes.get(ackedSeq);
+        if (sendTime !== undefined) {
+          // True round-trip: time from sending input `ackedSeq` to the server's
+          // acknowledgment ARRIVING (stamped on the socket message), not when this
+          // handler runs — so a slow render frame doesn't inflate the reading.
+          const arrivalTime = (data.recvTime as number | undefined) ?? performance.now();
+          const measuredLatency = arrivalTime - sendTime;
+          latencySamples.push(measuredLatency);
+          if (latencySamples.length > MAX_LATENCY_SAMPLES) {
+            latencySamples.shift();
+          }
+          // Use the MEDIAN, not the mean: occasional samples are inflated by client
+          // render-frame stalls (the WebSocket runs on the main thread, so onmessage
+          // can't fire during a long frame). The median reflects typical RTT and
+          // ignores those outlier spikes.
+          const sorted = [...latencySamples].sort((a, b) => a - b);
+          latency.value = sorted[Math.floor(sorted.length / 2)];
         }
-        const sum = latencySamples.reduce((acc, val) => acc + val, 0);
-        latency.value = sum / latencySamples.length;
+        // Prune acknowledged (and any older) send times.
+        for (const seq of inputSendTimes.keys()) {
+          if (seq <= ackedSeq) inputSendTimes.delete(seq);
+          else break; // keys() iterates in insertion (ascending) order
+        }
       }
-      
     });
 
     networkClient.onLowFrequency(Opcode.FootstepSound, (payload: any) => {
@@ -1471,6 +1488,10 @@ export function useGameSession() {
                 ? cameraController.getPosition().y < WATER.LEVEL_Y
                 : playerIsUnderwater.value;
               finalPostProcess.setUnderwaterIntensity(underwater ? 1 : 0);
+              // Skip the costly mirror reflection render while submerged (not visible
+              // underwater) — its full-scene pass was stalling frames and causing the
+              // input-buffer/replay latency spikes seen in deep water.
+              waterManager?.setMirrorEnabled(!underwater);
             }
             
             // Manage heartbeat sound based on health
@@ -1531,7 +1552,12 @@ export function useGameSession() {
               timestamp: performance.now()
             };
 
-            lastInputSendTime = performance.now();
+            inputSendTimes.set(inputSequence, performance.now());
+            // Safety cap: if acks stop (e.g. disconnect), don't let the map grow.
+            if (inputSendTimes.size > 256) {
+              const oldest = inputSendTimes.keys().next().value;
+              if (oldest !== undefined) inputSendTimes.delete(oldest);
+            }
             networkClient.sendInput(input);
           }
         });

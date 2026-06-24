@@ -10,6 +10,8 @@ import {
   rayVsVoxelGrid,
   PLAYER_HITBOX_HALF,
   PLAYER_HITBOX_CENTER_Y,
+  PLAYER_HEAD_HALF,
+  PLAYER_HEAD_OFFSET_Y,
   GROUND_HEIGHT,
   PROJECTILE_SUBSTEPS,
   PROJECTILE_COLLISION_INTERVAL,
@@ -332,17 +334,18 @@ export class ProjectileSystem {
           const distX = proj.posX - bx;
           const distZ = proj.posZ - bz;
           if (distX * distX + distZ * distZ > PLAYER_CHECK_DISTANCE * PLAYER_CHECK_DISTANCE) continue;
+          // Dummies are anchored at the feet, players at the body center — lift
+          // dummies by the body-center offset so both share one head computation.
           const isDummyTarget = targetEntity.hasTag(TAG_DUMMY);
           const bodyCenterY = isDummyTarget ? by + PLAYER_HITBOX_CENTER_Y : by;
-          const headCenterY = isDummyTarget ? by + PLAYER_HITBOX_CENTER_Y + 0.8 : by + 0.8;
-          const headHalfSize = 0.3;
+          const headCenterY = bodyCenterY + PLAYER_HEAD_OFFSET_Y;
 
           const headResult = rayVsAABB(
             stepStartX, stepStartY, stepStartZ,
             rayDirNormX, rayDirNormY, rayDirNormZ,
             rayLength,
             bx, headCenterY, bz,
-            headHalfSize
+            PLAYER_HEAD_HALF
           );
           const bodyResult = rayVsAABB(
             stepStartX, stepStartY, stepStartZ,
