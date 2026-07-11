@@ -22,7 +22,7 @@
                     <v-list-item
                       v-for="player in playersList"
                       :key="player.id"
-                      :title="player.id"
+                      :title="player.displayName || player.id"
                     >
                       <template v-slot:prepend>
                         <v-icon
@@ -50,7 +50,7 @@
                       class="chat-message mb-2"
                     >
                       <span class="chat-sender" :style="{ color: msg.senderColor }">
-                        {{ msg.senderId }}:
+                        {{ msg.senderName || msg.senderId }}:
                       </span>
                       <span class="chat-text">{{ msg.text }}</span>
                     </div>

@@ -194,6 +194,7 @@ export class AudioManager {
       try {
         const response = await fetch(item.path);
         if (!response.ok) {
+          console.warn(`[AudioManager] Missing SFX: ${item.path} (${response.status}). Add the file to client/public/assets/sfx/`);
           return;
         }
 

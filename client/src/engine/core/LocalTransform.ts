@@ -195,8 +195,8 @@ export class LocalTransform {
     // Initialize weapon holder
     this.weaponHolder = new WeaponHolder(scene, `player_${entityId}`, isLocal);
 
-    // Expose a live reconciliation toggle for movement-feel testing
-    if (isLocal && typeof window !== 'undefined') {
+    // Expose a live reconciliation toggle for movement-feel testing (dev only)
+    if (import.meta.env.DEV && isLocal && typeof window !== 'undefined') {
       (window as any).toggleReconciliation = (enabled?: boolean) => {
         LocalTransform.ReconciliationEnabled =
           enabled === undefined ? !LocalTransform.ReconciliationEnabled : enabled;

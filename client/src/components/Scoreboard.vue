@@ -28,7 +28,7 @@
             <div class="col-color">
               <div class="color-indicator" :style="{ backgroundColor: player.color }"></div>
             </div>
-            <div class="col-player">Player#{{ player.entityId }}</div>
+            <div class="col-player">{{ player.displayName || 'Player#' + player.entityId }}</div>
             <div class="col-kills">{{ player.kills }}</div>
             <div class="col-deaths">{{ player.deaths }}</div>
             <div class="col-kd">{{ calculateKD(player.kills, player.deaths) }}</div>
@@ -58,6 +58,7 @@ export interface PlayerInfo {
   color: string;
   kills: number;
   deaths: number;
+  displayName?: string;
 }
 
 interface Props {

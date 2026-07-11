@@ -49,6 +49,7 @@ import { BuildSystem } from '../engine/building/BuildSystem';
 import { LadderPlacementSystem } from '../engine/building/LadderPlacementSystem';
 import { createLadderSegmentMesh, disposeLadderMesh } from '../engine/entities/props/LadderMesh';
 import { FootstepManager } from '../engine/audio/FootstepManager';
+import { trackEvent, identifyGuest } from '../analytics';
 import type { 
   BuildingInitialStateMessage, 
   BuildingCreatedMessage,
@@ -65,8 +66,10 @@ export interface KillFeedEntry {
   id: number;
   killerEntityId: number;
   killerColor: string;
+  killerName?: string;
   victimEntityId: number;
   victimColor: string;
+  victimName?: string;
   weaponType: string | null;
   isHeadshot: boolean;
   timestamp: number;
@@ -331,8 +334,8 @@ export function useGameSession() {
       hoverMask = new ItemHoverMask(scene, cameraController.getCamera());
       cloudPostProcess?.setHoverMaskTexture(hoverMask.getTexture());
       
-      // Blood splatter + camera-in-leaves check only (no leaf overlay effect; foliage uses backFaceCulling on materials)
-      await setupGamePostProcesses(scene, cameraController.getCamera());
+      // Full leaf/bush overlay + blood splatter post-processes
+      await initializeLeafEffect(scene, cameraController.getCamera());
       
       // Initialize final post-processing (FXAA + vignette) LAST so it's applied after all other effects
       finalPostProcess = new FinalPostProcess(scene, cameraController.getCamera());
@@ -404,7 +407,8 @@ export function useGameSession() {
     );
     projectileManager = new ProjectileManager(scene);
     
-    // Expose debug functions to browser console
+    // Expose debug functions to browser console (dev builds only)
+    if (import.meta.env.DEV) {
     (window as any).toggleLeafDebug = (visible: boolean = true) => {
       if (treeManager) {
         treeManager.toggleLeafCollisionDebug(visible);
@@ -478,7 +482,7 @@ export function useGameSession() {
     };
     (window as any).showDebugCommands = () => {
       return `
-🌲 Tree & Bush Debug Commands:
+Tree & Bush Debug Commands:
   toggleLeafDebug(true)   - Show leaf trigger volumes (green wireframe)
   toggleLeafDebug(false)  - Hide leaf triggers
   toggleWoodDebug(true)   - Show wood collision meshes (red wireframe)
@@ -491,6 +495,8 @@ export function useGameSession() {
   showDebugCommands()     - Show this help message
       `.trim();
     };
+    } // end import.meta.env.DEV debug block
+
     // Track latency and update remote player footsteps
     networkClient.onHighFrequency(Opcode.TransformUpdate, (data: any) => {
       if (data.entityId === myEntityId.value && typeof data.lastProcessedInput === 'number') {
@@ -849,12 +855,20 @@ export function useGameSession() {
     });
     
     networkClient.onLowFrequency(Opcode.KillFeed, (payload: KillFeedMessage) => {
+      const findDisplayName = (entityId: number): string | undefined => {
+        for (const p of players.value.values()) {
+          if (p.entityId === entityId) return p.displayName as string | undefined;
+        }
+        return undefined;
+      };
       const entry: KillFeedEntry = {
         id: killFeedIdCounter++,
         killerEntityId: payload.killerEntityId,
         killerColor: payload.killerColor,
+        killerName: findDisplayName(payload.killerEntityId),
         victimEntityId: payload.victimEntityId,
         victimColor: payload.victimColor,
+        victimName: findDisplayName(payload.victimEntityId),
         weaponType: payload.weaponType,
         isHeadshot: payload.isHeadshot,
         timestamp: payload.timestamp
@@ -1125,6 +1139,7 @@ export function useGameSession() {
       networkClient.onLowFrequency(Opcode.GameBegin, () => {
         isInLoadingPhase = false;
         gameBegun.value = true;
+        trackEvent('game_begin', { roomId: config.roomId });
         
         // Spawn the player if we have a pending entity ID
         if (pendingEntityId !== null && spawnPlayerFn) {
@@ -1141,8 +1156,28 @@ export function useGameSession() {
     
     // Try to connect
     try {
+      let initialConnect = true;
+
+      networkClient.onDisconnect(() => {
+        isConnected.value = false;
+        trackEvent('disconnect', { roomId: config.roomId });
+      });
+
+      // On reconnect (any open after the first), rejoin the room so server sends
+      // a fresh JoinSync snapshot (items, level, building state).
+      networkClient.onConnect(() => {
+        if (initialConnect) return; // handled below
+        isConnected.value = true;
+        trackEvent('reconnect_success', { roomId: config.roomId });
+        room.joinRoom(config.roomId, config.levelConfig);
+      });
+
       await networkClient.connect();
+      initialConnect = false;
       isConnected.value = true;
+      const displayName = localStorage.getItem('spong_displayName') ?? undefined;
+      if (displayName) identifyGuest(displayName);
+      trackEvent('session_start', { roomId: config.roomId });
       room.joinRoom(config.roomId, config.levelConfig);
 
       // Auto-send ClientReady during loading phase once connected

@@ -7,20 +7,18 @@
         class="kill-feed-entry"
       >
         <span class="player-name killer" :style="{ color: entry.killerColor }">
-          Player#{{ entry.killerEntityId }}
+          {{ entry.killerName || 'Player#' + entry.killerEntityId }}
         </span>
         
         <template v-if="entry.weaponType">
           <v-icon size="18" class="weapon-icon">{{ getWeaponIcon(entry.weaponType) }}</v-icon>
           <span class="weapon-name">{{ entry.weaponType.toUpperCase() }}</span>
           <v-icon v-if="entry.isHeadshot" size="20" class="headshot-icon" title="Headshot!">mdi-bullseye-arrow</v-icon>
-          <!-- Debug: show raw value -->
-          <span style="font-size: 10px; margin-left: 4px; opacity: 0.6;">[HS:{{ entry.isHeadshot }}]</span>
         </template>
         <v-icon v-else size="18" class="weapon-icon">mdi-skull</v-icon>
         
         <span class="player-name victim" :style="{ color: entry.victimColor }">
-          Player#{{ entry.victimEntityId }}
+          {{ entry.victimName || 'Player#' + entry.victimEntityId }}
         </span>
       </div>
     </TransitionGroup>
@@ -32,8 +30,10 @@ export interface KillFeedEntry {
   id: number;
   killerEntityId: number;
   killerColor: string;
+  killerName?: string;
   victimEntityId: number;
   victimColor: string;
+  victimName?: string;
   weaponType: string | null;
   isHeadshot: boolean;
   timestamp: number;

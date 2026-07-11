@@ -24,8 +24,10 @@ const MAX_SIMULATED_LATENCY_MS = 5000;
 /**
  * Read simulated latency from URL (e.g. ?latency=100 or ?lag=100).
  * One-way delay in ms; applied to both incoming and outgoing (RTT = 2 * value).
+ * Only active in dev builds to prevent abuse in production.
  */
 export function getSimulatedLatencyMs(): number {
+  if (!import.meta.env.DEV) return 0;
   if (typeof window === 'undefined') return 0;
   const params = new URLSearchParams(window.location.search);
   const v = params.get('latency') ?? params.get('lag');

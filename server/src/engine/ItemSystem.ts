@@ -316,6 +316,10 @@ export class ItemSystem {
     this.upsertPickupGrid(entityId, worldX, worldZ);
   }
 
+  // Manual pickup (F key) is allowed up to this many units away to tolerate lag.
+  // Much larger than auto-pickup (0.75) but not infinite — prevents remote-pickup cheat.
+  private static readonly MANUAL_PICKUP_MAX_RANGE = 4.0;
+
   handlePickupRequest(playerEntity: Entity, itemId: number, now: number): void {
     const pc = playerEntity.get<PlayerComponent>(COMP_PLAYER);
     if (!pc) return;
@@ -325,6 +329,13 @@ export class ItemSystem {
 
     const itemPhysics = itemEntity.get<PhysicsComponent>(COMP_PHYSICS);
     if (!itemPhysics) return;
+
+    // Validate that the player is close enough to the item.
+    const dx = pc.state.posX - itemPhysics.posX;
+    const dy = pc.state.posY - itemPhysics.posY;
+    const dz = pc.state.posZ - itemPhysics.posZ;
+    const maxRange = ItemSystem.MANUAL_PICKUP_MAX_RANGE;
+    if (dx * dx + dy * dy + dz * dz > maxRange * maxRange) return;
 
     const pickupEffect = itemEntity.get<PickupEffectComponent>(COMP_PICKUP_EFFECT);
     const collected = playerEntity.get<CollectedComponent>(COMP_COLLECTED);

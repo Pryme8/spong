@@ -6,16 +6,33 @@
           <v-card-title class="text-h3 text-center primary--text pa-8">
             SPONG
           </v-card-title>
-          <v-card-subtitle class="text-center text-h6 pb-4">
-            Multiplayer Game
+          <v-card-subtitle class="text-center text-h6 pb-2">
+            Public Alpha &bull; Multiplayer FFA
           </v-card-subtitle>
-          <v-card-actions class="pa-6">
+
+          <v-card-text class="px-6 pb-2">
+            <v-text-field
+              v-model="displayName"
+              label="Your Name"
+              variant="outlined"
+              color="primary"
+              prepend-inner-icon="mdi-account"
+              maxlength="24"
+              counter
+              hint="Shown on scoreboard and kill feed"
+              persistent-hint
+              @update:model-value="saveDisplayName"
+            />
+          </v-card-text>
+
+          <v-card-actions class="pa-6 pt-2">
             <v-btn
               block
               color="primary"
               size="x-large"
               variant="flat"
               @click="createLobby"
+              :disabled="!displayName.trim()"
             >
               <v-icon start>mdi-plus</v-icon>
               Create Lobby
@@ -42,7 +59,7 @@
               size="large"
               variant="outlined"
               @click="joinGame"
-              :disabled="!roomId"
+              :disabled="!roomId || !displayName.trim()"
             >
               <v-icon start>mdi-login</v-icon>
               Join Existing Lobby
@@ -57,34 +74,36 @@
               color="primary"
               size="large"
               @click="quickPlay"
+              :disabled="!displayName.trim()"
             >
               <v-icon start>mdi-lightning-bolt</v-icon>
               Quick Play (Skip Lobby)
             </v-btn>
           </v-card-text>
           
-          <v-divider class="mx-6 my-2"></v-divider>
-          
-          <v-card-text class="text-center">
-            <v-btn
-              variant="outlined"
-              color="primary"
-              @click="router.push('/shootingRange')"
-              class="mx-2"
-            >
-              <v-icon start>mdi-target</v-icon>
-              Shooting Range
-            </v-btn>
-            <v-btn
-              variant="outlined"
-              color="secondary"
-              @click="router.push('/builder')"
-              class="mx-2"
-            >
-              <v-icon start>mdi-cube-outline</v-icon>
-              Builder
-            </v-btn>
-          </v-card-text>
+          <template v-if="isDev">
+            <v-divider class="mx-6 my-2"></v-divider>
+            <v-card-text class="text-center">
+              <v-btn
+                variant="outlined"
+                color="primary"
+                @click="router.push('/shootingRange')"
+                class="mx-2"
+              >
+                <v-icon start>mdi-target</v-icon>
+                Shooting Range
+              </v-btn>
+              <v-btn
+                variant="outlined"
+                color="secondary"
+                @click="router.push('/builder')"
+                class="mx-2"
+              >
+                <v-icon start>mdi-cube-outline</v-icon>
+                Builder
+              </v-btn>
+            </v-card-text>
+          </template>
         </v-card>
       </v-col>
       <v-col cols="12" md="6" lg="5">
@@ -141,6 +160,14 @@ import devLogRaw from '../content/devlog.md?raw';
 
 const router = useRouter();
 const roomId = ref('');
+const isDev = import.meta.env.DEV;
+
+const displayName = ref(localStorage.getItem('spong_displayName') ?? '');
+
+const saveDisplayName = () => {
+  const trimmed = displayName.value.trim();
+  if (trimmed) localStorage.setItem('spong_displayName', trimmed);
+};
 
 const createLobby = () => {
   const uniqueRoomId = `lobby_${Math.random().toString(36).substring(2, 15)}`;

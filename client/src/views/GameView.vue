@@ -146,6 +146,53 @@
       :scores="roundState?.scores.value || []"
     />
 
+    <!-- Disconnect banner -->
+    <Transition name="disconnect-slide">
+      <div v-if="showDisconnectBanner" class="disconnect-banner">
+        <v-icon size="20" class="mr-2">mdi-wifi-off</v-icon>
+        <span>Connection lost — reconnecting…</span>
+        <v-btn size="small" variant="tonal" class="ml-4" @click="returnToMenu">Return to Menu</v-btn>
+      </div>
+    </Transition>
+
+    <!-- Controls overlay (H key) -->
+    <div v-if="showControls" class="controls-overlay" @click.self="showControls = false">
+      <div class="controls-panel">
+        <div class="controls-header">
+          <span>Controls</span>
+          <v-btn icon size="small" variant="text" @click="showControls = false"><v-icon>mdi-close</v-icon></v-btn>
+        </div>
+        <div class="controls-grid">
+          <div class="controls-col">
+            <div class="controls-section-title">Movement</div>
+            <div class="ctrl-row"><kbd>W A S D</kbd><span>Move</span></div>
+            <div class="ctrl-row"><kbd>Space</kbd><span>Jump</span></div>
+            <div class="ctrl-row"><kbd>Shift</kbd><span>Sprint</span></div>
+            <div class="ctrl-row"><kbd>Ctrl</kbd><span>Dive / Crouch</span></div>
+            <div class="controls-section-title mt-3">Combat</div>
+            <div class="ctrl-row"><kbd>LMB</kbd><span>Shoot</span></div>
+            <div class="ctrl-row"><kbd>RMB</kbd><span>Zoom / ADS</span></div>
+            <div class="ctrl-row"><kbd>R</kbd><span>Reload</span></div>
+            <div class="ctrl-row"><kbd>F</kbd><span>Pick up item</span></div>
+            <div class="ctrl-row"><kbd>Q</kbd><span>Drop item</span></div>
+          </div>
+          <div class="controls-col">
+            <div class="controls-section-title">Building</div>
+            <div class="ctrl-row"><kbd>1</kbd><span>Select mode</span></div>
+            <div class="ctrl-row"><kbd>2</kbd><span>Build mode</span></div>
+            <div class="ctrl-row"><kbd>3</kbd><span>Transform mode</span></div>
+            <div class="ctrl-row"><kbd>4</kbd><span>Demolish mode</span></div>
+            <div class="ctrl-row"><kbd>LMB</kbd><span>Place / confirm</span></div>
+            <div class="controls-section-title mt-3">UI</div>
+            <div class="ctrl-row"><kbd>Tab</kbd><span>Scoreboard</span></div>
+            <div class="ctrl-row"><kbd>H</kbd><span>Controls (this)</span></div>
+            <div class="ctrl-row"><kbd>Esc</kbd><span>Exit pointer lock</span></div>
+          </div>
+        </div>
+        <div class="controls-footer">Desktop only &bull; WebGL2 required &bull; Public Alpha</div>
+      </div>
+    </div>
+
     <!-- Loading Dialog (during level preload) -->
     <v-dialog
       v-model="showLoadingOverlay"
@@ -181,7 +228,7 @@
                   size="small"
                 ></v-icon>
               </template>
-              <v-list-item-title>{{ player.id }}</v-list-item-title>
+              <v-list-item-title>{{ player.displayName || player.id }}</v-list-item-title>
               <template v-slot:append>
                 <v-icon
                   v-if="readyPlayerIds.includes(player.id)"
@@ -204,7 +251,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useGameSession } from '../composables/useGameSession';
 import { PLAYER_MAX_HEALTH, Opcode } from '@spong/shared';
 import GameHud from '../components/GameHud.vue';
@@ -257,8 +304,8 @@ if (!props.levelConfig && route.query.pistols) {
   levelConfig.pistolCount = parseInt(route.query.pistols as string);
 }
 
-// Parse damage multipliers from URL params
-if (!props.levelConfig) {
+// Parse damage multipliers from URL params (dev only — prevent exploit tweaking in prod)
+if (import.meta.env.DEV && !props.levelConfig) {
   if (route.query.hsDmg) {
     levelConfig.headshotDmg = parseFloat(route.query.hsDmg as string);
   }
@@ -267,20 +314,20 @@ if (!props.levelConfig) {
   }
 }
 
-// Parse disable flags from URL (e.g. ?disable=trees,bushes,rocks,items)
-if (route.query.disable) {
+// Parse disable flags from URL (dev only)
+if (import.meta.env.DEV && route.query.disable) {
   const disableFlags = (route.query.disable as string).split(',').map(s => s.trim());
   levelConfig.disableSpawns = disableFlags;
 }
 
-// Check for debug URL flags
-const showShadowDebug = ref(route.query.shadowDebug !== undefined);
-const showWaterDebug = ref(route.query.waterDebug !== undefined);
-const showWorldDebug = ref(route.query.debugWorld !== undefined);
-const showPostDebug = ref(route.query.debugPost !== undefined);
-const showCameraDebug = ref(route.query.cameraDebug !== undefined);
-const showLatencyDebug = ref(route.query.latencyDebug !== undefined);
-const showWeaponDebug = ref(false); // Toggle with U key
+// Debug URL flags are only honoured in dev builds
+const showShadowDebug = ref(import.meta.env.DEV && route.query.shadowDebug !== undefined);
+const showWaterDebug = ref(import.meta.env.DEV && route.query.waterDebug !== undefined);
+const showWorldDebug = ref(import.meta.env.DEV && route.query.debugWorld !== undefined);
+const showPostDebug = ref(import.meta.env.DEV && route.query.debugPost !== undefined);
+const showCameraDebug = ref(import.meta.env.DEV && route.query.cameraDebug !== undefined);
+const showLatencyDebug = ref(import.meta.env.DEV && route.query.latencyDebug !== undefined);
+const showWeaponDebug = ref(false); // Toggle with U key (dev only)
 const weaponDebugPosition = ref({ x: 0, y: 0, z: 0 });
 const weaponDebugRotation = ref({ x: 0, y: 0, z: 0 });
 
@@ -332,6 +379,19 @@ const {
 // Scoreboard visibility (Tab key)
 const showScoreboard = ref(false);
 
+// Controls overlay (H key)
+const showControls = ref(false);
+
+// Disconnect banner — only show after the session has connected at least once
+const hasEverConnected = ref(false);
+const showDisconnectBanner = computed(() => hasEverConnected.value && !isConnected.value);
+
+watch(isConnected, (val) => {
+  if (val) hasEverConnected.value = true;
+});
+
+const router = useRouter();
+
 // Loading dialog state
 const showLoadingOverlay = ref(false);
 const loadingSecondsRemaining = ref(0);
@@ -378,31 +438,42 @@ function handleMobileShoot() {
   // Handled by game session
 }
 
+function returnToMenu() {
+  session.dispose?.();
+  router.push('/');
+}
+
 // Tab key handler for scoreboard
 function handleKeyDown(e: KeyboardEvent) {
   if (e.code === 'Tab') {
     e.preventDefault();
     showScoreboard.value = true;
   }
-  
-  // F12 to toggle Babylon inspector
-  if (e.code === 'F12') {
-    e.preventDefault();
-    toggleInspector();
+
+  // H key toggles controls overlay
+  if (e.code === 'KeyH') {
+    showControls.value = !showControls.value;
   }
   
-  // U key to toggle weapon debug panel
-  if (e.code === 'KeyU') {
-    e.preventDefault();
-    showWeaponDebug.value = !showWeaponDebug.value;
-    
-    // Update initial values from current weapon holder when opening
-    if (showWeaponDebug.value && session.myTransform?.value) {
-      const holder = session.myTransform.value.getWeaponHolder();
-      const pos = holder.getWeaponPosition();
-      const rot = holder.getWeaponRotation();
-      if (pos) weaponDebugPosition.value = pos;
-      if (rot) weaponDebugRotation.value = rot;
+  if (import.meta.env.DEV) {
+    // F12 to toggle Babylon inspector
+    if (e.code === 'F12') {
+      e.preventDefault();
+      toggleInspector();
+    }
+
+    // U key to toggle weapon debug panel
+    if (e.code === 'KeyU') {
+      e.preventDefault();
+      showWeaponDebug.value = !showWeaponDebug.value;
+
+      if (showWeaponDebug.value && session.myTransform?.value) {
+        const holder = session.myTransform.value.getWeaponHolder();
+        const pos = holder.getWeaponPosition();
+        const rot = holder.getWeaponRotation();
+        if (pos) weaponDebugPosition.value = pos;
+        if (rot) weaponDebugRotation.value = rot;
+      }
     }
   }
 }
@@ -567,5 +638,101 @@ onUnmounted(() => {
   width: 8px;
   margin-top: -0.5px;
   margin-left: 4px;
+}
+
+/* Disconnect banner */
+.disconnect-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  background: rgba(200, 50, 50, 0.92);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 200;
+  backdrop-filter: blur(4px);
+}
+
+.disconnect-slide-enter-active,
+.disconnect-slide-leave-active {
+  transition: transform 0.3s ease;
+}
+.disconnect-slide-enter-from,
+.disconnect-slide-leave-to {
+  transform: translateY(-100%);
+}
+
+/* Controls overlay */
+.controls-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 300;
+}
+.controls-panel {
+  background: rgba(18, 18, 28, 0.97);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 520px;
+  max-width: 90vw;
+  color: #e0e0e0;
+}
+.controls-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.controls-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 32px;
+}
+.controls-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.45);
+  margin-bottom: 6px;
+}
+.ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.ctrl-row kbd {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-family: monospace;
+  white-space: nowrap;
+  min-width: 60px;
+  text-align: center;
+}
+.controls-footer {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+  text-align: center;
 }
 </style>

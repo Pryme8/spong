@@ -63,8 +63,8 @@ export function useRoom(networkClient: NetworkClient) {
   });
 
   const joinRoom = (targetRoomId: string, config?: any) => {
-
-    networkClient.sendLow(Opcode.RoomJoin, { roomId: targetRoomId, config });
+    const displayName = localStorage.getItem('spong_displayName') ?? undefined;
+    networkClient.sendLow(Opcode.RoomJoin, { roomId: targetRoomId, config, displayName });
   };
 
   const leaveRoom = () => {

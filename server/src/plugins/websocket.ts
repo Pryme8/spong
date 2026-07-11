@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
 import { ConnectionHandler } from '../network/ConnectionHandler.js';
+import { config } from '../config.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -11,11 +12,14 @@ declare module 'fastify' {
 const plugin: FastifyPluginAsync = async (fastify) => {
   const connectionHandler = new ConnectionHandler();
 
-  // Decorate the fastify instance
   fastify.decorate('connectionHandler', connectionHandler);
 
-  // WebSocket upgrade route
-  fastify.get('/ws', { websocket: true }, (socket) => {
+  fastify.get('/ws', { websocket: true }, (socket, req) => {
+    if (connectionHandler.getConnectionCount() >= config.limits.maxConnections) {
+      req.log.warn('WS connection rejected: max connections reached');
+      socket.close(1013, 'Server full');
+      return;
+    }
     connectionHandler.handleConnection(socket);
   });
 

@@ -130,16 +130,29 @@ export class LevelBushManager {
         continue;
       }
 
-      // Create instance
       const bushInstance = baseMesh.createInstance(`bush_inst_${instance.variationId}_${i}`);
       bushInstance.position.set(instance.worldX, instance.worldY, instance.worldZ);
       this.instanceRoots.push(bushInstance as any);
       created.push(bushInstance);
-      
-      // Register shadows
+
       if (this.hasShadows) {
         const sm = ShadowManager.getInstance();
         if (sm) sm.addShadowCaster(bushInstance, false);
+      }
+
+      // Build the per-instance collider used by checkCameraInBushes + the leaf overlay.
+      // Bushes have no rotation, so the collider is just the pre-computed local AABB
+      // translated to the instance world position.
+      if (instance.variationId < this.bushLocalBounds.length) {
+        const b = this.bushLocalBounds[instance.variationId];
+        this.bushColliders.push({
+          localMinX: b.minX, localMinY: b.minY, localMinZ: b.minZ,
+          localMaxX: b.maxX, localMaxY: b.maxY, localMaxZ: b.maxZ,
+          posX: instance.worldX,
+          posY: instance.worldY,
+          posZ: instance.worldZ,
+          bushIndex: i,
+        });
       }
     }
     return created;

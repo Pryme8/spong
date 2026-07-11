@@ -1,138 +1,55 @@
-# Spong - Multiplayer Game Foundation
+# Spong
 
-A real-time multiplayer game built with Vue 3, Vuetify, Babylon.js, and Fastify.
+A real-time multiplayer FFA sandbox shooter built with Babylon.js on both client and server.
 
-## Architecture
+**Public Alpha** — playable but rough around the edges. [See known issues](#known-issues).
 
-### **Nexus Theme**
-Deep indigo/purple aesthetic with neon green accents and cyan highlights. Digital matrix vibe.
+## What's in the Alpha
 
-### **Tech Stack**
-- **Frontend**: Vue 3, Vuetify, Vite, TypeScript, Babylon.js
-- **Backend**: Fastify, raw WebSocket (ws), Babylon.js NullEngine, TypeScript
-- **Protocol**: Binary transform updates at 20Hz, JSON messages for room management
+- **FFA Deathmatch** — first to 20 kills wins (5-minute time limit)
+- **9 weapon types** — pistol, SMG, LMG, shotgun, double-barrel, sniper, assault rifle, DMR, rocket launcher
+- **Building system** — place/transform/demolish blocks using the hammer item
+- **Water & swimming** — dive, swim, breath meter, drowning
+- **Lobby + Quick Play** — create a private room or jump straight in
+- **Client prediction + lag compensation** — 60 Hz physics, adaptive interpolation, spawn-time rewind hits
+- **Procedural levels** — seed-based terrain, trees, rocks, bushes, clouds
 
-### **Key Features**
-- High-frequency binary protocol for transform sync (33 bytes/entity/tick)
-- Low-frequency JSON protocol for room management
-- Server-authoritative transform system
-- Room-based multiplayer with NullEngine physics on server
+## Tech Stack
 
-## Project Structure
-
-```
-spong/
-├── client/         # Vue 3 + Vuetify + Babylon.js frontend
-├── server/         # Fastify + WebSocket + NullEngine backend
-├── shared/         # Shared protocol types and binary codec
-└── package.json    # Workspace root
-```
+| Layer | Technology |
+|-------|-----------|
+| Client renderer | Babylon.js 8 + Vue 3 + Vite |
+| Server | Node.js + Fastify + raw WebSocket (`ws`) |
+| Server physics | Babylon NullEngine + Havok |
+| Shared physics | TypeScript package — identical `stepCharacter` on client & server |
+| Protocol | Binary high-freq opcodes (transforms, input, projectiles) + JSON low-freq |
+| Netcode | 60 Hz physics, WS in Worker, adaptive interpolation, spawn-time lag comp |
 
 ## Getting Started
 
-### Prerequisites
-- Node.js 18+ and npm
+See [QUICKSTART.md](QUICKSTART.md) for setup instructions.
 
-### Installation
+## Deployment
 
-```bash
-# Install all dependencies (root + workspaces)
-npm install
+See [docs/DEPLOY.md](docs/DEPLOY.md) for production deployment (VM or Docker).
 
-# Build shared package (required before running client/server)
-npm run build:shared
-```
+## Architecture
 
-### Running the Project
+See [ARCHITECTURE.md](ARCHITECTURE.md) for system boundaries and data flow.
 
-**Option 1: Run both client and server simultaneously**
+## Known Issues
 
-Open two terminal windows:
+- Audio is silent until SFX assets are added to `client/public/assets/sfx/` (see `docs/AUDIO_SETUP_GUIDE.md`)
+- Ladder placement works; climbing not yet implemented
+- Building finalize UX incomplete (no material return, no greedy mesh)
+- Water system visuals/audio incomplete (phases 1–3 functional)
+- Mobile controls exist but are not fully wired — desktop recommended
+- Reconnect restores the socket but does not resync game state
 
-```bash
-# Terminal 1: Start the server
-npm run dev:server
+## Roadmap (post-alpha)
 
-# Terminal 2: Start the client
-npm run dev:client
-```
+Inventory/equipment system, ladder climbing, spectator/kill cam, larger multi-tile worlds, building finalization, weather and day-night cycle, weapon scopes.
 
-**Option 2: Manual workspace commands**
+---
 
-```bash
-# Server (runs on http://localhost:3000)
-npm run dev --workspace=server
-
-# Client (runs on http://localhost:5173)
-npm run dev --workspace=client
-```
-
-### Usage
-
-1. Open your browser to `http://localhost:5173`
-2. Enter a room ID (default: "lobby")
-3. Click "Join Game"
-4. You should see a neon green wireframe cube orbiting and rotating on a grid
-5. Open another browser tab/window and join the same room to see multiple cubes
-
-## How It Works
-
-### Networking Protocol
-
-**Single WebSocket connection per client** with opcode-prefixed messages:
-
-- **High-Frequency (Binary)**: Transform updates at 20 ticks/sec
-  - Format: `[opcode:1][entityId:4][pos:12][rot:16]` = 33 bytes
-  
-- **Low-Frequency (JSON)**: Room join/leave, player events
-  - Format: `[opcode:1][JSON payload]`
-
-### Transform Sync
-
-1. **Server**: Each player gets a `RemoteTransform` (TransformNode in NullEngine)
-2. **Server**: Room ticks at 20Hz, animates RemoteTransforms, broadcasts binary updates
-3. **Client**: Creates `LocalTransform` for each entity
-4. **Client**: Applies incoming transform updates to LocalTransform
-5. **Visual**: Cube mesh is parented to LocalTransform, inherits all movement
-
-## Development
-
-### Building for Production
-
-```bash
-npm run build
-```
-
-This builds:
-1. Shared package (transpiled TypeScript)
-2. Client (optimized Vite bundle)
-3. Server (transpiled TypeScript)
-
-### Workspace Scripts
-
-```bash
-npm run dev:client       # Start client dev server
-npm run dev:server       # Start server dev server
-npm run build:client     # Build client for production
-npm run build:server     # Build server for production
-npm run build:shared     # Build shared package
-npm run build            # Build all packages
-```
-
-## Next Steps
-
-Current implementation provides the foundation:
-- ✅ Networking layer with binary + JSON protocols
-- ✅ Room system with server-authoritative transforms
-- ✅ Visual proof (synced cube)
-
-Future enhancements:
-- Player input handling
-- Interpolation/prediction for smoother movement
-- Game mechanics (collision, scoring, etc.)
-- User authentication
-- Persistent game state
-
-## License
-
-MIT
+> This is a research and passion project. Stability and feature completeness are works in progress.

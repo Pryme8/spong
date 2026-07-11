@@ -326,7 +326,10 @@ export class CloudPostProcess {
   /** Add a mesh to the mask RTT with the black override material. */
   private registerMeshForMask(mesh: AbstractMesh): void {
     if (this.cloudMeshes.indexOf(mesh) >= 0) return;
-    if(mesh.visibility == 0 || mesh.layerMask == LAYER_HIDDEN_FROM_MAIN) return;
+    // Use <= 0 (not == 0) to handle any sub-zero visibility values as well.
+    // Meshes must have visibility = 0 (not just isVisible = false) to be excluded,
+    // since Babylon's RTT render list ignores the isVisible boolean flag.
+    if (mesh.visibility <= 0 || mesh.layerMask === LAYER_HIDDEN_FROM_MAIN) return;
     this.maskRT.renderList!.push(mesh);
     this.maskRT.setMaterialForRendering(mesh, this.blackMat);
   }

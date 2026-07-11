@@ -1,5 +1,6 @@
 import { Room } from './Room.js';
 import { ConnectionState, ConnectionHandler } from '../network/ConnectionHandler.js';
+import { config } from '../config.js';
 import { 
   Opcode, 
   RoomJoinMessage, 
@@ -28,9 +29,13 @@ import {
 export class RoomManager {
   private rooms = new Map<string, Room>();
   private connectionHandler: ConnectionHandler;
+  private roomCleanupInterval: NodeJS.Timeout;
 
   constructor(connectionHandler: ConnectionHandler, _tickRate: number = 20) {
     this.connectionHandler = connectionHandler;
+
+    // Periodically clean up orphaned / stale rooms
+    this.roomCleanupInterval = setInterval(() => this.cleanupStaleRooms(), 60_000);
 
     // Register message handlers
     this.connectionHandler.registerMessageHandler(Opcode.RoomJoin, (conn, data) => {
@@ -128,20 +133,33 @@ export class RoomManager {
   }
 
   private async handleRoomJoin(conn: ConnectionState, data: RoomJoinMessage) {
-    const { roomId, config } = data;
+    const { roomId, config: roomConfig } = data;
 
     // Get or create room
     let room = this.rooms.get(roomId);
     if (!room) {
-      room = new Room(roomId, this.connectionHandler);
-      
-      // If config is provided (e.g., from URL params), set it before initializing
-      if (config) {
-        room.setLobbyConfig(config);
+      if (this.rooms.size >= config.limits.maxRooms) {
+        this.connectionHandler.sendError(conn, 'SERVER_FULL', 'Too many active rooms. Try again later.');
+        return;
       }
-      
+      room = new Room(roomId, this.connectionHandler);
+
+      if (roomConfig) {
+        room.setLobbyConfig(roomConfig);
+      }
+
       await room.initialize();
       this.rooms.set(roomId, room);
+    }
+
+    if (room.getPlayerCount() >= config.limits.maxPlayersPerRoom) {
+      this.connectionHandler.sendError(conn, 'ROOM_FULL', 'This room is full.');
+      return;
+    }
+
+    // Store the guest display name on the connection
+    if (typeof data.displayName === 'string') {
+      conn.displayName = data.displayName.slice(0, 24).trim() || undefined;
     }
 
     // Add player to room
@@ -416,11 +434,20 @@ export class RoomManager {
     const player = room.getPlayer(conn.id);
     if (!player) return;
 
+    const now = Date.now();
+    if (now - conn.lastChatMs < config.limits.chatRateLimitMs) return;
+    conn.lastChatMs = now;
+
+    const raw = typeof data.text === 'string' ? data.text : '';
+    const text = raw.slice(0, config.limits.chatMaxLength).trim();
+    if (!text) return;
+
     const broadcastMsg: ChatBroadcastPayload = {
       senderId: player.id,
       senderColor: player.color,
-      text: data.text,
-      timestamp: Date.now()
+      senderName: conn.displayName,
+      text,
+      timestamp: now
     };
 
     const connections = room.getAllConnections();
@@ -494,7 +521,33 @@ export class RoomManager {
     return Array.from(this.rooms.values());
   }
 
+  getRoomCount(): number {
+    return this.rooms.size;
+  }
+
+  getTotalPlayerCount(): number {
+    let total = 0;
+    for (const room of this.rooms.values()) total += room.getPlayerCount();
+    return total;
+  }
+
+  private cleanupStaleRooms(): void {
+    const now = Date.now();
+    for (const [roomId, room] of this.rooms) {
+      const idleSince = room.getIdleSinceMs();
+      if (idleSince === undefined) continue;
+      const ttl = room.isGameActive()
+        ? config.limits.activeRoomTtlMs
+        : config.limits.emptyRoomTtlMs;
+      if (now - idleSince > ttl) {
+        room.dispose();
+        this.rooms.delete(roomId);
+      }
+    }
+  }
+
   dispose() {
+    clearInterval(this.roomCleanupInterval);
     this.rooms.forEach(room => room.dispose());
     this.rooms.clear();
   }

@@ -16,11 +16,15 @@ export class SkyPickSphere {
       scene
     );
 
-    // Make it invisible but pickable
+    // Make it invisible but pickable.
+    // isVisible = false hides it from the main render and scene picking UI, but
+    // Babylon's RTT render list ignores isVisible — so we also set visibility = 0
+    // (the float) to satisfy the CloudPostProcess mask-pass guard which filters
+    // out visibility-0 meshes to prevent them blacking out the sky in the mask RTT.
     this.sphere.isVisible = false;
+    this.sphere.visibility = 0;
     this.sphere.isPickable = true;
 
-    // Create invisible material (just in case visibility fails)
     const mat = new StandardMaterial('skyPickSphereMat', scene);
     mat.alpha = 0;
     this.sphere.material = mat;

@@ -56,6 +56,7 @@ export interface Player {
   connectionId: string;
   entityId: number;
   color: string;
+  displayName?: string;
 }
 
 // ============================================================================
@@ -96,6 +97,8 @@ export class Room {
   private broadcastTickCounter = 0;
   private physicsAccumulatorMs = 0;
   private lastLoopMs = 0;
+  /** Timestamp (ms) at which the room last became empty (no players). Used for stale room cleanup. */
+  private idleSinceMs: number = Date.now();
   /**
    * Remote-player interpolation delay (ms) the client renders behind server time.
    * Used by lag compensation to rewind targets to what the shooter actually saw.
@@ -270,7 +273,8 @@ export class Room {
       id: conn.id,
       connectionId: conn.id,
       entityId: entity.id,
-      color
+      color,
+      displayName: conn.displayName,
     };
 
     this.players.set(conn.id, player);
@@ -348,6 +352,7 @@ export class Room {
       }
 
       if (this.players.size === 0) {
+        this.idleSinceMs = Date.now();
         this.stopTicking();
       }
 
@@ -496,7 +501,8 @@ export class Room {
       entityId: player.entityId,
       color: player.color,
       kills: stats?.kills || 0,
-      deaths: stats?.deaths || 0
+      deaths: stats?.deaths || 0,
+      displayName: player.displayName,
     };
   }
 
@@ -509,7 +515,8 @@ export class Room {
         entityId: p.entityId,
         color: p.color,
         kills: stats?.kills || 0,
-        deaths: stats?.deaths || 0
+        deaths: stats?.deaths || 0,
+        displayName: p.displayName,
       };
     });
   }
@@ -613,9 +620,17 @@ export class Room {
   getPlayerCount(): number {
     return this.players.size;
   }
-  
+
   isGameActive(): boolean {
     return this.gameStartSystem.isGameActive();
+  }
+
+  /**
+   * Returns the timestamp (ms) when this room last had zero players.
+   * Undefined while the room has at least one player.
+   */
+  getIdleSinceMs(): number | undefined {
+    return this.players.size === 0 ? this.idleSinceMs : undefined;
   }
 
   private startTicking() {

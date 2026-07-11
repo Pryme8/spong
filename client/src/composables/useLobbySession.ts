@@ -2,6 +2,7 @@ import { ref, readonly, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { NetworkClient, getWebSocketUrl } from '../network/NetworkClient';
 import { useRoom } from './useRoom';
+import { trackEvent, identifyGuest } from '../analytics';
 import {
   Opcode,
   ChatBroadcastPayload,
@@ -17,6 +18,7 @@ import {
 export interface ChatMessage {
   senderId: string;
   senderColor: string;
+  senderName?: string;
   text: string;
   timestamp: number;
 }
@@ -41,6 +43,10 @@ export function useLobbySession() {
   let room: ReturnType<typeof useRoom> | null = null;
 
   async function init(targetRoomId: string): Promise<void> {
+    const displayName = localStorage.getItem('spong_displayName') ?? undefined;
+    if (displayName) identifyGuest(displayName);
+    trackEvent('lobby_join', { roomId: targetRoomId });
+
     networkClient = new NetworkClient(getWebSocketUrl());
     room = useRoom(networkClient);
 
@@ -65,6 +71,7 @@ export function useLobbySession() {
       chatMessages.value.push({
         senderId: payload.senderId,
         senderColor: payload.senderColor,
+        senderName: payload.senderName,
         text: payload.text,
         timestamp: payload.timestamp
       });
@@ -76,6 +83,7 @@ export function useLobbySession() {
 
     networkClient.onLowFrequency(Opcode.LobbyStartCountdown, (payload: LobbyStartCountdownPayload) => {
       startCountdownSeconds.value = payload.secondsRemaining;
+      if (payload.secondsRemaining === 3) trackEvent('lobby_start', { roomId: targetRoomId });
     });
 
     networkClient.onLowFrequency(Opcode.LobbyStartCancel, () => {

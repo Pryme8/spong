@@ -121,12 +121,26 @@ export class ShootSystem {
     const pelletCount = shootable.pelletsPerShot || 1;
     const currentAccuracy = getCurrentAccuracy(weaponType as WeaponType, shootable.currentBloom);
 
+    // Clamp the client-provided spawn position to within a reasonable distance of the
+    // server-authoritative player position to prevent teleport-shot exploits.
+    const MAX_SPAWN_OFFSET = 5.0;
+    const sdx = clientSpawnX - pc.state.posX;
+    const sdy = clientSpawnY - pc.state.posY;
+    const sdz = clientSpawnZ - pc.state.posZ;
+    const spawnDistSq = sdx * sdx + sdy * sdy + sdz * sdz;
+    const spawnX = spawnDistSq <= MAX_SPAWN_OFFSET * MAX_SPAWN_OFFSET
+      ? clientSpawnX : pc.state.posX + sdx / Math.sqrt(spawnDistSq) * MAX_SPAWN_OFFSET;
+    const spawnY = spawnDistSq <= MAX_SPAWN_OFFSET * MAX_SPAWN_OFFSET
+      ? clientSpawnY : pc.state.posY + sdy / Math.sqrt(spawnDistSq) * MAX_SPAWN_OFFSET;
+    const spawnZ = spawnDistSq <= MAX_SPAWN_OFFSET * MAX_SPAWN_OFFSET
+      ? clientSpawnZ : pc.state.posZ + sdz / Math.sqrt(spawnDistSq) * MAX_SPAWN_OFFSET;
+
     const result = this.projectileSystem.spawn(this.world, {
       ownerId: player.entityId,
       weaponType,
-      posX: clientSpawnX,
-      posY: clientSpawnY,
-      posZ: clientSpawnZ,
+      posX: spawnX,
+      posY: spawnY,
+      posZ: spawnZ,
       baseDirX,
       baseDirY,
       baseDirZ,

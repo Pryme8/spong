@@ -10,6 +10,16 @@ import { initializeHavok } from './engine/setupNullEngine.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
+// Sentry server-side crash reporting (no-op when SENTRY_DSN is unset)
+if (process.env.SENTRY_DSN) {
+  const Sentry = await import('@sentry/node');
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    tracesSampleRate: 0.05,
+    environment: process.env.NODE_ENV ?? 'production',
+  });
+}
+
 const execAsync = promisify(exec);
 
 // Kill any process using our port (for hot reload cleanup)
@@ -56,9 +66,19 @@ await fastify.register(cors, config.cors);
 await fastify.register(websocket);
 await fastify.register(websocketPlugin);
 
+const serverStartMs = Date.now();
+let roomManager: RoomManager | undefined;
+
 // Health check endpoint
 fastify.get('/health', async () => {
-  return { status: 'ok', timestamp: Date.now() };
+  return {
+    status: 'ok',
+    timestamp: Date.now(),
+    uptimeMs: Date.now() - serverStartMs,
+    connections: fastify.connectionHandler.getConnectionCount(),
+    rooms: roomManager?.getRoomCount() ?? 0,
+    players: roomManager?.getTotalPlayerCount() ?? 0,
+  };
 });
 
 // Optional: serve client static + SPA fallback (e.g. Docker with PUBLIC_DIR set)
@@ -75,7 +95,7 @@ if (config.publicDir) {
 
 // Initialize room manager after plugins are ready
 await fastify.ready();
-const roomManager = new RoomManager(fastify.connectionHandler, config.tickRate);
+roomManager = new RoomManager(fastify.connectionHandler, config.tickRate);
 
 // Clean up port before starting (helps with hot reload)
 await killPort(config.port);
@@ -87,7 +107,7 @@ await new Promise(resolve => setTimeout(resolve, 500));
 async function cleanup(_signal: string) {
   const forceExitTimeout = setTimeout(() => process.exit(0), 3000);
   try {
-    roomManager.dispose();
+    roomManager?.dispose();
     fastify.connectionHandler.dispose();
     await fastify.close();
     clearTimeout(forceExitTimeout);

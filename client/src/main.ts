@@ -7,6 +7,7 @@ import '@mdi/font/css/materialdesignicons.css';
 import 'vuetify/styles';
 import App from './App.vue';
 import router from './router';
+import { initAnalytics } from './analytics';
 
 // Nexus theme configuration
 const nexusTheme = {
@@ -52,3 +53,6 @@ const app = createApp(App);
 app.use(router);
 app.use(vuetify);
 app.mount('#app');
+
+// Init analytics after mount so it doesn't block the first render
+initAnalytics(app, router);

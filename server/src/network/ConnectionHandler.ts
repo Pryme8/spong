@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 import { Opcode } from '@spong/shared';
+import { config } from '../config.js';
 
 export interface ConnectionState {
   id: string;
@@ -9,6 +10,14 @@ export interface ConnectionState {
   isAlive: boolean;
   clientTimeOffsetMs?: number;
   lastClientTimestampMs?: number;
+  /** Guest display name chosen by the player before joining. */
+  displayName?: string;
+  /** Rate-limit: start of the current 1-second window. */
+  rateLimitWindowStart: number;
+  /** Rate-limit: messages received in the current window. */
+  rateLimitCount: number;
+  /** Timestamp of the last chat message sent (for per-user chat rate limiting). */
+  lastChatMs: number;
 }
 
 export type MessageHandler = (conn: ConnectionState, data: any) => void | Promise<void>;
@@ -58,7 +67,10 @@ export class ConnectionHandler {
     const conn: ConnectionState = {
       id,
       ws,
-      isAlive: true
+      isAlive: true,
+      rateLimitWindowStart: Date.now(),
+      rateLimitCount: 0,
+      lastChatMs: 0,
     };
 
     // Disable Nagle's algorithm on the underlying TCP socket (server→client).
@@ -94,8 +106,25 @@ export class ConnectionHandler {
 
   }
 
+  getConnectionCount(): number {
+    return this.connections.size;
+  }
+
+  private isRateLimited(conn: ConnectionState): boolean {
+    const now = Date.now();
+    const { wsRateLimitWindowMs, wsRateLimitMax } = config.limits;
+    if (now - conn.rateLimitWindowStart >= wsRateLimitWindowMs) {
+      conn.rateLimitWindowStart = now;
+      conn.rateLimitCount = 0;
+    }
+    conn.rateLimitCount++;
+    return conn.rateLimitCount > wsRateLimitMax;
+  }
+
   private async handleMessage(conn: ConnectionState, data: Buffer) {
     if (data.length === 0) return;
+
+    if (this.isRateLimited(conn)) return;
 
     const opcode = data[0];
     // Check if it's a binary message (high-frequency)

@@ -85,6 +85,7 @@ export enum Opcode {
 export interface RoomJoinMessage {
   roomId: string;
   config?: LobbyConfigPayload;
+  displayName?: string;
 }
 
 export interface RoomLeaveMessage {
@@ -97,6 +98,7 @@ export interface PlayerInfo {
   color: string;
   kills: number;
   deaths: number;
+  displayName?: string;
 }
 
 export interface RoomStateMessage {
@@ -503,6 +505,7 @@ export interface ChatMessagePayload {
 export interface ChatBroadcastPayload {
   senderId: string;
   senderColor: string;
+  senderName?: string;
   text: string;
   timestamp: number;
 }
